@@ -12,6 +12,8 @@ export interface AppContext {
   limiter: FailureLimiter;
   /** Per-username cap, independent of client IP. */
   accountLimiter: FailureLimiter;
+  /** One-time first-run setup token; null once setup is done (or was not needed). */
+  setupToken: string | null;
 }
 
 declare module 'fastify' {

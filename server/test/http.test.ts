@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { call, key32, makeApp, registerBody, setupAdmin, type TestApp } from './helpers.js';
+import { call, key32, makeApp, setupAdmin, setupBody, type TestApp } from './helpers.js';
 
 let t: TestApp | undefined;
 let webDist: string | undefined;
@@ -25,11 +25,11 @@ const EXPECTED_HEADERS = {
 describe('CSRF header', () => {
   it('is required on non-GET requests', async () => {
     t = await makeApp();
-    const missing = await t.app.inject({ method: 'POST', url: '/api/setup', payload: registerBody('admin') });
+    const missing = await t.app.inject({ method: 'POST', url: '/api/setup', payload: setupBody('admin') });
     expect(missing.statusCode).toBe(403);
     expect(missing.json().error).toBe('csrf');
 
-    const wrong = await call(t.app, 'POST', '/api/setup', { body: registerBody('admin'), headers: { 'x-inked': '0' } });
+    const wrong = await call(t.app, 'POST', '/api/setup', { body: setupBody('admin'), headers: { 'x-inked': '0' } });
     expect(wrong.statusCode).toBe(403);
 
     // Nothing was created.

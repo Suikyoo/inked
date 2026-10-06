@@ -11,13 +11,16 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-export async function makeApp(opts: { webDist?: string; trustProxy?: false | number | string } = {}): Promise<TestApp> {
+export const TEST_SETUP_TOKEN = 'test-setup-token-0123456789abcdef';
+
+export async function makeApp(opts: { webDist?: string; trustProxy?: false | number | string; setupToken?: string } = {}): Promise<TestApp> {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'inked-test-'));
   const app = await buildApp({
     dataDir,
     webDist: opts.webDist ?? path.join(dataDir, 'no-web'),
     cookieSecure: false,
     trustProxy: opts.trustProxy ?? false,
+    setupToken: opts.setupToken ?? TEST_SETUP_TOKEN,
   });
   return {
     app,
@@ -58,6 +61,9 @@ export function registerBody(username: string) {
   };
 }
 
+/** A setup request body: a registration body plus the one-time setup token. */
+export const setupBody = (username: string) => ({ ...registerBody(username), setupToken: TEST_SETUP_TOKEN });
+
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /** Inject a request with the CSRF header set (unless overridden) and an optional session cookie. */
@@ -83,7 +89,7 @@ export function sessionCookie(res: { cookies: Array<{ name: string; value: strin
 
 /** Runs first-time setup and returns the admin account. */
 export async function setupAdmin(app: FastifyInstance, username = 'admin'): Promise<Account> {
-  const body = registerBody(username);
+  const body = setupBody(username);
   const res = await call(app, 'POST', '/api/setup', { body });
   if (res.statusCode !== 200) throw new Error(`setup failed: ${res.statusCode} ${res.body}`);
   return { username, authKey: body.authKey, recoveryAuth: body.recoveryAuth, cookie: sessionCookie(res), userId: body.userId };

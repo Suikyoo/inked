@@ -234,7 +234,7 @@ describe('notes', () => {
     const vault = await createVault(alice);
     const tooBig = `v1.${'A'.repeat(2 * 1024 * 1024)}`;
     const res = await as(alice).post(`/api/vaults/${vault.id}/notes`, { id: randomUUID(), folderId: null, encMeta: fakeCipher(), encBody: tooBig });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(413);
 
     const huge = await as(alice).post(`/api/vaults/${vault.id}/notes`, {
       id: randomUUID(),
@@ -284,5 +284,17 @@ describe('isolation between users', () => {
     const a = (await as(alice).get(`/api/notes/${note.id}`)).json().note;
     expect(a.encBody).toBe((await as(alice).get(`/api/vaults/${vault.id}/bodies`)).json().notes[0].encBody);
     expect((await as(alice).get(`/api/vaults/${vault.id}/tree`)).json().folders).toHaveLength(1);
+  });
+});
+
+describe('note size limit', () => {
+  it('oversized note body returns 413 too_large (M10)', async () => {
+    const vault = await createVault(alice);
+    const note = await createNote(alice, vault.id);
+    // ~2.1 MB of valid ciphertext characters, under the 4 MB request limit
+    const huge = `v1.${'A'.repeat(2_100_000)}`;
+    const r = await as(alice).put(`/api/notes/${note.id}`, { encBody: huge });
+    expect(r.statusCode).toBe(413);
+    expect(r.json().error).toBe('too_large');
   });
 });

@@ -15,6 +15,11 @@ export const randomToken = (bytes: number): string => randomBytes(bytes).toStrin
 
 export const sha256Hex = (value: string): string => createHash('sha256').update(value).digest('hex');
 
+/** Constant-time string comparison (compares fixed-length SHA-256 digests). */
+export function safeEqualStrings(a: string, b: string): boolean {
+  return timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
+}
+
 export interface SecretHash {
   salt: string;
   hash: string;

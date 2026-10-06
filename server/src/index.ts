@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { redactUrl } from './logging.js';
 
 const config = loadConfig();
 
@@ -10,9 +11,9 @@ const app = await buildApp({
   trustProxy: config.trustProxy,
   logger: {
     level: process.env.LOG_LEVEL || 'info',
-    // Log paths without query strings: those can carry invite tokens and usernames.
+    // Log paths without query strings or invite tokens: those can carry usernames and secrets.
     serializers: {
-      req: (req) => ({ method: req.method, url: req.url.split('?')[0], remoteAddress: req.ip }),
+      req: (req) => ({ method: req.method, url: redactUrl(req.url), remoteAddress: req.ip }),
     },
   },
 });

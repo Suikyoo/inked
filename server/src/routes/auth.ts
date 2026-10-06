@@ -7,7 +7,7 @@ import {
   requireUser,
   startSession,
 } from '../context.js';
-import { burnScrypt, fakeKdfSalt, hashSecret, sha256Hex, verifySecret } from '../crypto.js';
+import { burnScrypt, fakeKdfSalt, hashSecret, safeEqualStrings, sha256Hex, verifySecret } from '../crypto.js';
 import { type Db, nowIso, transaction, type UserRow } from '../db.js';
 import { ApiError } from '../errors.js';
 import {
@@ -54,7 +54,12 @@ const registerFields = {
 const registerRequired = Object.keys(registerFields);
 
 const setupSchema = {
-  body: { type: 'object', additionalProperties: false, required: registerRequired, properties: registerFields },
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: [...registerRequired, 'setupToken'],
+    properties: { ...registerFields, setupToken: { type: 'string', minLength: 8, maxLength: 128 } },
+  },
 } as const;
 
 const registerSchema = {
@@ -112,7 +117,7 @@ const paramsSchema = {
   },
 } as const;
 
-const countUsers = (db: Db) => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+export const countUsers = (db: Db) => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
 
 const findUser = (db: Db, name: string) =>
   db.prepare('SELECT * FROM users WHERE username = ?').get(name) as UserRow | undefined;
@@ -202,14 +207,18 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.get('/api/status', async () => ({ needsSetup: countUsers(db) === 0 }));
 
-  app.post<{ Body: RegisterBody }>('/api/setup', { schema: setupSchema }, async (request, reply) => {
+  app.post<{ Body: RegisterBody & { setupToken: string } }>('/api/setup', { schema: setupSchema }, async (request, reply) => {
     if (countUsers(db) > 0) throw new ApiError(409, 'already_setup');
+    if (!ctx.setupToken || !safeEqualStrings(request.body.setupToken, ctx.setupToken)) {
+      throw new ApiError(403, 'invalid_setup_token');
+    }
     const hashes = await hashRegistration(request.body);
     const user = transaction(db, () => {
       // Re-check inside the transaction: another setup may have finished while we hashed.
       if (countUsers(db) > 0) throw new ApiError(409, 'already_setup');
       return insertUser(db, request.body, hashes, true);
     });
+    ctx.setupToken = null;
     startSession(ctx, reply, user.id);
     return { user: publicUser(user) };
   });
@@ -244,11 +253,15 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.post<{ Body: RegisterBody }>('/api/auth/register', { schema: registerSchema }, async (request, reply) => {
     const tokenHash = sha256Hex(request.body.inviteToken!);
-    const hashes = await hashRegistration(request.body);
-    const user = transaction(db, () => {
-      const invite = db
+    const live = () =>
+      db
         .prepare('SELECT id FROM invites WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?')
         .get(tokenHash, nowIso()) as { id: string } | undefined;
+    // Cheap check first: a bad invite must not cost two scrypt hashes.
+    if (!live()) throw new ApiError(403, 'invalid_invite');
+    const hashes = await hashRegistration(request.body);
+    const user = transaction(db, () => {
+      const invite = live(); // re-check: it may have been used while we hashed
       if (!invite) throw new ApiError(403, 'invalid_invite');
       const created = insertUser(db, request.body, hashes, false);
       db.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE id = ?').run(created.id, nowIso(), invite.id);

@@ -2,13 +2,14 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
+import { randomBytes } from 'node:crypto';
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { type AppContext, deleteExpiredSessions } from './context.js';
 import { loadServerSecret } from './crypto.js';
 import { type Db, openDb } from './db.js';
 import { ApiError } from './errors.js';
 import { FailureLimiter } from './limiter.js';
-import { authRoutes } from './routes/auth.js';
+import { authRoutes, countUsers } from './routes/auth.js';
 import { folderRoutes } from './routes/folders.js';
 import { inviteRoutes } from './routes/invites.js';
 import { noteRoutes } from './routes/notes.js';
@@ -20,6 +21,8 @@ export interface AppOptions {
   webDist: string;
   cookieSecure: boolean;
   trustProxy?: false | number | string;
+  /** Fixed setup token (tests); by default one is generated and logged when no users exist. */
+  setupToken?: string;
   logger?: FastifyServerOptions['logger'];
 }
 
@@ -79,7 +82,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     cookieSecure: opts.cookieSecure,
     limiter: new FailureLimiter(),
     accountLimiter: new FailureLimiter(30, 15 * 60_000, 15 * 60_000),
+    setupToken: opts.setupToken ?? (countUsers(db) === 0 ? randomBytes(16).toString('base64url') : null),
   };
+  if (ctx.setupToken && !opts.setupToken) app.log.warn(`Inked first-run setup token: ${ctx.setupToken}`);
 
   // Housekeeping: drop expired sessions now and hourly.
   deleteExpiredSessions(db);
@@ -123,6 +128,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       return reply
         .code(err.statusCode)
         .send({ error: err.code, ...(err.message ? { message: err.message } : {}), ...err.extra });
+    }
+    if (err.validation?.some((v) => v.keyword === 'maxLength' && /encBody/.test(v.instancePath))) {
+      return reply.code(413).send({ error: 'too_large', message: 'Note is too large' });
     }
     if (err.validation) {
       return reply.code(400).send({ error: 'invalid_request', message: err.message });

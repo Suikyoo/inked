@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type Account, call, key32, makeApp, registerBody, sessionCookie, setupAdmin, type TestApp } from './helpers.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as cryptoMod from '../src/crypto.js';
+import { type Account, call, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
 
 let t: TestApp;
 beforeEach(async () => {
@@ -17,7 +18,7 @@ describe('setup', () => {
   });
 
   it('creates an admin, sets a session cookie and lowercases the username', async () => {
-    const body = registerBody('Alice.Admin');
+    const body = setupBody('Alice.Admin');
     const res = await call(t.app, 'POST', '/api/setup', { body });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ user: { id: body.userId, username: 'alice.admin', isAdmin: true } });
@@ -30,24 +31,74 @@ describe('setup', () => {
 
   it('only works once', async () => {
     await setupAdmin(t.app);
-    const res = await call(t.app, 'POST', '/api/setup', { body: registerBody('second') });
+    const res = await call(t.app, 'POST', '/api/setup', { body: setupBody('second') });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe('already_setup');
   });
 
   it('validates the body', async () => {
     const bad = [
-      { ...registerBody('ab') }, // too short
-      { ...registerBody('has space') },
-      { ...registerBody('valid'), userId: 'not-a-uuid' },
-      { ...registerBody('valid'), wrappedUserKey: 'v2.abc' },
-      { ...registerBody('valid'), authKey: 'short' },
-      { ...registerBody('valid'), kdfParams: { alg: 'pbkdf2', m: 65536, t: 3, p: 1 } },
+      { ...setupBody('ab') }, // too short
+      { ...setupBody('has space') },
+      { ...setupBody('valid'), userId: 'not-a-uuid' },
+      { ...setupBody('valid'), wrappedUserKey: 'v2.abc' },
+      { ...setupBody('valid'), authKey: 'short' },
+      { ...setupBody('valid'), kdfParams: { alg: 'pbkdf2', m: 65536, t: 3, p: 1 } },
     ];
     for (const body of bad) {
       const res = await call(t.app, 'POST', '/api/setup', { body });
       expect(res.statusCode, JSON.stringify(body)).toBe(400);
       expect(res.json().error).toBe('invalid_request');
+    }
+  });
+});
+
+describe('setup hardening', () => {
+  it('setup requires the one-time setup token (M8)', async () => {
+    const body = registerBody('admin');
+    const bad = await call(t.app, 'POST', '/api/setup', { body: { ...body, setupToken: 'nope-nope-nope' } });
+    expect(bad.statusCode).toBe(403);
+    expect(bad.json().error).toBe('invalid_setup_token');
+    const missing = await call(t.app, 'POST', '/api/setup', { body });
+    expect(missing.statusCode).toBe(400);
+    const ok = await call(t.app, 'POST', '/api/setup', { body: { ...body, setupToken: TEST_SETUP_TOKEN } });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it('rejects weak kdf params (M5)', async () => {
+    const weak = [
+      { alg: 'argon2id', m: 19456, t: 2, p: 1 },
+      { alg: 'argon2id', m: 65536, t: 2, p: 1 },
+      { alg: 'argon2id', m: 65536, t: 3, p: 9 },
+      { alg: 'argon2id', m: 2097152, t: 3, p: 1 },
+    ];
+    for (const kdfParams of weak) {
+      const r = await call(t.app, 'POST', '/api/setup', { body: { ...setupBody('admin'), kdfParams } });
+      expect(r.statusCode, JSON.stringify(kdfParams)).toBe(400);
+    }
+  });
+
+  it('register with a bad invite fails before any scrypt hashing (M4)', async () => {
+    const admin = await setupAdmin(t.app);
+    const spy = vi.spyOn(cryptoMod, 'hashSecret');
+    try {
+      for (let i = 0; i < 10; i++) {
+        const r = await call(t.app, 'POST', '/api/auth/register', {
+          body: { ...registerBody(`u${i}xx`), inviteToken: 'x'.repeat(32) },
+        });
+        expect(r.statusCode).toBe(403);
+        expect(r.json().error).toBe('invalid_invite');
+      }
+      expect(spy).not.toHaveBeenCalled();
+      // Control: a valid invite does hash, so the spy really observes the register path.
+      const invite = await call(t.app, 'POST', '/api/invites', { cookie: admin.cookie, body: {} });
+      const ok = await call(t.app, 'POST', '/api/auth/register', {
+        body: { ...registerBody('good'), inviteToken: invite.json().token },
+      });
+      expect(ok.statusCode).toBe(200);
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
     }
   });
 });
@@ -159,14 +210,14 @@ describe('login', () => {
 
 describe('auth params', () => {
   it('returns the stored salt for a real user', async () => {
-    const body = registerBody('alice');
+    const body = setupBody('alice');
     await call(t.app, 'POST', '/api/setup', { body });
     const res = await call(t.app, 'GET', '/api/auth/params?username=Alice');
     expect(res.json()).toEqual({ kdfSalt: body.kdfSalt, kdfParams: body.kdfParams });
   });
 
   it('returns a stable fake salt for unknown users, shaped like a real one', async () => {
-    const body = registerBody('alice');
+    const body = setupBody('alice');
     await call(t.app, 'POST', '/api/setup', { body });
     const real = (await call(t.app, 'GET', '/api/auth/params?username=alice')).json();
     const fake1 = await call(t.app, 'GET', '/api/auth/params?username=mallory');
@@ -231,7 +282,7 @@ describe('password change', () => {
 
 describe('recovery', () => {
   it('start returns the recovery-wrapped key only for a valid proof', async () => {
-    const body = registerBody('alice');
+    const body = setupBody('alice');
     await call(t.app, 'POST', '/api/setup', { body });
 
     const bad = await call(t.app, 'POST', '/api/auth/recover/start', { body: { username: 'alice', recoveryAuth: key32() } });
@@ -246,7 +297,7 @@ describe('recovery', () => {
   });
 
   it('finish sets a new password, ends old sessions and starts a new one', async () => {
-    const body = registerBody('alice');
+    const body = setupBody('alice');
     const setup = await call(t.app, 'POST', '/api/setup', { body });
     const oldCookie = sessionCookie(setup);
     const next = registerBody('alice');

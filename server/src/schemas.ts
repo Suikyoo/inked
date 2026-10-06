@@ -32,9 +32,9 @@ export const kdfParams = {
   required: ['alg', 'm', 't', 'p'],
   properties: {
     alg: { type: 'string', const: 'argon2id' },
-    m: { type: 'integer', minimum: 19456, maximum: 4194304 },
-    t: { type: 'integer', minimum: 1, maximum: 16 },
-    p: { type: 'integer', minimum: 1, maximum: 16 },
+    m: { type: 'integer', minimum: 65536, maximum: 1048576 },
+    t: { type: 'integer', minimum: 3, maximum: 16 },
+    p: { type: 'integer', minimum: 1, maximum: 8 },
   },
 } as const;
 
