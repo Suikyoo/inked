@@ -34,7 +34,7 @@ declare module 'fastify' {
 
 const SECURITY_HEADERS: Record<string, string> = {
   'content-security-policy':
-    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
     "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
     "frame-ancestors 'none'; form-action 'self'",
   'x-content-type-options': 'nosniff',
