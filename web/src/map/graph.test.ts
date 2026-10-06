@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { folder, note, tree } from './fixtures';
-import { buildVaultGraph, noteLinkTargets } from './graph';
+import { buildVaultGraph, incomingLinks, noteLinkTargets, structureKey } from './graph';
 
 describe('noteLinkTargets', () => {
   it('resolves wiki-links case-insensitively, with or without an alias', () => {
@@ -57,5 +57,25 @@ describe('buildVaultGraph', () => {
     const g = buildVaultGraph('v1', t, {}, false);
     expect(g.folders.map((f) => [f.id, f.depth])).toEqual([['f1', 0], ['f2', 1]]);
     expect(g.linksReady).toBe(false);
+  });
+});
+
+describe('incomingLinks (backlinks)', () => {
+  it('includes notes that link by [[title]] or by a root-relative /v/{vault}/n/{id} link, sorted by title', () => {
+    const t = tree([], [note('target', null, 'Target'), note('w', null, 'Wiki'), note('m', null, 'Markdown'), note('x', null, 'Other')]);
+    const g = buildVaultGraph('v1', t, { w: 'see [[target]]', m: 'see [it](/v/v1/n/target#top)', x: 'nothing' }, true);
+    expect(incomingLinks(g, 'target').map((n) => n.id)).toEqual(['m', 'w']);
+  });
+});
+
+describe('structureKey', () => {
+  it('ignores edit times and links, but tracks titles, folders and parents', () => {
+    const base = tree([folder('f1', null, 'A')], [note('n1', 'f1', 'One')]);
+    const k = structureKey(buildVaultGraph('v1', base, {}, true));
+    const touched = tree([folder('f1', null, 'A')], [note('n1', 'f1', 'One', { updatedAt: '2026-10-06T00:00:00.000Z' })]);
+    expect(structureKey(buildVaultGraph('v1', touched, { n1: '[[One]]' }, true))).toBe(k);
+    expect(structureKey(buildVaultGraph('v1', tree([folder('f1', null, 'A')], [note('n1', 'f1', 'Two')]), {}, true))).not.toBe(k);
+    expect(structureKey(buildVaultGraph('v1', tree([folder('f1', null, 'B')], [note('n1', 'f1', 'One')]), {}, true))).not.toBe(k);
+    expect(structureKey(buildVaultGraph('v1', tree([folder('f1', null, 'A')], [note('n1', null, 'One')]), {}, true))).not.toBe(k);
   });
 });

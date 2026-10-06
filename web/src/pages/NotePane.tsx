@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Spinner } from '../components/Fields';
-import { renderMarkdown, toggleTaskAtLine, wikiLinkTargets } from '../markdown/render';
+import { renderMarkdown, toggleTaskAtLine } from '../markdown/render';
+import { incomingLinks } from '../map/graph';
+import { useVaultGraph } from '../map/useVaultGraphs';
 import { prefs } from '../lib/prefs';
 import { describeError, formatDate, relativeTime, wordCount } from '../lib/util';
 import { folderPath, titleIndex, useAppState, useStore } from '../state/StoreContext';
@@ -105,14 +107,8 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
     });
   }, [mode, editor.status, editor.body, titles, vault.id]);
 
-  const backlinks = useMemo(() => {
-    if (!head || !tree) return [];
-    const me = head.title.trim().toLowerCase();
-    if (!me) return [];
-    return Object.values(tree.notes)
-      .filter((n) => n.id !== noteId && state.bodies[n.id] && wikiLinkTargets(state.bodies[n.id]).has(me))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }, [head, tree, noteId, state.bodies]);
+  const graph = useVaultGraph(state, vault.id);
+  const backlinks = useMemo(() => (graph ? incomingLinks(graph, noteId) : []), [graph, noteId]);
 
   const commitTitle = async () => {
     const next = title.trim();

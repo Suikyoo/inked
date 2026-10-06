@@ -103,3 +103,14 @@ export function buildVaultGraph(
 
   return { vaultId, folders, notes, links, linksReady: bodiesReady };
 }
+
+/** Changes only when something the layout depends on changes (not edit times or links). */
+export function structureKey(g: VaultGraph): string {
+  return JSON.stringify([g.folders.map((f) => [f.id, f.parentId, f.name]), g.notes.map((n) => [n.id, n.folderId, n.title])]);
+}
+
+/** Notes that link to `noteId` (backlinks), sorted by title. */
+export function incomingLinks(g: VaultGraph, noteId: string): GraphNote[] {
+  const from = new Set(g.links.filter((l) => l.to === noteId).map((l) => l.from));
+  return g.notes.filter((n) => from.has(n.id)).sort((a, b) => a.title.localeCompare(b.title) || (a.id < b.id ? -1 : 1));
+}
