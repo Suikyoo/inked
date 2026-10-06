@@ -368,6 +368,21 @@ describe('known devices (I-3)', () => {
     expect((await login(next.authKey, '10.31.0.1', device)).statusCode).toBe(429);
   });
 
+  it('a password change re-issues the device cookie, so the device stays known (M4)', async () => {
+    const device = deviceCookie(await login(admin.authKey, '10.19.0.1'))!.value;
+    const next = registerBody('admin');
+    const res = await changePassword(next);
+    expect(res.statusCode).toBe(200);
+    const c = deviceCookie(res)!;
+    expect(c.value).toBe(deviceValue(admin.userId));
+    expect(c.value).not.toBe(device);
+    expect(c.path).toBe('/api/auth');
+    expect(c.httpOnly).toBe(true);
+    await exhaust('10.37.0');
+    expect((await login(next.authKey, '10.38.0.1', device)).statusCode).toBe(429);
+    expect((await login(next.authKey, '10.38.0.2', c.value)).statusCode).toBe(200);
+  });
+
   it('a cookie minted after a password change exempts (A1)', async () => {
     const next = registerBody('admin');
     expect((await changePassword(next)).statusCode).toBe(200);

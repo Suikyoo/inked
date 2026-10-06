@@ -292,7 +292,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post<{ Body: NewCredentials & { currentAuthKey: string } }>(
     '/api/auth/password',
     { schema: passwordSchema, onRequest: requireUser(ctx, { ignoreUserHeader: true }) },
-    async (request) => {
+    async (request, reply) => {
       const user = currentUser(request);
       const key = `password|${request.ip}|${user.id}`;
       const wait = ctx.limiter.attempt(key);
@@ -305,6 +305,8 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
       await replaceCredentials(db, user.id, request.body);
       // Sign out every other session.
       db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?').run(user.id, request.sessionHash);
+      // Re-read: replaceCredentials rotated auth_salt, so earlier device cookies stopped counting; keep this device known.
+      setDeviceCookie(ctx, reply, findUser(db, user.username)!);
       return { ok: true };
     },
   );
