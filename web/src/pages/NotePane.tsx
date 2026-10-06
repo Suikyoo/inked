@@ -3,10 +3,11 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Spinner } from '../components/Fields';
 import { renderMarkdown, toggleTaskAtLine } from '../markdown/render';
 import { incomingLinks } from '../map/graph';
+import { LocalMap } from '../map/LocalMap';
 import { useVaultGraph } from '../map/useVaultGraphs';
 import { prefs } from '../lib/prefs';
 import { describeError, formatDate, relativeTime, wordCount } from '../lib/util';
-import { folderPath, titleIndex, useAppState, useStore } from '../state/StoreContext';
+import { folderPath, titleIndex, useAppState, useStore, vaultStats } from '../state/StoreContext';
 import type { VaultView } from '../state/store';
 import { useNoteEditor, type SaveStatus } from './useNoteEditor';
 
@@ -262,6 +263,12 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
       </main>
 
       <aside className="ctx" aria-label="Note context">
+        {graph && head && (
+          <section className="ctx-section">
+            <h2 className="ctx-title">Local map</h2>
+            <LocalMap graph={graph} noteId={noteId} vaultName={vault.name} vaultColor={vault.color} level={vaultStats(vault, tree).level} />
+          </section>
+        )}
         <section className="ctx-section">
           <h2 className="ctx-title">
             Backlinks{state.bodiesReady[vault.id] ? ` · ${backlinks.length}` : ''}

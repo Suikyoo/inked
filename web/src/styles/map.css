@@ -246,3 +246,60 @@
 .lg-note {
   color: var(--muted-2);
 }
+
+/* Local map (note page) */
+.lmap {
+  position: relative;
+  aspect-ratio: 100 / 78;
+  background: var(--canvas);
+  border: 1px solid var(--side-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.lmap-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.lmap-svg .cmap-dot {
+  stroke-width: 3;
+}
+.lmap-label {
+  font: 500 9.5px var(--font-ui);
+  fill: var(--muted);
+  pointer-events: none;
+}
+.cmap-node:hover .lmap-label,
+.cmap-node:focus-visible .lmap-label {
+  fill: var(--text);
+}
+.lmap-parent-name {
+  font: italic 500 11px var(--font-serif);
+  fill: var(--text);
+}
+.lmap-caption {
+  font: 500 8.5px var(--font-ui);
+  fill: var(--muted-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.lmap-more {
+  font: 500 9px var(--font-ui);
+  fill: var(--muted-3);
+}
+.lmap-ring {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 1.5;
+}
+.lmap-msg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted-3);
+  pointer-events: none;
+}
