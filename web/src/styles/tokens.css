@@ -1,0 +1,62 @@
+/* Inked design tokens (dark only). Values come from the approved mockups. */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --ground: #17161c;
+  --side: #121117;
+  --side-border: #222029;
+  --panel: #1b1a21;
+  --panel-2: #211f28;
+  --panel-3: #24222c;
+  --canvas: #1a1920;
+  --hover: #1f1d26;
+  --row-selected: #2a2440;
+
+  /* Lines */
+  --border: #2e2c38;
+  --border-2: #34323f;
+  --line: #2a2833;
+
+  /* Text */
+  --text: #e6e3ee;
+  --text-strong: #ede9ff;
+  --text-2: #c4bfd1;
+  --text-body: #dad6e3;
+  --muted: #a29db2;
+  --muted-2: #8d879f;
+  --muted-3: #6e6880;
+  --placeholder: #7d7790;
+
+  /* Ink */
+  --ink: #7452e0;
+  --ink-hover: #8160ea;
+  --ink-light: #b69cff;
+  --ink-lighter: #d6c8ff;
+  --selection: #4b3a80;
+  --mark: rgba(124, 92, 230, 0.32);
+
+  /* Status */
+  --error: #f2a7b4;
+  --error-bg: #241d2a;
+  --error-text: #e9c9cf;
+  --ok: #8fd1b5;
+  --warn: #d19c3c;
+
+  /* Type */
+  --font-ui: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Spectral', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+  /* Geometry */
+  --row: 28px;
+  --row-sm: 26px;
+  --control: 30px;
+  --control-lg: 36px;
+  --radius-sm: 5px;
+  --radius: 6px;
+  --radius-md: 7px;
+  --radius-lg: 8px;
+  --side-width: 240px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}

@@ -1,0 +1,14 @@
+services:
+  inked:
+    build: .
+    ports:
+      # Host port is configurable: INKED_PORT=9000 docker compose up -d
+      - "${INKED_PORT:-8088}:8080"
+    volumes:
+      # On Linux the container runs as uid 1000 (user "node"); make sure ./data is writable by it,
+      # e.g. `mkdir -p data && sudo chown 1000:1000 data`.
+      - ./data:/data
+    environment:
+      # Set to "true" when Inked is served over HTTPS (e.g. behind a TLS reverse proxy).
+      COOKIE_SECURE: "false"
+    restart: unless-stopped

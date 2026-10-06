@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+data
+server/data
+.git
+.remember
+.impeccable
+*.log
+.env

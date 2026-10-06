@@ -1,0 +1,302 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import {
+  type AppContext,
+  currentUser,
+  endSession,
+  publicUser,
+  requireUser,
+  startSession,
+} from '../context.js';
+import { burnScrypt, fakeKdfSalt, hashSecret, sha256Hex, verifySecret } from '../crypto.js';
+import { type Db, nowIso, transaction, type UserRow } from '../db.js';
+import { ApiError } from '../errors.js';
+import {
+  DEFAULT_KDF_PARAMS,
+  type KdfParams,
+  kdfParams,
+  kdfSalt,
+  key32,
+  normalizeKdfParams,
+  username,
+  uuid,
+  wrappedKey,
+} from '../schemas.js';
+
+interface RegisterBody {
+  inviteToken?: string;
+  userId: string;
+  username: string;
+  kdfSalt: string;
+  kdfParams: KdfParams;
+  authKey: string;
+  wrappedUserKey: string;
+  recoveryAuth: string;
+  wrappedUserKeyRecovery: string;
+}
+
+interface NewCredentials {
+  kdfSalt: string;
+  kdfParams: KdfParams;
+  authKey: string;
+  wrappedUserKey: string;
+}
+
+const registerFields = {
+  userId: uuid,
+  username,
+  kdfSalt,
+  kdfParams,
+  authKey: key32,
+  wrappedUserKey: wrappedKey,
+  recoveryAuth: key32,
+  wrappedUserKeyRecovery: wrappedKey,
+} as const;
+const registerRequired = Object.keys(registerFields);
+
+const setupSchema = {
+  body: { type: 'object', additionalProperties: false, required: registerRequired, properties: registerFields },
+} as const;
+
+const registerSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: [...registerRequired, 'inviteToken'],
+    properties: { ...registerFields, inviteToken: { type: 'string', minLength: 1, maxLength: 128 } },
+  },
+} as const;
+
+const credentialFields = { kdfSalt, kdfParams, authKey: key32, wrappedUserKey: wrappedKey } as const;
+
+const loginSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['username', 'authKey'],
+    properties: { username, authKey: key32 },
+  },
+} as const;
+
+const passwordSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['currentAuthKey', 'kdfSalt', 'kdfParams', 'authKey', 'wrappedUserKey'],
+    properties: { currentAuthKey: key32, ...credentialFields },
+  },
+} as const;
+
+const recoverStartSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['username', 'recoveryAuth'],
+    properties: { username, recoveryAuth: key32 },
+  },
+} as const;
+
+const recoverFinishSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['username', 'recoveryAuth', 'kdfSalt', 'kdfParams', 'authKey', 'wrappedUserKey'],
+    properties: { username, recoveryAuth: key32, ...credentialFields },
+  },
+} as const;
+
+const paramsSchema = {
+  querystring: {
+    type: 'object',
+    required: ['username'],
+    properties: { username },
+  },
+} as const;
+
+const countUsers = (db: Db) => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+
+const findUser = (db: Db, name: string) =>
+  db.prepare('SELECT * FROM users WHERE username = ?').get(name) as UserRow | undefined;
+
+const lockedError = (retryAfter: number) =>
+  new ApiError(429, 'locked', 'Too many failed attempts', { retryAfter }, { 'retry-after': String(retryAfter) });
+
+const invalidCredentials = () => new ApiError(401, 'invalid_credentials');
+
+/**
+ * Verifies a client-derived secret for `name` with lockout on repeated failure.
+ * Unknown users cost the same scrypt work and fail identically.
+ */
+async function checkSecret(
+  ctx: AppContext,
+  request: FastifyRequest,
+  scope: string,
+  name: string,
+  secret: string,
+  stored: (u: UserRow) => { salt: string; hash: string },
+): Promise<UserRow> {
+  const key = `${scope}|${request.ip}|${name}`;
+  const wait = ctx.limiter.retryAfter(key);
+  if (wait > 0) throw lockedError(wait);
+
+  const user = findUser(ctx.db, name);
+  const ok = user ? await verifySecret(secret, stored(user)) : (await burnScrypt(secret), false);
+  if (!user || !ok) {
+    ctx.limiter.fail(key);
+    throw invalidCredentials();
+  }
+  ctx.limiter.reset(key);
+  return user;
+}
+
+const authOf = (u: UserRow) => ({ salt: u.auth_salt, hash: u.auth_hash });
+const recoveryOf = (u: UserRow) => ({ salt: u.recovery_salt, hash: u.recovery_hash });
+
+/** Replaces the password-derived credentials (kdf salt/params, auth hash, wrapped user key). */
+async function replaceCredentials(db: Db, userId: string, c: NewCredentials): Promise<void> {
+  const auth = await hashSecret(c.authKey);
+  db.prepare(
+    `UPDATE users SET kdf_salt = ?, kdf_params = ?, auth_salt = ?, auth_hash = ?, wrapped_user_key = ? WHERE id = ?`,
+  ).run(c.kdfSalt, JSON.stringify(normalizeKdfParams(c.kdfParams)), auth.salt, auth.hash, c.wrappedUserKey, userId);
+}
+
+async function hashRegistration(b: RegisterBody) {
+  const [auth, recovery] = await Promise.all([hashSecret(b.authKey), hashSecret(b.recoveryAuth)]);
+  return { auth, recovery };
+}
+
+/** Inserts a user; must be called inside a transaction. Throws 409 on username/id clash. */
+function insertUser(
+  db: Db,
+  b: RegisterBody,
+  hashes: Awaited<ReturnType<typeof hashRegistration>>,
+  isAdmin: boolean,
+): UserRow {
+  const name = b.username.toLowerCase();
+  if (findUser(db, name)) throw new ApiError(409, 'username_taken');
+  if (db.prepare('SELECT 1 FROM users WHERE id = ?').get(b.userId)) throw new ApiError(409, 'id_taken');
+  db.prepare(
+    `INSERT INTO users (id, username, is_admin, kdf_salt, kdf_params, auth_salt, auth_hash, wrapped_user_key,
+                        recovery_salt, recovery_hash, wrapped_user_key_recovery, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    b.userId,
+    name,
+    isAdmin ? 1 : 0,
+    b.kdfSalt,
+    JSON.stringify(normalizeKdfParams(b.kdfParams)),
+    hashes.auth.salt,
+    hashes.auth.hash,
+    b.wrappedUserKey,
+    hashes.recovery.salt,
+    hashes.recovery.hash,
+    b.wrappedUserKeyRecovery,
+    nowIso(),
+  );
+  return findUser(db, name)!;
+}
+
+export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
+  const { db } = ctx;
+
+  app.get('/api/status', async () => ({ needsSetup: countUsers(db) === 0 }));
+
+  app.post<{ Body: RegisterBody }>('/api/setup', { schema: setupSchema }, async (request, reply) => {
+    if (countUsers(db) > 0) throw new ApiError(409, 'already_setup');
+    const hashes = await hashRegistration(request.body);
+    const user = transaction(db, () => {
+      // Re-check inside the transaction: another setup may have finished while we hashed.
+      if (countUsers(db) > 0) throw new ApiError(409, 'already_setup');
+      return insertUser(db, request.body, hashes, true);
+    });
+    startSession(ctx, reply, user.id);
+    return { user: publicUser(user) };
+  });
+
+  app.get<{ Querystring: { username: string } }>('/api/auth/params', { schema: paramsSchema }, async (request) => {
+    const name = request.query.username.toLowerCase();
+    const user = findUser(db, name);
+    if (user) return { kdfSalt: user.kdf_salt, kdfParams: JSON.parse(user.kdf_params) as KdfParams };
+    return { kdfSalt: fakeKdfSalt(ctx.serverSecret, name), kdfParams: DEFAULT_KDF_PARAMS };
+  });
+
+  app.post<{ Body: { username: string; authKey: string } }>(
+    '/api/auth/login',
+    { schema: loginSchema },
+    async (request, reply) => {
+      const name = request.body.username.toLowerCase();
+      const user = await checkSecret(ctx, request, 'login', name, request.body.authKey, authOf);
+      startSession(ctx, reply, user.id);
+      return { user: publicUser(user), wrappedUserKey: user.wrapped_user_key };
+    },
+  );
+
+  app.post('/api/auth/logout', async (request, reply) => {
+    endSession(ctx, request, reply);
+    return { ok: true };
+  });
+
+  app.get('/api/me', { onRequest: requireUser(ctx) }, async (request) => {
+    const user = currentUser(request);
+    return { user: publicUser(user), wrappedUserKey: user.wrapped_user_key };
+  });
+
+  app.post<{ Body: RegisterBody }>('/api/auth/register', { schema: registerSchema }, async (request, reply) => {
+    const tokenHash = sha256Hex(request.body.inviteToken!);
+    const hashes = await hashRegistration(request.body);
+    const user = transaction(db, () => {
+      const invite = db
+        .prepare('SELECT id FROM invites WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?')
+        .get(tokenHash, nowIso()) as { id: string } | undefined;
+      if (!invite) throw new ApiError(403, 'invalid_invite');
+      const created = insertUser(db, request.body, hashes, false);
+      db.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE id = ?').run(created.id, nowIso(), invite.id);
+      return created;
+    });
+    startSession(ctx, reply, user.id);
+    return { user: publicUser(user) };
+  });
+
+  app.post<{ Body: NewCredentials & { currentAuthKey: string } }>(
+    '/api/auth/password',
+    { schema: passwordSchema, onRequest: requireUser(ctx) },
+    async (request) => {
+      const user = currentUser(request);
+      const key = `password|${request.ip}|${user.id}`;
+      const wait = ctx.limiter.retryAfter(key);
+      if (wait > 0) throw lockedError(wait);
+      if (!(await verifySecret(request.body.currentAuthKey, authOf(user)))) {
+        ctx.limiter.fail(key);
+        // 403 rather than 401: the session is fine, the proof is not.
+        throw new ApiError(403, 'invalid_credentials');
+      }
+      ctx.limiter.reset(key);
+      await replaceCredentials(db, user.id, request.body);
+      // Sign out every other session.
+      db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?').run(user.id, request.sessionHash);
+      return { ok: true };
+    },
+  );
+
+  app.post<{ Body: { username: string; recoveryAuth: string } }>(
+    '/api/auth/recover/start',
+    { schema: recoverStartSchema },
+    async (request) => {
+      const name = request.body.username.toLowerCase();
+      const user = await checkSecret(ctx, request, 'recover', name, request.body.recoveryAuth, recoveryOf);
+      return { userId: user.id, wrappedUserKeyRecovery: user.wrapped_user_key_recovery };
+    },
+  );
+
+  app.post<{ Body: NewCredentials & { username: string; recoveryAuth: string } }>(
+    '/api/auth/recover/finish',
+    { schema: recoverFinishSchema },
+    async (request, reply) => {
+      const name = request.body.username.toLowerCase();
+      const user = await checkSecret(ctx, request, 'recover', name, request.body.recoveryAuth, recoveryOf);
+      await replaceCredentials(db, user.id, request.body);
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+      startSession(ctx, reply, user.id);
+      return { user: publicUser(user), wrappedUserKey: request.body.wrappedUserKey };
+    },
+  );
+}

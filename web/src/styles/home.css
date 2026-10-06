@@ -1,0 +1,202 @@
+/* ---- Home: search engine front door ------------------------------------------------------- */
+.home {
+  padding: 18px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 100%;
+}
+.home-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.home-head-side {
+  flex: 1 1 0;
+  display: flex;
+}
+.home-head-side.is-end {
+  justify-content: flex-end;
+}
+.home-error {
+  margin: -8px 0 0;
+  justify-content: center;
+}
+
+.search {
+  flex: 0 1 560px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-lg);
+  padding: 0 8px 0 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition:
+    border-color 120ms,
+    box-shadow 120ms;
+}
+.search:focus-within {
+  border-color: var(--ink-light);
+  box-shadow: 0 0 0 2px rgba(182, 156, 255, 0.16);
+}
+.search-icon {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+}
+.search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+}
+.search input:focus-visible {
+  outline: none;
+}
+/* Esc clears the query; the native clear button clashes with the dark field. */
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+.search:focus-within kbd {
+  visibility: hidden;
+}
+
+.home-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.map-placeholder {
+  flex: 999 1 520px;
+  min-width: 0;
+  aspect-ratio: 100 / 60;
+  display: grid;
+  place-items: center;
+  background: var(--canvas);
+  border: 1px solid var(--side-border);
+  border-radius: 10px;
+}
+.map-placeholder p {
+  margin: 0;
+  padding: 0 24px;
+  font-size: 12.5px;
+  color: var(--muted-3);
+  text-align: center;
+}
+
+.results {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.results-title {
+  margin: 0 0 6px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-2);
+}
+.results-sub {
+  margin: 12px 0 6px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-2);
+}
+.results-note {
+  margin: 8px 0 0;
+  padding: 0 8px;
+  font-size: 11.5px;
+  color: var(--muted-3);
+}
+.res-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.res {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--text);
+}
+.res:hover,
+.res:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+}
+.res:focus-visible {
+  outline-offset: -1px;
+}
+.res-title {
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+.res-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted-2);
+}
+.res-snippet {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+@media (max-width: 760px) {
+  .home {
+    padding: 14px 16px 24px;
+  }
+  .home-head {
+    flex-wrap: wrap;
+  }
+  .home-head-side:first-child {
+    display: none;
+  }
+  .search {
+    flex: 1 1 100%;
+    order: 1;
+  }
+  .home-head-side.is-end {
+    order: 2;
+    flex: 1 1 100%;
+  }
+  .home-head-side.is-end .btn {
+    width: 100%;
+  }
+  .search kbd {
+    display: none;
+  }
+  /* Results first on narrow screens; the map placeholder can wait. */
+  .results {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .map-placeholder {
+    order: 2;
+    aspect-ratio: 100 / 40;
+  }
+}

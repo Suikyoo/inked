@@ -1,0 +1,338 @@
+/* ---- App shell: sidebar + main --------------------------------------------------------- */
+.shell {
+  display: grid;
+  grid-template-columns: var(--side-width) minmax(0, 1fr);
+  min-height: 100vh;
+}
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.main:focus {
+  outline: none;
+}
+.topbar,
+.scrim {
+  display: none;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-decoration: none;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 24px 0;
+  padding: 7px 8px 7px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* ---- Sidebar ----------------------------------------------------------------------------- */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--side);
+  border-right: 1px solid var(--side-border);
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 2px 8px;
+}
+.side-nav,
+.side-foot,
+.side-vaults {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.side-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 4px 8px;
+}
+.side-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-2);
+}
+.side-empty {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-2);
+}
+.side-grow {
+  flex: 1 1 auto;
+}
+.side-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--muted-3);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 13px;
+  min-width: 0;
+}
+.item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.item[aria-current='page'],
+.item.active {
+  background: var(--panel-3);
+  color: var(--text);
+}
+.item.active .item-icon,
+.item[aria-current='page'] .item-icon {
+  color: var(--ink-light);
+}
+.item-sm {
+  height: var(--row-sm);
+  font-size: 12.5px;
+}
+.item .count {
+  font-size: 11px;
+  color: var(--muted-3);
+}
+
+/* Vault rows */
+.vault-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.vault-link {
+  flex: 1 1 auto;
+}
+.vault-row.is-open .vault-link {
+  color: var(--text);
+}
+.vault-row .vault-actions {
+  position: absolute;
+  right: 4px;
+  top: 3px;
+  opacity: 0;
+}
+.vault-row:hover .vault-actions,
+.vault-row:focus-within .vault-actions {
+  opacity: 1;
+}
+.vault-row.is-open .vault-link {
+  padding-right: 30px;
+}
+.vault-row:hover .count,
+.vault-row:focus-within .count {
+  visibility: hidden;
+}
+.vault-row:not(.is-open):hover .count,
+.vault-row:not(.is-open):focus-within .count {
+  visibility: visible;
+}
+.vault-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: italic 500 14px/1 var(--font-serif);
+  letter-spacing: 0.005em;
+}
+.is-broken {
+  color: var(--muted-3);
+  font-style: italic;
+}
+.vault-icon {
+  flex: 0 0 auto;
+}
+
+/* ---- Tree --------------------------------------------------------------------------------- */
+.tree-wrap {
+  margin: 1px 0 4px 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.tree,
+.tree-group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tree-group {
+  margin-left: 14px;
+}
+.tree-li:focus-visible {
+  outline: none;
+}
+.tree-li:focus-visible > .tree-row {
+  outline: 2px solid var(--ink-light);
+  outline-offset: -1px;
+}
+.tree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--row-sm);
+  padding: 0 4px 0 2px;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+.tree-row:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.tree-row.is-active {
+  background: var(--row-selected);
+  color: var(--text-strong);
+}
+.tree-chev {
+  width: 12px;
+  flex: 0 0 12px;
+  display: grid;
+  place-items: center;
+  color: var(--muted-3);
+}
+.tree-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-actions {
+  display: none;
+  align-items: center;
+  gap: 1px;
+}
+.tree-row:hover .tree-actions,
+.tree-li:focus-visible > .tree-row .tree-actions,
+.tree-actions:has([aria-expanded='true']) {
+  display: flex;
+}
+.tree-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--ink-light);
+  border-radius: 4px;
+  background: var(--panel);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.tree-rename:focus-visible {
+  outline: none;
+}
+.tree-empty {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-2);
+}
+.tree-error {
+  margin: 4px 8px;
+  font-size: 12px;
+  color: var(--error);
+}
+
+/* ---- Small screens: sidebar becomes a drawer ------------------------------------------ */
+@media (max-width: 760px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 48px;
+    padding: 0 10px;
+    background: var(--side);
+    border-bottom: 1px solid var(--side-border);
+  }
+  .topbar .ibtn {
+    width: 34px;
+    height: 34px;
+  }
+  .sidebar {
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: auto;
+    width: min(300px, 86vw);
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition:
+      transform 200ms var(--ease-out),
+      visibility 0s linear 200ms;
+  }
+  .drawer-open .sidebar {
+    transform: none;
+    visibility: visible;
+    transition: transform 200ms var(--ease-out);
+    box-shadow: 16px 0 40px -20px rgba(0, 0, 0, 0.8);
+  }
+  .drawer-open .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(10, 9, 14, 0.55);
+  }
+  .banner {
+    margin: 10px 16px 0;
+  }
+  /* Touch: always show row actions. */
+  .tree-actions {
+    display: flex;
+  }
+  .vault-row .vault-actions {
+    opacity: 1;
+  }
+}
