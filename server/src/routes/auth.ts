@@ -235,6 +235,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
     });
     ctx.setupToken = null;
     startSession(ctx, reply, user.id);
+    setDeviceCookie(ctx, reply, user);
     return { user: publicUser(user) };
   });
 
@@ -252,7 +253,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
       const name = request.body.username.toLowerCase();
       const user = await checkSecret(ctx, request, 'login', name, request.body.authKey, authOf);
       startSession(ctx, reply, user.id);
-      setDeviceCookie(ctx, reply, user.id);
+      setDeviceCookie(ctx, reply, user);
       return { user: publicUser(user), wrappedUserKey: user.wrapped_user_key };
     },
   );
@@ -284,6 +285,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
       return created;
     });
     startSession(ctx, reply, user.id);
+    setDeviceCookie(ctx, reply, user);
     return { user: publicUser(user) };
   });
 
@@ -346,8 +348,10 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
       const user = await checkSecret(ctx, request, 'recover', name, request.body.recoveryAuth, recoveryOf);
       await replaceCredentials(db, user.id, request.body);
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
-      startSession(ctx, reply, user.id);
-      setDeviceCookie(ctx, reply, user.id);
+      // Re-read: replaceCredentials rotated auth_salt, and the device cookie is bound to the new one.
+      const updated = findUser(db, name)!;
+      startSession(ctx, reply, updated.id);
+      setDeviceCookie(ctx, reply, updated);
       return { user: publicUser(user), wrappedUserKey: request.body.wrappedUserKey };
     },
   );

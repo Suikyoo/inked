@@ -184,4 +184,14 @@ describe('trusted proxy', () => {
       expect(other).toEqual([401]);
     });
   }
+
+  it('with a hop count of 2, keys on the second-to-last X-Forwarded-For entry (C1)', async () => {
+    t = await makeApp({ trustProxy: 2 });
+    const acct = await setupAdmin(t.app);
+    const codes = await hammer(t.app, acct.username, '198.51.100.#, 203.0.113.50, 203.0.113.9', 8);
+    expect(codes.slice(0, 5)).toEqual([401, 401, 401, 401, 401]);
+    expect(codes.slice(5)).toEqual([429, 429, 429]);
+    // A different second-to-last entry is a different client, even with the same last entry.
+    expect(await hammer(t.app, acct.username, '198.51.100.1, 203.0.113.51, 203.0.113.9', 1)).toEqual([401]);
+  });
 });

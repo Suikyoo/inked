@@ -18,10 +18,12 @@ const app = await buildApp({
   },
 });
 
-app.log.info(
-  { trustProxy: config.trustProxy },
-  'proxy trust (a hop count is only safe when the container is reachable solely through the proxy; otherwise use proxy IPs/CIDRs)',
-);
+app.log.info({ trustProxy: config.trustProxy }, 'proxy trust');
+if (typeof config.trustProxy === 'number') {
+  app.log.warn(
+    'a hop count is only safe when the container is reachable solely through the proxy; otherwise use proxy IPs/CIDRs',
+  );
+}
 
 if (!config.cookieSecure) {
   app.log.warn('COOKIE_SECURE is false; set COOKIE_SECURE=true when serving over HTTPS');

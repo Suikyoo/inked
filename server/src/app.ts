@@ -60,7 +60,7 @@ function clientErrorCode(err: FastifyError, status: number): string {
 type FastifyTrustProxy = boolean | string | ((addr: string, hop: number) => boolean);
 
 /** Fastify 5 turns a numeric trustProxy into "trust nobody", so express a hop count as a trust function (hop 0 is the immediate peer). */
-function toFastifyTrustProxy(value: false | number | string): FastifyTrustProxy {
+export function toFastifyTrustProxy(value: false | number | string): FastifyTrustProxy {
   return typeof value === 'number' ? (_addr, hop) => hop < value : value;
 }
 

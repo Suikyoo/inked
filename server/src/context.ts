@@ -51,11 +51,11 @@ export function clearSessionCookie(ctx: AppContext, reply: FastifyReply): void {
 }
 
 /**
- * Issued on every successful password login and recover/finish: base64url(userId) + "." +
- * base64url(HMAC-SHA256(serverSecret, "device:" + userId)). Logout leaves it in place on purpose.
+ * Issued on every successful password login, recover/finish, setup and register: base64url(userId) + "." +
+ * base64url(HMAC-SHA256(serverSecret, "device:" + userId + ":" + auth_salt)). Logout leaves it in place on purpose.
  */
-export function setDeviceCookie(ctx: AppContext, reply: FastifyReply, userId: string): void {
-  const value = `${Buffer.from(userId).toString('base64url')}.${deviceTag(ctx.serverSecret, userId).toString('base64url')}`;
+export function setDeviceCookie(ctx: AppContext, reply: FastifyReply, user: { id: string; auth_salt: string }): void {
+  const value = `${Buffer.from(user.id).toString('base64url')}.${deviceTag(ctx.serverSecret, user.id, user.auth_salt).toString('base64url')}`;
   reply.setCookie(DEVICE_COOKIE, value, {
     httpOnly: true,
     sameSite: 'strict',
@@ -75,7 +75,7 @@ export function isKnownDevice(ctx: AppContext, request: FastifyRequest, user: Us
   if (!value || dot < 0) return false;
   const claimedId = Buffer.from(value.slice(0, dot), 'base64url').toString('utf8');
   const tag = Buffer.from(value.slice(dot + 1), 'base64url');
-  const expected = deviceTag(ctx.serverSecret, claimedId);
+  const expected = deviceTag(ctx.serverSecret, claimedId, user && user.id === claimedId ? user.auth_salt : '');
   const valid = tag.length === expected.length && timingSafeEqual(tag, expected);
   return valid && user !== undefined && claimedId === user.id;
 }

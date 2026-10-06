@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toFastifyTrustProxy } from '../src/app.js';
 import { parseTrustProxy } from '../src/config.js';
 
 describe('parseTrustProxy', () => {
@@ -34,5 +35,19 @@ describe('parseTrustProxy', () => {
   });
   it('rejects garbage', () => {
     expect(() => parseTrustProxy('yes please')).toThrow(/TRUST_PROXY/);
+  });
+});
+
+describe('toFastifyTrustProxy', () => {
+  it('turns a hop count into a function that trusts the first N hops', () => {
+    const f = toFastifyTrustProxy(2) as (addr: string, hop: number) => boolean;
+    expect(typeof f).toBe('function');
+    expect(f('x', 0)).toBe(true);
+    expect(f('x', 1)).toBe(true);
+    expect(f('x', 2)).toBe(false);
+  });
+  it('passes strings and false through', () => {
+    expect(toFastifyTrustProxy(false)).toBe(false);
+    expect(toFastifyTrustProxy('127.0.0.0/8')).toBe('127.0.0.0/8');
   });
 });

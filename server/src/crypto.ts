@@ -48,9 +48,13 @@ export function fakeKdfSalt(serverSecret: Buffer, username: string): string {
   return createHmac('sha256', serverSecret).update(`salt:${username}`).digest().subarray(0, 16).toString('base64url');
 }
 
-/** HMAC-SHA256(serverSecret, "device:" + userId): proves a device cookie was issued by this server for this user. */
-export function deviceTag(serverSecret: Buffer, userId: string): Buffer {
-  return createHmac('sha256', serverSecret).update(`device:${userId}`).digest();
+/**
+ * HMAC-SHA256(serverSecret, "device:" + userId + ":" + authSalt): proves a device cookie was issued by this
+ * server for this user's current password. auth_salt rotates on every password change and recovery, so those
+ * revoke every earlier device cookie.
+ */
+export function deviceTag(serverSecret: Buffer, userId: string, authSalt: string): Buffer {
+  return createHmac('sha256', serverSecret).update(`device:${userId}:${authSalt}`).digest();
 }
 
 /** Loads DATA_DIR/server-secret, creating the directory and a 32-byte secret (mode 0600) on first boot. */

@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -215,6 +216,9 @@ describe('login', () => {
     const codes = responses.map((r) => r.statusCode);
     expect(codes.filter((c) => c === 401).length).toBeLessThanOrEqual(5);
     expect(codes.filter((c) => c === 429).length).toBeGreaterThanOrEqual(35);
+    const limited = responses.filter((r) => r.statusCode === 429);
+    expect(limited.some((r) => typeof r.json().retryAfter === 'number')).toBe(true);
+    expect(limited.some((r) => typeof r.json().retryAfter === 'number' && r.headers['retry-after'] !== undefined)).toBe(true);
   });
 
   const login = (authKey: string, ip: string) =>
@@ -264,8 +268,16 @@ describe('known devices (I-3)', () => {
   });
 
   const secret = () => readFileSync(path.join(t.dataDir, 'server-secret'));
+  const authSaltOf = (userId: string) => {
+    const db = new DatabaseSync(path.join(t.dataDir, 'inked.db'), { readOnly: true });
+    try {
+      return (db.prepare('SELECT auth_salt FROM users WHERE id = ?').get(userId) as { auth_salt: string }).auth_salt;
+    } finally {
+      db.close();
+    }
+  };
   const deviceValue = (userId: string) =>
-    `${Buffer.from(userId).toString('base64url')}.${createHmac('sha256', secret()).update(`device:${userId}`).digest('base64url')}`;
+    `${Buffer.from(userId).toString('base64url')}.${createHmac('sha256', secret()).update(`device:${userId}:${authSaltOf(userId)}`).digest('base64url')}`;
   const deviceCookie = (res: { cookies: Array<{ name: string; value: string }> }) =>
     res.cookies.find((c) => c.name === 'inked_device');
   const login = (authKey: string, ip: string, device?: string) =>
@@ -338,6 +350,84 @@ describe('known devices (I-3)', () => {
       expect((await login(admin.authKey, '10.24.0.1', device)).statusCode, device).toBe(429);
     }
   });
+
+  const changePassword = (next: ReturnType<typeof registerBody>) =>
+    call(t.app, 'POST', '/api/auth/password', {
+      cookie: admin.cookie,
+      body: { currentAuthKey: admin.authKey, kdfSalt: next.kdfSalt, kdfParams: next.kdfParams, authKey: next.authKey, wrappedUserKey: next.wrappedUserKey },
+    });
+  const exhaust = async (prefix: string) => {
+    for (let i = 0; i < 30; i++) expect((await login(key32(), `${prefix}.${i}`)).statusCode).toBe(401);
+  };
+
+  it('a password change revokes earlier device cookies (A1)', async () => {
+    const device = deviceCookie(await login(admin.authKey, '10.19.0.1'))!.value;
+    const next = registerBody('admin');
+    expect((await changePassword(next)).statusCode).toBe(200);
+    await exhaust('10.30.0');
+    expect((await login(next.authKey, '10.31.0.1', device)).statusCode).toBe(429);
+  });
+
+  it('a cookie minted after a password change exempts (A1)', async () => {
+    const next = registerBody('admin');
+    expect((await changePassword(next)).statusCode).toBe(200);
+    const fresh = await call(t.app, 'POST', '/api/auth/login', { body: { username: 'admin', authKey: next.authKey }, ip: '10.32.0.1' });
+    expect(fresh.statusCode).toBe(200);
+    const device = deviceCookie(fresh)!.value;
+    expect(device).toBe(deviceValue(admin.userId));
+    await exhaust('10.33.0');
+    expect((await login(next.authKey, '10.34.0.1')).statusCode).toBe(429);
+    expect((await login(next.authKey, '10.34.0.2', device)).statusCode).toBe(200);
+  });
+
+  it('recovery revokes earlier device cookies (A1)', async () => {
+    const device = deviceCookie(await login(admin.authKey, '10.19.0.1'))!.value;
+    const next = registerBody('admin');
+    const res = await call(t.app, 'POST', '/api/auth/recover/finish', {
+      body: { username: 'admin', recoveryAuth: admin.recoveryAuth, kdfSalt: next.kdfSalt, kdfParams: next.kdfParams, authKey: next.authKey, wrappedUserKey: next.wrappedUserKey },
+    });
+    expect(res.statusCode).toBe(200);
+    const fresh = deviceCookie(res)!.value;
+    expect(fresh).not.toBe(device);
+    await exhaust('10.35.0');
+    expect((await login(next.authKey, '10.36.0.1', device)).statusCode).toBe(429);
+    expect((await login(next.authKey, '10.36.0.2', fresh)).statusCode).toBe(200);
+  });
+});
+
+describe('device cookie on setup and register (A1)', () => {
+  const deviceHeader = (res: { headers: Record<string, unknown> }) =>
+    ([] as string[]).concat(res.headers['set-cookie'] as string | string[]).find((c) => c.startsWith('inked_device='))!;
+  const saltOf = (userId: string) => {
+    const db = new DatabaseSync(path.join(t.dataDir, 'inked.db'), { readOnly: true });
+    try {
+      return (db.prepare('SELECT auth_salt FROM users WHERE id = ?').get(userId) as { auth_salt: string }).auth_salt;
+    } finally {
+      db.close();
+    }
+  };
+  const expectDevice = (res: { statusCode: number; headers: Record<string, unknown> }, userId: string) => {
+    expect(res.statusCode).toBe(200);
+    const raw = deviceHeader(res);
+    expect(raw).toBeDefined();
+    expect(raw).toContain('Path=/api/auth');
+    expect(raw).toContain('HttpOnly');
+    expect(raw).toContain('SameSite=Strict');
+    const tag = createHmac('sha256', readFileSync(path.join(t.dataDir, 'server-secret')))
+      .update(`device:${userId}:${saltOf(userId)}`)
+      .digest('base64url');
+    expect(raw.split(';')[0]).toBe(`inked_device=${Buffer.from(userId).toString('base64url')}.${tag}`);
+  };
+
+  it('setup and register set inked_device (A1)', async () => {
+    const body = setupBody('admin');
+    const setup = await call(t.app, 'POST', '/api/setup', { body });
+    expectDevice(setup, body.userId);
+    const bob = registerBody('bob');
+    const invite = await call(t.app, 'POST', '/api/invites', { cookie: sessionCookie(setup), body: {} });
+    const reg = await call(t.app, 'POST', '/api/auth/register', { body: { ...bob, inviteToken: invite.json().token } });
+    expectDevice(reg, bob.userId);
+  });
 });
 
 describe('auth params', () => {
@@ -409,6 +499,44 @@ describe('password change', () => {
     await setupAdmin(t.app);
     const res = await call(t.app, 'POST', '/api/auth/password', { body: {} });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('credential-change lockouts (C1)', () => {
+  const next = () => registerBody('admin');
+  it('locks /api/auth/password after 5 wrong currentAuthKey', async () => {
+    const admin = await setupAdmin(t.app);
+    const n = next();
+    const body = (currentAuthKey: string) => ({ currentAuthKey, kdfSalt: n.kdfSalt, kdfParams: n.kdfParams, authKey: n.authKey, wrappedUserKey: n.wrappedUserKey });
+    for (let i = 0; i < 5; i++) {
+      expect((await call(t.app, 'POST', '/api/auth/password', { cookie: admin.cookie, body: body(key32()) })).statusCode).toBe(403);
+    }
+    const locked = await call(t.app, 'POST', '/api/auth/password', { cookie: admin.cookie, body: body(admin.authKey) });
+    expect(locked.statusCode).toBe(429);
+    expect(locked.json().error).toBe('locked');
+  });
+
+  it('locks /api/auth/recovery-key after 5 wrong currentAuthKey', async () => {
+    const admin = await setupAdmin(t.app);
+    const body = (currentAuthKey: string) => ({ currentAuthKey, recoveryAuth: key32(), wrappedUserKeyRecovery: fakeCipher(60) });
+    for (let i = 0; i < 5; i++) {
+      expect((await call(t.app, 'POST', '/api/auth/recovery-key', { cookie: admin.cookie, body: body(key32()) })).statusCode).toBe(403);
+    }
+    const locked = await call(t.app, 'POST', '/api/auth/recovery-key', { cookie: admin.cookie, body: body(admin.authKey) });
+    expect(locked.statusCode).toBe(429);
+    expect(locked.json().error).toBe('locked');
+  });
+
+  it('rejects /api/auth/recovery-key without X-Inked (CSRF)', async () => {
+    const admin = await setupAdmin(t.app);
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/api/auth/recovery-key',
+      headers: { cookie: `inked_session=${admin.cookie}` },
+      payload: { currentAuthKey: admin.authKey, recoveryAuth: key32(), wrappedUserKeyRecovery: fakeCipher(60) },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('csrf');
   });
 });
 
