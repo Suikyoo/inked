@@ -60,6 +60,7 @@ Internet ──HTTPS──▶ Cloudflare edge ══tunnel══▶ cloudflared 
     - `inked-internal`
     - `cloudflared-net: { aliases: [inked-nginx] }`
   - `volumes: ./deploy/nginx/templates:/etc/nginx/templates:ro`. The official image runs `envsubst` on `*.template` into `/etc/nginx/conf.d/`.
+  - `deploy/nginx/empty.conf` is mounted over the image's `conf.d/default.conf` so the image's default server doesn't answer first.
   - `environment: CLOUDFLARED_NET_CIDR: ${CLOUDFLARED_NET_CIDR:-172.16.0.0/12}`
   - `healthcheck`: `wget -q -O /dev/null http://127.0.0.1/healthz` every 30 s. nginx answers `/healthz` itself with 200.
 - **`networks`**

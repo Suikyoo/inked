@@ -1,6 +1,12 @@
 # Follow-ups after the round-1 review fixes
 
-These are findings from the 2026-10-06 review-fix plan that were parked or deferred as non-blocking. The final review judged none of them required before merge.
+Resolved by `docs/superpowers/specs/2026-10-07-deploy-and-followups-design.md` (plan `docs/superpowers/plans/2026-10-07-deploy-and-followups.md`).
+
+## History
+
+The original list, kept for reference:
+
+These were findings from the 2026-10-06 review-fix plan that were parked or deferred as non-blocking. The final review judged none of them required before merge.
 
 ## Parked after the final review
 - device-cookie HMAC not bound to a credential version (survives password change/recovery, 180 d) — matches the I-3 ruling; follow-up to add auth_salt to HMAC input — cost if wrong: a past device/stolen cookie skips only the account cap, per-IP limit still applies.

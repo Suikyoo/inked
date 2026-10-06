@@ -28,16 +28,16 @@ docker network inspect cloudflared-net >/dev/null 2>&1 || docker network create 
 cp .env.example .env
 ```
 
-Set `CLOUDFLARED_NET_CIDR` in `.env` to the subnet of `cloudflared-net`. nginx trusts the `CF-Connecting-IP` header only from this subnet:
+Set `CLOUDFLARED_NET_CIDR` in `.env` to the subnet of `cloudflared-net`. nginx trusts the `CF-Connecting-IP` header only from this subnet. If the value is wrong, nginx ignores `CF-Connecting-IP` and every visitor shares the one lockout bucket of the proxy's address, so confirm the subnet with this command:
 
 ```bash
 docker network inspect cloudflared-net --format '{{(index .IPAM.Config 0).Subnet}}'
 ```
 
-On Linux, make the data directory writable by the container user (uid 1000):
+The encrypted database lives in `INKED_DATA_DIR` (default `./data`, mounted at `/data` in the container). Set it in `.env` to keep the data elsewhere. On Linux, make that directory writable by the container user (uid 1000):
 
 ```bash
-mkdir -p data && sudo chown 1000:1000 data
+mkdir -p "${INKED_DATA_DIR:-./data}" && sudo chown 1000:1000 "${INKED_DATA_DIR:-./data}"
 ```
 
 ## 3. Cloudflare dashboard
@@ -50,6 +50,20 @@ In the tunnel's configuration, add a Public hostname, for example `notes.example
 docker compose up -d --build
 ```
 
+nginx's `default.conf` is masked by `deploy/nginx/empty.conf` (mounted over it), so the nginx image's default server, which would otherwise answer first on port 80, never does. `deploy/nginx/templates/inked.conf.template` is the only server.
+
+### Rebuilding Inked
+
+nginx resolves the `inked` address once, at startup. After recreating the `inked` container on its own (for example `docker compose up -d --build inked`), restart nginx too, or it keeps sending traffic to the old address:
+
+```bash
+docker compose restart nginx
+```
+
+### Request size
+
+The effective request limit is the app's 4 MiB. nginx allows 5 MB (`client_max_body_size 5m`), so nginx itself never cuts off a legitimate request; anything between the two limits reaches Inked, which answers 413.
+
 ## 5. First run
 
 ```bash
@@ -60,18 +74,20 @@ Copy the first-run setup token, open the hostname, and create the admin account.
 
 ## 6. Backups
 
-`./data` holds only ciphertext and hashes. The SQLite database runs in WAL mode, so for a consistent copy either stop the container first (`docker compose stop inked`) or use `sqlite3 <db> ".backup <file>"`.
+`INKED_DATA_DIR` (default `./data`) holds only ciphertext and hashes. The SQLite database runs in WAL mode, so for a consistent copy either stop the container first (`docker compose stop inked`) or use `sqlite3 <db> ".backup <file>"`.
 
 ## 7. Accepted risk
 
-Any container placed on `cloudflared-net` can reach nginx and could forge `CF-Connecting-IP`, which would let it choose the IP that login lockouts are keyed on. Only trusted containers belong on that network. The per-account lockout cap still applies.
+Any container placed on `cloudflared-net` can reach nginx and could forge `CF-Connecting-IP`, which would let it choose the IP that login lockouts are keyed on. Only trusted containers belong on that network. The Docker host itself can do the same: its bridge gateway address sits inside the trusted range, so a process on the host can also set `CF-Connecting-IP`. The per-account lockout cap still applies.
 
 ## Local test
 
 ```bash
 docker network create cloudflared-net   # once
-docker compose -f compose.yaml -f compose.local.yaml up -d --build
+INKED_DATA_DIR=$(mktemp -d) docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
 bash deploy/smoke-test.sh
 ```
+
+The smoke test needs fresh data on every run, because lockout counters persist between runs. Tear the stack down (`docker compose -p inked-test -f compose.yaml -f compose.local.yaml down`) and use a new throwaway `INKED_DATA_DIR` for the next one. On Linux the throwaway directory must be writable by uid 1000 (`chown 1000:1000`).
 
 The override publishes nginx on `127.0.0.1:${INKED_PORT:-8088}` and turns off `Secure` cookies so plain HTTP works.
