@@ -254,8 +254,14 @@ describe('AppStore', () => {
     await s.lock();
     expect(s.getState().pendingCount).toBe(1);
     api.updateNote.mockResolvedValue({ note: { updatedAt: 't1' } });
+    // Without a session nothing is sent; signing back in sends it.
+    const before = api.updateNote.mock.calls.length;
     await s.retryPending();
-    expect(s.getState().pendingCount).toBe(0);
+    expect(api.updateNote.mock.calls.length).toBe(before);
+    expect(s.getState().pendingCount).toBe(1);
+    mockUnlock();
+    await s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
     const sent = api.updateNote.mock.calls.at(-1)!;
     expect(sent[0]).toBe(noteId);
     expect(sent[1].encBody).toMatch(/^v1\./);
@@ -569,6 +575,20 @@ describe('AppStore', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('drops a vault rename that finishes after lock (minor)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    let release!: (v: unknown) => void;
+    api.updateVault.mockReturnValue(new Promise((r) => (release = r)));
+    const p = s.updateVault(vaultId, { name: 'Secret name', color: '#45A89E' }).catch((e) => e);
+    await vi.waitFor(() => expect(api.updateVault).toHaveBeenCalled());
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    release({ vault: { updatedAt: 't9' } });
+    await p;
+    expect(s.getState().vaults).toEqual({});
   });
 
   it('refuses to queue a body the server would never take (I4)', async () => {

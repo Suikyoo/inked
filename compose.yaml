@@ -18,5 +18,8 @@ services:
       # A hop count ("1") is only safe when the container is reachable solely through the proxy;
       # otherwise give the proxy's IP or CIDR (for a Docker network, e.g. "172.16.0.0/12").
       # Leave unset when exposed directly.
+      # Behind a proxy, also bind the published port to localhost so only the proxy can reach Inked
+      # (ports: - "127.0.0.1:${INKED_PORT:-8088}:8080"), and give the narrowest CIDR that covers the proxy
+      # (its exact IP, or the compose network's subnet rather than all of 172.16.0.0/12).
       # TRUST_PROXY: "172.16.0.0/12"
     restart: unless-stopped

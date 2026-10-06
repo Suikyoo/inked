@@ -29,6 +29,8 @@ export interface AppOptions {
 declare module 'fastify' {
   interface FastifyInstance {
     db: Db;
+    /** The pending first-run setup token, null once setup is done (read-only; for tests). */
+    readonly setupToken: string | null;
   }
 }
 
@@ -84,7 +86,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     accountLimiter: new FailureLimiter(30, 15 * 60_000, 15 * 60_000),
     setupToken: opts.setupToken ?? (countUsers(db) === 0 ? randomBytes(16).toString('base64url') : null),
   };
-  if (ctx.setupToken && !opts.setupToken) app.log.warn(`Inked first-run setup token: ${ctx.setupToken}`);
+  if (ctx.setupToken && !opts.setupToken) {
+    app.log.warn(`Inked first-run setup token: ${ctx.setupToken}`);
+    // Unconditional, so the token is visible even with LOG_LEVEL=silent.
+    process.stderr.write(`Inked first-run setup token: ${ctx.setupToken}\n`);
+  }
+  app.decorate('setupToken', { getter: () => ctx.setupToken });
 
   // Housekeeping: drop expired sessions now and hourly.
   deleteExpiredSessions(db);

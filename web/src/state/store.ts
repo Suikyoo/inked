@@ -669,8 +669,11 @@ export class AppStore {
   }
 
   async updateVault(id: string, meta: { name: string; color: string }): Promise<void> {
+    const ep = this.epoch;
     const encMeta = await encryptVaultMeta(this.vaultKey(id), id, meta);
     const { vault } = await api.updateVault(id, encMeta);
+    // Locked meanwhile: the rename landed, but the plaintext name must not reach the new state.
+    if (ep !== this.epoch) return;
     this.set((s) => ({
       vaults: { ...s.vaults, [id]: { ...s.vaults[id], ...meta, updatedAt: vault.updatedAt } },
     }));
@@ -970,8 +973,8 @@ export class AppStore {
     let dropped = 0;
     for (const entry of [...this.pending]) {
       if (entry.held || !this.pending.includes(entry)) continue;
-      // Never send one account's edits with another account's session.
-      if (entry.owner && userId && entry.owner !== userId) continue;
+      // Only ever send with the owning account's session (never another's, never none).
+      if (!userId || entry.owner !== userId) continue;
       const out = await sendPending(entry.item, { updateNote: api.updateNote, createNote: api.createNote });
       if (out === 'retry') {
         entry.item.attempts++;

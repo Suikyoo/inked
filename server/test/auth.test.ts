@@ -1,7 +1,9 @@
 import { createHmac, randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildApp } from '../src/app.js';
 import * as cryptoMod from '../src/crypto.js';
 import { type Account, call, fakeCipher, inviteUser, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
 
@@ -66,6 +68,50 @@ describe('setup hardening', () => {
     expect(missing.statusCode).toBe(400);
     const ok = await call(t.app, 'POST', '/api/setup', { body: { ...body, setupToken: TEST_SETUP_TOKEN } });
     expect(ok.statusCode).toBe(200);
+  });
+
+  it('generates a setup token on an empty data dir, prints it to stderr and clears it after setup', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'inked-test-'));
+    const lines: string[] = [];
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    let app: Awaited<ReturnType<typeof buildApp>> | undefined;
+    try {
+      app = await buildApp({ dataDir, webDist: path.join(dataDir, 'no-web'), cookieSecure: false, logger: { level: 'silent' } });
+      write.mockRestore();
+      const line = lines.find((l) => l.startsWith('Inked first-run setup token: '));
+      expect(line).toMatch(/^Inked first-run setup token: [A-Za-z0-9_-]{22}\n$/);
+      const token = line!.slice('Inked first-run setup token: '.length, -1);
+      expect(app.setupToken).toBe(token);
+      const res = await call(app, 'POST', '/api/setup', { body: { ...registerBody('admin'), setupToken: token } });
+      expect(res.statusCode).toBe(200);
+      expect(app.setupToken).toBeNull();
+    } finally {
+      write.mockRestore();
+      await app?.close();
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it('does not generate a setup token once a user exists', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'inked-test-'));
+    const opts = { dataDir, webDist: path.join(dataDir, 'no-web'), cookieSecure: false };
+    const first = await buildApp({ ...opts, setupToken: TEST_SETUP_TOKEN });
+    await setupAdmin(first);
+    await first.close();
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    let app: Awaited<ReturnType<typeof buildApp>> | undefined;
+    try {
+      app = await buildApp(opts);
+      expect(app.setupToken).toBeNull();
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+      await app?.close();
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   });
 
   it('rejects weak kdf params (M5)', async () => {
