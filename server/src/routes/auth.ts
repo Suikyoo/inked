@@ -135,16 +135,15 @@ async function checkSecret(
   stored: (u: UserRow) => { salt: string; hash: string },
 ): Promise<UserRow> {
   const key = `${scope}|${request.ip}|${name}`;
-  const wait = ctx.limiter.retryAfter(key);
+  const accountKey = `${scope}|${name}`;
+  const wait = Math.max(ctx.limiter.attempt(key), ctx.accountLimiter.attempt(accountKey));
   if (wait > 0) throw lockedError(wait);
 
   const user = findUser(ctx.db, name);
   const ok = user ? await verifySecret(secret, stored(user)) : (await burnScrypt(secret), false);
-  if (!user || !ok) {
-    ctx.limiter.fail(key);
-    throw invalidCredentials();
-  }
+  if (!user || !ok) throw invalidCredentials();
   ctx.limiter.reset(key);
+  ctx.accountLimiter.reset(accountKey);
   return user;
 }
 
@@ -262,10 +261,9 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
     async (request) => {
       const user = currentUser(request);
       const key = `password|${request.ip}|${user.id}`;
-      const wait = ctx.limiter.retryAfter(key);
+      const wait = ctx.limiter.attempt(key);
       if (wait > 0) throw lockedError(wait);
       if (!(await verifySecret(request.body.currentAuthKey, authOf(user)))) {
-        ctx.limiter.fail(key);
         // 403 rather than 401: the session is fine, the proof is not.
         throw new ApiError(403, 'invalid_credentials');
       }

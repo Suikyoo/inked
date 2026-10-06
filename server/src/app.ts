@@ -66,13 +66,20 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.decorateRequest('user', null);
   app.decorateRequest('sessionHash', null);
 
-  const ctx: AppContext = { db, serverSecret, cookieSecure: opts.cookieSecure, limiter: new FailureLimiter() };
+  const ctx: AppContext = {
+    db,
+    serverSecret,
+    cookieSecure: opts.cookieSecure,
+    limiter: new FailureLimiter(),
+    accountLimiter: new FailureLimiter(30, 15 * 60_000, 15 * 60_000),
+  };
 
   // Housekeeping: drop expired sessions now and hourly.
   deleteExpiredSessions(db);
   const sweeper = setInterval(() => {
     deleteExpiredSessions(db);
     ctx.limiter.prune();
+    ctx.accountLimiter.prune();
   }, 60 * 60 * 1000);
   sweeper.unref();
   app.addHook('onClose', async () => {

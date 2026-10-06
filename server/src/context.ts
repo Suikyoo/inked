@@ -10,6 +10,8 @@ export interface AppContext {
   serverSecret: Buffer;
   cookieSecure: boolean;
   limiter: FailureLimiter;
+  /** Per-username cap, independent of client IP. */
+  accountLimiter: FailureLimiter;
 }
 
 declare module 'fastify' {

@@ -24,6 +24,18 @@ export class FailureLimiter {
     return Math.ceil((entry.lockedUntil - now) / 1000);
   }
 
+  /**
+   * Records an attempt up front (as a provisional failure) unless the key is locked.
+   * Returns seconds to wait when locked (nothing recorded), else 0. Call reset() on success.
+   * Counting before the async verification is what stops parallel bursts.
+   */
+  attempt(key: string, now = Date.now()): number {
+    const wait = this.retryAfter(key, now);
+    if (wait > 0) return wait;
+    this.fail(key, now);
+    return 0;
+  }
+
   fail(key: string, now = Date.now()): void {
     let entry = this.entries.get(key);
     if (!entry || now - entry.firstFailAt > this.windowMs) {

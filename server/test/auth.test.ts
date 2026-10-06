@@ -106,6 +106,17 @@ describe('login', () => {
     expect(other.statusCode).toBe(200);
   });
 
+  it('locks out a parallel burst of wrong logins (I1)', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 40 }, () =>
+        call(t.app, 'POST', '/api/auth/login', { body: { username: 'admin', authKey: key32() } }),
+      ),
+    );
+    const codes = responses.map((r) => r.statusCode);
+    expect(codes.filter((c) => c === 401).length).toBeLessThanOrEqual(5);
+    expect(codes.filter((c) => c === 429).length).toBeGreaterThanOrEqual(35);
+  });
+
   it('logout ends the session', async () => {
     const out = await call(t.app, 'POST', '/api/auth/logout', { cookie: admin.cookie });
     expect(out.json()).toEqual({ ok: true });
