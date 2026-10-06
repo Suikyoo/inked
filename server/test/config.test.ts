@@ -17,6 +17,21 @@ describe('parseTrustProxy', () => {
   it('accepts IP / CIDR lists', () => {
     expect(parseTrustProxy('172.16.0.0/12, 10.0.0.5')).toBe('172.16.0.0/12,10.0.0.5');
   });
+  it('treats 0 and off as false, ignoring case and whitespace', () => {
+    expect(parseTrustProxy('0')).toBe(false);
+    expect(parseTrustProxy('off')).toBe(false);
+    expect(parseTrustProxy('  TRUE ')).toBe(1);
+    expect(parseTrustProxy(' FALSE ')).toBe(false);
+  });
+  it('accepts IPv6 addresses and CIDRs', () => {
+    expect(parseTrustProxy('fd00::/8')).toBe('fd00::/8');
+    expect(parseTrustProxy('::1')).toBe('::1');
+  });
+  it('rejects malformed addresses and prefixes', () => {
+    for (const bad of ['...', ':::', '1.2.3.4/999', '1.2.3.4/33', 'fd00::/129', '1.2.3.4/', '1.2.3.4/8/8']) {
+      expect(() => parseTrustProxy(bad), bad).toThrow(/TRUST_PROXY/);
+    }
+  });
   it('rejects garbage', () => {
     expect(() => parseTrustProxy('yes please')).toThrow(/TRUST_PROXY/);
   });

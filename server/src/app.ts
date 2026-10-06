@@ -52,14 +52,20 @@ function clientErrorCode(err: FastifyError, status: number): string {
   return 'bad_request';
 }
 
+type FastifyTrustProxy = boolean | string | ((addr: string, hop: number) => boolean);
+
+/** Fastify 5 turns a numeric trustProxy into "trust nobody", so express a hop count as a trust function (hop 0 is the immediate peer). */
+function toFastifyTrustProxy(value: false | number | string): FastifyTrustProxy {
+  return typeof value === 'number' ? (_addr, hop) => hop < value : value;
+}
+
 export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const serverSecret = loadServerSecret(opts.dataDir);
   const db = openDb(path.join(opts.dataDir, 'inked.db'));
 
   const app = Fastify({
     bodyLimit: BODY_LIMIT,
-    // Fastify supports a hop count at runtime, but its typings omit `number`.
-    trustProxy: (opts.trustProxy ?? false) as string | boolean,
+    trustProxy: toFastifyTrustProxy(opts.trustProxy ?? false),
     ajv: { customOptions: { coerceTypes: false } },
     logger: opts.logger ?? false,
   });

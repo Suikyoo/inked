@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,15 +19,22 @@ function bool(value: string | undefined, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+function validProxyEntry(entry: string): boolean {
+  const [addr, prefix, ...rest] = entry.split('/');
+  const family = isIP(addr);
+  if (!family || rest.length) return false;
+  if (prefix === undefined) return true;
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128);
+}
+
 export function parseTrustProxy(value: string | undefined): false | number | string {
   const v = (value ?? '').trim().toLowerCase();
   if (v === '' || v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
   // "true" would make Fastify trust every hop, so a client could forge its IP. One hop is what a single reverse proxy needs.
   if (v === 'true' || v === 'yes' || v === 'on') return 1;
   if (/^\d+$/.test(v)) return Number(v);
-  const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
-  const ipish = /^[0-9a-f:.]+(\/\d{1,3})?$/;
-  if (parts.length && parts.every((p) => ipish.test(p))) return parts.join(',');
+  const parts = v.split(',').map((x) => x.trim()).filter(Boolean);
+  if (parts.length && parts.every(validProxyEntry)) return parts.join(',');
   throw new Error(`Invalid TRUST_PROXY: ${value} (use a hop count like 1, or proxy IPs/CIDRs)`);
 }
 

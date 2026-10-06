@@ -11,7 +11,9 @@ services:
     environment:
       # Set to "true" when Inked is served over HTTPS (e.g. behind a TLS reverse proxy).
       COOKIE_SECURE: "false"
-      # Behind a reverse proxy (Traefik, Caddy, nginx) set this to the number of proxy hops (usually 1)
-      # or the proxy's IP/CIDR, so login lockouts apply per real client IP. Leave unset when exposed directly.
-      # TRUST_PROXY: "1"
+      # Behind a reverse proxy (Traefik, Caddy, nginx) set this so login lockouts apply per real client IP.
+      # A hop count ("1") is only safe when the container is reachable solely through the proxy;
+      # otherwise give the proxy's IP or CIDR (for a Docker network, e.g. "172.16.0.0/12").
+      # Leave unset when exposed directly.
+      # TRUST_PROXY: "172.16.0.0/12"
     restart: unless-stopped

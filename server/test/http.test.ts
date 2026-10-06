@@ -158,20 +158,30 @@ describe('SPA hosting', () => {
 });
 
 describe('trusted proxy', () => {
-  it('with one trusted hop, a client-forged X-Forwarded-For cannot dodge the lockout (I2)', async () => {
-    t = await makeApp({ trustProxy: 1 });
-    const acct = await setupAdmin(t.app);
+  async function hammer(app: TestApp['app'], username: string, xff: string, n: number) {
     const codes: number[] = [];
-    for (let i = 0; i < 8; i++) {
-      // The proxy appends the real client (here always 203.0.113.9) after the forged value.
-      const r = await t.app.inject({
+    for (let i = 0; i < n; i++) {
+      const r = await app.inject({
         method: 'POST',
         url: '/api/auth/login',
-        headers: { 'x-inked': '1', 'x-forwarded-for': `198.51.100.${i}, 203.0.113.9` },
-        payload: { username: acct.username, authKey: key32() },
+        headers: { 'x-inked': '1', 'x-forwarded-for': xff.replace('#', String(i)) },
+        payload: { username, authKey: key32() },
       });
       codes.push(r.statusCode);
     }
-    expect(codes.slice(5)).toEqual([429, 429, 429]);
-  });
+    return codes;
+  }
+
+  for (const [label, trustProxy] of [['one trusted hop', 1], ['a CIDR covering the proxy', '127.0.0.0/8']] as const) {
+    it(`with ${label}, the lockout keys on the real client IP, not a forged X-Forwarded-For (I2)`, async () => {
+      t = await makeApp({ trustProxy });
+      const acct = await setupAdmin(t.app);
+      // The proxy appends the real client (always 203.0.113.9) after the forged value.
+      const codes = await hammer(t.app, acct.username, '198.51.100.#, 203.0.113.9', 8);
+      expect(codes.slice(5)).toEqual([429, 429, 429]);
+      // A different real client is not locked out by that.
+      const other = await hammer(t.app, acct.username, '198.51.100.1, 203.0.113.10', 1);
+      expect(other).toEqual([401]);
+    });
+  }
 });
