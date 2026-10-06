@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Logo, Wordmark } from '../brand/Logo';
 import { useAppState, useStore } from '../state/StoreContext';
+import type { AppStore } from '../state/store';
 import { CloseIcon, LockIcon, MenuIcon } from './Icons';
 import { Sidebar } from './Sidebar';
 
@@ -14,20 +15,21 @@ function isEditable(el: EventTarget | null): boolean {
   return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
 }
 
-/** Locks after 15 minutes without keyboard, pointer or wheel input. */
-function useIdleLock(onIdle: () => void) {
-  const last = useRef(Date.now());
+/**
+ * Locks after 15 minutes without keyboard, pointer or wheel input in any tab of this browser
+ * (activity is shared through the store, so a background tab never locks under an active one).
+ */
+function useIdleLock(store: AppStore, onIdle: () => void) {
   const cb = useRef(onIdle);
   cb.current = onIdle;
   useEffect(() => {
-    const bump = () => {
-      last.current = Date.now();
-    };
+    const bump = () => store.markActive();
+    bump(); // unlocking counts as activity
     const events = ['keydown', 'pointerdown', 'pointermove', 'wheel', 'touchstart', 'input'] as const;
     for (const ev of events) window.addEventListener(ev, bump, { passive: true, capture: true });
     // Checking on an interval (and on tab focus) also covers a sleeping laptop.
     const check = () => {
-      if (Date.now() - last.current >= IDLE_MS) cb.current();
+      if (store.idleMs() >= IDLE_MS) cb.current();
     };
     const t = window.setInterval(check, 15_000);
     document.addEventListener('visibilitychange', check);
@@ -36,7 +38,7 @@ function useIdleLock(onIdle: () => void) {
       window.clearInterval(t);
       document.removeEventListener('visibilitychange', check);
     };
-  }, []);
+  }, [store]);
 }
 
 export function AppShell() {
@@ -47,7 +49,7 @@ export function AppShell() {
   const [drawer, setDrawer] = useState(false);
   const menuBtn = useRef<HTMLButtonElement>(null);
 
-  useIdleLock(() => void store.lock('Locked after 15 minutes without activity.'));
+  useIdleLock(store, () => void store.lock('Locked after 15 minutes without activity.'));
 
   // Close the mobile drawer on navigation.
   useEffect(() => setDrawer(false), [location.pathname]);

@@ -231,6 +231,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
             aria-label={`Markdown source of ${head?.title ?? 'note'}`}
             value={editor.body}
             onChange={(e) => editor.setBody(e.target.value)}
+            readOnly={state.locking}
             spellCheck={prefs.spellcheck()}
             placeholder={'# Heading\n\nWrite in Markdown. Link notes with [[Note title]].'}
           />

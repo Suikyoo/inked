@@ -4,9 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   status: vi.fn(), me: vi.fn(), params: vi.fn(), login: vi.fn(), logout: vi.fn(), setup: vi.fn(),
   listVaults: vi.fn(), createVault: vi.fn(), createNote: vi.fn(), getNote: vi.fn(), updateNote: vi.fn(),
-  rotateRecoveryKey: vi.fn(), tree: vi.fn(), bodies: vi.fn(), createFolder: vi.fn(),
+  rotateRecoveryKey: vi.fn(), tree: vi.fn(), bodies: vi.fn(), createFolder: vi.fn(), updateVault: vi.fn(),
 }));
-vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
+/** The store's 401 handler, as the real client would call it. */
+const unauthorized = vi.hoisted(() => ({ handler: null as null | (() => unknown) }));
+vi.mock('../api/client', async (orig) => ({
+  ...(await orig<typeof import('../api/client')>()),
+  api,
+  setUnauthorizedHandler: (fn: () => unknown) => { unauthorized.handler = fn; },
+}));
 vi.mock('../crypto/kdf', async (orig) => {
   const m = await orig<typeof import('../crypto/kdf')>();
   const fast = { alg: 'argon2id' as const, m: 1024, t: 1, p: 1 };
@@ -19,7 +25,34 @@ vi.mock('../lib/argon2Worker', async () => {
 });
 
 import { ApiError } from '../api/client';
+import { newSaveState, settle } from '../pages/useNoteEditor';
 import { AppStore, LockedError } from './store';
+
+/** In-memory BroadcastChannel: instances created in the same test share one bus; delivery is async. */
+class FakeChannel {
+  static bus: FakeChannel[] = [];
+  private readonly peers = FakeChannel.bus;
+  onmessage: ((e: { data: unknown }) => void) | null = null;
+  readonly received: unknown[] = [];
+  constructor(readonly name: string) {
+    this.peers.push(this);
+  }
+  postMessage(data: unknown) {
+    for (const ch of this.peers) {
+      if (ch === this || ch.name !== this.name) continue;
+      const copy = structuredClone(data);
+      setTimeout(() => {
+        ch.received.push(copy);
+        ch.onmessage?.({ data: copy });
+      }, 0);
+    }
+  }
+  close() {
+    const i = this.peers.indexOf(this);
+    if (i >= 0) this.peers.splice(i, 1);
+  }
+}
+vi.stubGlobal('BroadcastChannel', FakeChannel);
 
 async function registeredStore() {
   api.setup.mockImplementation(async (body: { userId: string; username: string }) => ({ user: { id: body.userId, username: body.username, isAdmin: true } }));
@@ -29,13 +62,24 @@ async function registeredStore() {
   return s;
 }
 
+/** Lets `unlock('ann', …)` sign the registered account back in. */
+function mockUnlock(vaults: unknown[] = []) {
+  const setupBody = api.setup.mock.calls[0][0];
+  api.params.mockResolvedValue({ kdfSalt: setupBody.kdfSalt, kdfParams: setupBody.kdfParams });
+  api.login.mockResolvedValue({ user: { id: setupBody.userId, username: 'ann', isAdmin: true }, wrappedUserKey: setupBody.wrappedUserKey });
+  api.listVaults.mockResolvedValue({ vaults });
+  api.tree.mockResolvedValue({ folders: [], notes: [] });
+  api.bodies.mockResolvedValue({ notes: [] });
+}
+
 type NoteBody = { id: string; folderId: string | null; encMeta: string; encBody: string };
+type Msg = { type: string; tab?: string; id?: string };
 const headFor = (b: NoteBody, updatedAt: string) => ({
   note: { id: b.id, folderId: b.folderId, encMeta: b.encMeta, size: 1, createdAt: 'a', updatedAt },
 });
 
 describe('AppStore', () => {
-  beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); });
+  beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); FakeChannel.bus = []; });
 
   it('lock ends the server session and remembers only the username (I3)', async () => {
     const s = await registeredStore();
@@ -358,6 +402,173 @@ describe('AppStore', () => {
     release();
     await tracked;
     expect(s.hasUnsavedWork()).toBe(false);
+  });
+
+  it('a 401 flushes the open editor into the queue before dropping keys; it is sent after unlock (C1)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Plan', '');
+    const noteSent: NoteBody = api.createNote.mock.calls[0][1];
+    const ed = newSaveState(vaultId, created.id);
+    ed.base = 't1';
+    ed.body = 'typed before the 401';
+    s.registerFlusher((final) => settle(s, ed, final));
+    // Every request now gets 401, and the client reports each one.
+    api.updateNote.mockImplementation(async () => {
+      unauthorized.handler!();
+      throw new ApiError(401, 'unauthorized');
+    });
+    unauthorized.handler!(); // e.g. another tab's lock ended the shared session
+    await vi.waitFor(() => expect(s.getState().phase).toBe('signedOut'));
+    expect(s.getState().notice).toBe('Your session ended. Sign in again.');
+    expect(s.getState().pendingCount).toBe(1);
+    expect(s.getState().bodies).toEqual({});
+
+    // Sign back in: the queued ciphertext is sent and decrypts to the typed text.
+    const vaultDto = { ...api.createVault.mock.calls[0][0], createdAt: 'x', updatedAt: 'x', noteCount: 1, activeNoteCount7d: 1 };
+    mockUnlock([vaultDto]);
+    api.updateNote.mockReset();
+    api.updateNote.mockResolvedValue({ note: { updatedAt: 't2' } });
+    await s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
+    const [id, sent] = api.updateNote.mock.calls.at(-1)!;
+    expect(id).toBe(created.id);
+    expect(sent.baseUpdatedAt).toBe('t1');
+    expect(sent.encBody).toMatch(/^v1\./);
+    expect(sent.encBody).not.toContain('typed');
+    await vi.waitFor(() => expect(s.getState().vaults[vaultId]?.name).toBe('Personal'));
+    api.getNote.mockResolvedValue({ note: { ...headFor(noteSent, 't2').note, encBody: sent.encBody } });
+    expect((await s.loadNote(vaultId, created.id)).body).toBe('typed before the 401');
+  });
+
+  it('ignores 401s while the session is already ending (C1)', async () => {
+    const s = await registeredStore();
+    let release!: () => void;
+    const flusher = vi.fn(() => new Promise<void>((r) => (release = r)));
+    s.registerFlusher(flusher);
+    unauthorized.handler!();
+    unauthorized.handler!();
+    expect(s.getState().locking).toBe(true);
+    expect(flusher).toHaveBeenCalledTimes(1);
+    release();
+    await vi.waitFor(() => expect(s.getState().phase).toBe('signedOut'));
+    expect(s.getState().locking).toBe(false);
+    expect(flusher).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a second lock or sign-out while a lock is in progress (C1)', async () => {
+    const s = await registeredStore();
+    let release!: () => void;
+    const flusher = vi.fn(() => new Promise<void>((r) => (release = r)));
+    s.registerFlusher(flusher);
+    api.logout.mockResolvedValue({ ok: true });
+    const first = s.lock();
+    expect(s.getState().locking).toBe(true);
+    const again = [s.lock(), s.signOut()];
+    expect(flusher).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, ...again]);
+    expect(api.logout).toHaveBeenCalledTimes(1);
+    expect(s.getState().locking).toBe(false);
+    expect(s.getState().lastUsername).toBe('ann'); // the sign-out was a no-op
+  });
+
+  it('locks when another tab broadcasts a lock, flushing with the keys still present (C1)', async () => {
+    const s = await registeredStore();
+    const phases: string[] = [];
+    const flusher = vi.fn(async (_final: boolean) => {
+      phases.push(s.getState().phase);
+    });
+    s.registerFlusher(flusher);
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'lock', tab: 'peer', id: 'L1', notice: 'Locked after 15 minutes without activity.' });
+    await vi.waitFor(() => expect(s.getState().phase).toBe('signedOut'));
+    expect(flusher).toHaveBeenCalledWith(true);
+    expect(phases).toEqual(['unlocked']);
+    expect(s.getState().notice).toBe('Locked after 15 minutes without activity.');
+    expect(s.getState().lastUsername).toBe('ann');
+    // The tab that started the lock ends the session.
+    expect(api.logout).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'L1' }));
+  });
+
+  it('broadcasts a lock and ends the session once the other tabs have flushed (C1)', async () => {
+    const s = await registeredStore();
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'hello', tab: 'peer' });
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'here', tab: expect.any(String) }));
+    api.logout.mockResolvedValue({ ok: true });
+    const locking = s.lock();
+    await vi.waitFor(() => expect(s.getState().phase).toBe('signedOut'));
+    const lock = (peer.received as Msg[]).find((m) => m.type === 'lock')!;
+    expect(lock).toBeDefined();
+    expect(api.logout).not.toHaveBeenCalled();
+    peer.postMessage({ type: 'lock-done', tab: 'peer', id: lock.id });
+    await locking;
+    expect(api.logout).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-end', tab: lock.tab, id: lock.id }));
+  });
+
+  it('ends the session after at most 4 s when another tab never answers (C1)', async () => {
+    const s = await registeredStore();
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'hello', tab: 'peer' });
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'here', tab: expect.any(String) }));
+    api.logout.mockResolvedValue({ ok: true });
+    vi.useFakeTimers();
+    try {
+      const locking = s.lock();
+      await vi.advanceTimersByTimeAsync(3_900);
+      expect(s.getState().phase).toBe('signedOut');
+      expect(api.logout).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      await locking;
+      expect(api.logout).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for a pending session end before signing in again (C1)', async () => {
+    const s = await registeredStore();
+    let release!: (v: unknown) => void;
+    api.logout.mockReturnValue(new Promise((r) => (release = r)));
+    const locking = s.lock();
+    await vi.waitFor(() => expect(api.logout).toHaveBeenCalled());
+    mockUnlock();
+    const unlocking = s.unlock('ann', 'pw-ann-123456');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.login).not.toHaveBeenCalled();
+    release({ ok: true });
+    await Promise.all([locking, unlocking]);
+    expect(api.login).toHaveBeenCalledTimes(1);
+    expect(s.getState().phase).toBe('unlocked');
+  });
+
+  it('shares activity across tabs, at most one ping per 15 s (C1)', async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    try {
+      const s = new AppStore();
+      const peer = new FakeChannel('inked');
+      const pings = () => (peer.received as Msg[]).filter((m) => m.type === 'activity').length;
+      s.markActive();
+      s.markActive();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(pings()).toBe(1);
+      // Activity inside the window goes out once, when the window ends.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(pings()).toBe(2);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(pings()).toBe(2);
+      expect(s.idleMs()).toBeGreaterThanOrEqual(75_000);
+      // Activity in another tab counts here too.
+      peer.postMessage({ type: 'activity', tab: 'peer' });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(s.idleMs()).toBeLessThan(1_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('refuses to queue a body the server would never take (I4)', async () => {

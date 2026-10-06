@@ -3,12 +3,13 @@ import { isApiError } from '../api/client';
 import { describeError } from '../lib/util';
 import { LockedError, NoteTooLargeError, type AppStore, type NoteView } from '../state/store';
 import { useStore } from '../state/StoreContext';
+import { LOCK_WAIT_MS } from '../state/tabs';
 
 export type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'conflict';
 
 const AUTOSAVE_MS = 800;
 /** Once the keys are about to go (lock, sign out), how long a flush waits for the network before queueing. */
-export const FINAL_WAIT_MS = 4000;
+export const FINAL_WAIT_MS = LOCK_WAIT_MS;
 /** When leaving a note, how long its flush waits for the network before queueing. */
 export const LEAVE_WAIT_MS = 10_000;
 
@@ -290,6 +291,8 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
 
   const setBody = useCallback(
     (b: string) => {
+      // A lock is stashing this text: later changes could not be saved, so refuse them (the textarea is read-only).
+      if (store.getState().locking) return;
       const s = r.current;
       s.body = b;
       setBodyState(b);
@@ -297,7 +300,7 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
       setSave('pending');
       schedule();
     },
-    [schedule],
+    [schedule, store],
   );
 
   const reload = useCallback(() => {

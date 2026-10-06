@@ -30,6 +30,7 @@ import {
 import { argon2InWorker } from '../lib/argon2Worker';
 import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
 import { sendPending, type PendingSave } from './pending';
+import { TabLink } from './tabs';
 
 export type Phase = 'booting' | 'offline' | 'setup' | 'signedOut' | 'locked' | 'unlocked';
 
@@ -88,6 +89,8 @@ export interface AppState {
   bodiesReady: Record<string, boolean>;
   /** Saves waiting in the ciphertext queue. Survives lock (not part of EMPTY_DATA). */
   pendingCount: number;
+  /** A lock, sign-out or session end is flushing edits before the keys go: editing is paused. */
+  locking: boolean;
 }
 
 const EMPTY_DATA = {
@@ -105,6 +108,7 @@ const initialState: AppState = {
   lastUsername: '',
   notice: null,
   pendingCount: 0,
+  locking: false,
   ...EMPTY_DATA,
 };
 
@@ -189,6 +193,10 @@ export class AppStore {
   private retryTimer: ReturnType<typeof setInterval> | null = null;
   /** Editor flushes in progress (see trackSettle). */
   private settling = 0;
+  /** Other tabs of this browser share the session: lock together, idle together. */
+  private tabs = new TabLink({ onPeerLock: (notice) => this.lock(notice, { fromPeer: true }) });
+  /** The logout of the last lock or sign-out; a new sign-in waits for it so it cannot end the new session. */
+  private sessionEnd: Promise<void> = Promise.resolve();
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
@@ -251,6 +259,7 @@ export class AppStore {
     const { kdfSalt, kdfParams } = await api.params(username);
     const params = assertKdfParams(kdfParams);
     const { authKey, passwordKEK } = await derive(password, kdfSalt, params);
+    await this.previousSessionGone();
     const { user, wrappedUserKey } = await api.login(username, authKey);
     const userKey = await unwrapUserKey(wrappedUserKey, passwordKEK, user.id);
     this.enterUnlocked(user, userKey);
@@ -286,18 +295,50 @@ export class AppStore {
     await Promise.allSettled([...this.flushers].map((f) => f(final)));
   }
 
-  /** Drops keys + decrypted data and ends the server session; only the username is remembered. */
-  async lock(notice: string | null = null): Promise<void> {
-    if (this.state.phase !== 'unlocked') return;
-    await this.flushAll(true);
-    const lastUsername = this.state.user?.username ?? this.state.lastUsername;
-    this.dropKeys();
-    rememberUsername(lastUsername);
-    this.set({ phase: 'signedOut', user: null, lastUsername, notice, ...EMPTY_DATA });
+  /** Records keyboard/pointer input; shared with the other tabs for the idle lock. */
+  markActive() {
+    this.tabs.markActive();
+  }
+
+  /** Milliseconds since the newest input in any tab of this browser. */
+  idleMs(): number {
+    return this.tabs.idleMs();
+  }
+
+  /** Waits until a lock here or in another tab has finished ending the shared session. */
+  private async previousSessionGone(): Promise<void> {
+    await Promise.all([this.sessionEnd, this.tabs.peerLocksSettled()]);
+  }
+
+  /**
+   * Drops keys + decrypted data and ends the server session; only the username is remembered.
+   * The other tabs lock too (each flushes its own edits first). The tab that started the lock ends
+   * the session once they are done, or after LOCK_WAIT_MS; a tab locked by a peer leaves that to it.
+   * A call while a lock, sign-out or session end is in progress does nothing.
+   */
+  async lock(notice: string | null = null, opts: { fromPeer?: boolean } = {}): Promise<void> {
+    if (this.state.phase !== 'unlocked' || this.state.locking) return;
+    this.set({ locking: true });
     try {
-      await api.logout();
-    } catch {
-      // Keys are gone either way.
+      const peers = opts.fromPeer ? null : this.tabs.announceLock(notice);
+      await this.flushAll(true);
+      const lastUsername = this.state.user?.username ?? this.state.lastUsername;
+      this.dropKeys();
+      rememberUsername(lastUsername);
+      this.set({ phase: 'signedOut', user: null, lastUsername, notice, locking: false, ...EMPTY_DATA });
+      if (!peers) return;
+      this.sessionEnd = (async () => {
+        await peers.peersDone;
+        try {
+          await api.logout();
+        } catch {
+          // Keys are gone either way.
+        }
+        peers.end();
+      })();
+      await this.sessionEnd;
+    } finally {
+      if (this.state.locking) this.set({ locking: false });
     }
   }
 
@@ -307,22 +348,42 @@ export class AppStore {
     this.set({ lastUsername: '' });
   }
 
+  /** Other tabs are not told: their next request gets 401 and stashes their edits (see sessionEnded). */
   async signOut(): Promise<void> {
-    await this.flushAll(true);
-    this.dropKeys();
-    forgetRememberedUsername();
-    this.set({ phase: 'signedOut', user: null, lastUsername: '', notice: null, ...EMPTY_DATA });
+    if (this.state.locking) return;
+    this.set({ locking: true });
     try {
-      await api.logout();
-    } catch {
-      // Keys are gone either way; a stale cookie only lets someone see the locked screen.
+      await this.flushAll(true);
+      this.dropKeys();
+      forgetRememberedUsername();
+      this.set({ phase: 'signedOut', user: null, lastUsername: '', notice: null, locking: false, ...EMPTY_DATA });
+      this.sessionEnd = api.logout().then(
+        () => undefined,
+        // Keys are gone either way; a stale cookie only lets someone see the locked screen.
+        () => undefined,
+      );
+      await this.sessionEnd;
+    } finally {
+      if (this.state.locking) this.set({ locking: false });
     }
   }
 
-  private sessionEnded() {
-    if (this.state.phase === 'signedOut' || this.state.phase === 'setup') return;
-    this.dropKeys();
-    this.set({ phase: 'signedOut', user: null, notice: 'Your session ended. Sign in again.', ...EMPTY_DATA });
+  /**
+   * The server ended the session (401): a lock in another tab, a password change or a recovery
+   * elsewhere. Open editors are flushed while the keys are still here; their saves fail with 401
+   * (transient), so the text is stashed as ciphertext and sent after the next sign-in. Further 401s
+   * while this runs (or during a lock) are ignored.
+   */
+  private async sessionEnded(): Promise<void> {
+    if (this.state.phase === 'signedOut' || this.state.phase === 'setup' || this.state.locking) return;
+    this.set({ locking: true });
+    try {
+      await this.flushAll(true);
+      this.dropKeys();
+      this.set({ phase: 'signedOut', user: null, notice: 'Your session ended. Sign in again.', locking: false, ...EMPTY_DATA });
+    } finally {
+      if (this.state.locking) this.set({ locking: false });
+    }
   }
 
   // ---- Registration, recovery, password ---------------------------------------------------
