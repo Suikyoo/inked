@@ -134,7 +134,7 @@ JSON in/out. Errors: `{ "error": "<code>", "message"?: string }` with 4xx. All `
 `Vault = { id, encMeta, wrappedKey, createdAt, updatedAt, noteCount, activeNoteCount7d }` (`activeNoteCount7d` = notes updated in the last 7 days; drives the vault ink-level icon).
 `Folder = { id, parentId, encMeta, createdAt, updatedAt }`.
 `NoteHead = { id, folderId, encMeta, size, createdAt, updatedAt }` (`size` = encBody length).
-Timestamps are ISO-8601 strings. Limits: encBody ≤ 2 MB, encMeta ≤ 8 KB, request body ≤ 4 MiB (nginx allows 5 MB, so the app's limit is the effective one). An `encBody` over the limit gets 413 `too_large`.
+Timestamps are ISO-8601 strings. Limits: encBody ≤ 2 MB, encMeta ≤ 8 KB, request body ≤ 4 MiB (nginx allows 5 MiB, so the app's limit is the effective one). An `encBody` over the limit gets 413 `too_large`.
 
 ## Storage (SQLite)
 

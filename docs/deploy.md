@@ -62,7 +62,7 @@ docker compose restart nginx
 
 ### Request size
 
-The effective request limit is the app's 4 MiB. nginx allows 5 MB (`client_max_body_size 5m`), so nginx itself never cuts off a legitimate request; anything between the two limits reaches Inked, which answers 413.
+The effective request limit is the app's 4 MiB. nginx allows 5 MiB (`client_max_body_size 5m`), so nginx itself never cuts off a legitimate request; anything between the two limits reaches Inked, which answers 413.
 
 ## 5. First run
 
@@ -84,10 +84,12 @@ Any container placed on `cloudflared-net` can reach nginx and could forge `CF-Co
 
 ```bash
 docker network create cloudflared-net   # once
-INKED_DATA_DIR=$(mktemp -d) docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
+d=$(mktemp -d); sudo chown 1000:1000 "$d"; INKED_DATA_DIR=$d docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
 bash deploy/smoke-test.sh
 ```
 
-The smoke test needs fresh data on every run, because lockout counters persist between runs. Tear the stack down (`docker compose -p inked-test -f compose.yaml -f compose.local.yaml down`) and use a new throwaway `INKED_DATA_DIR` for the next one. On Linux the throwaway directory must be writable by uid 1000 (`chown 1000:1000`).
+The `chown` is needed on Linux only. Lockout counters live in the server's memory, so recreate the stack (`docker compose -p inked-test -f compose.yaml -f compose.local.yaml down`, then `up` again) before each smoke run; otherwise the per-account cap builds up in the long-running container. A fresh data directory is optional.
+
+The test stack uses the same fixed `inked-internal` subnet (172.31.250.0/28) as production, so it cannot run alongside the production stack on the same host. Stop one before starting the other.
 
 The override publishes nginx on `127.0.0.1:${INKED_PORT:-8088}` and turns off `Secure` cookies so plain HTTP works.
