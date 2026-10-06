@@ -69,6 +69,17 @@ export async function copyText(text: string): Promise<boolean> {
 export const NOTE_TOO_LARGE_MESSAGE = 'This note is too large to save (about 1.5 MB of text is the limit).';
 
 /** Plain-language message for anything thrown by the API client or crypto code. */
+/**
+ * Why a recovery-key replacement failed. A 4xx means the server refused it, so the old key still
+ * works; a network error or 5xx leaves the outcome unknown, and then either key may be the live one.
+ */
+export const ROTATION_NOT_SAVED = 'Not saved — your old recovery key still works.';
+
+export function rotationCommitError(e: unknown): string {
+  if (isApiError(e) && e.status >= 400 && e.status < 500) return ROTATION_NOT_SAVED;
+  return 'We couldn’t confirm the change. Keep BOTH your old and new recovery keys; one of them works. Try again from Settings to be sure.';
+}
+
 export function describeError(e: unknown, fallback = 'Something went wrong. Try again.'): string {
   if (e instanceof Error && e.name === 'NoteTooLargeError') return e.message;
   if (isApiError(e)) {

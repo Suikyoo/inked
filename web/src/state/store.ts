@@ -133,6 +133,13 @@ export class NoteTooLargeError extends Error {
 
 const PENDING_RETRY_MS = 30_000;
 
+/** A new recovery key, shown to the user before the server is told about it. */
+export interface PreparedRecoveryKey {
+  /** The formatted key, for display. */
+  text: string;
+  body: { currentAuthKey: string; recoveryAuth: string; wrappedUserKeyRecovery: string };
+}
+
 /** A save of the same note still on the wire when its text was queued, and whether it carries that same text. */
 export interface RacingSave {
   save: Promise<{ updatedAt: string }>;
@@ -455,11 +462,12 @@ export class AppStore {
   }
 
   /**
-   * Replaces the recovery key: the same userKey is re-wrapped under a fresh recovery key and the
-   * server swaps the recovery proof, so the old key stops working. Returns the new key (shown once).
+   * Step 1 of replacing the recovery key: makes a fresh key and re-wraps the same userKey under it.
+   * Sends nothing (only the params/me reads), so the old key keeps working until
+   * commitRecoveryKeyRotation; show `text` first and commit only once the user has saved it.
    * Throws CryptoError('unwrap') for a wrong password.
    */
-  async rotateRecoveryKey(password: string): Promise<string> {
+  async prepareRecoveryKeyRotation(password: string): Promise<PreparedRecoveryKey> {
     const user = this.state.user;
     if (!user || !this.userKey) throw new LockedError();
     const { kdfSalt, kdfParams } = await api.params(user.username);
@@ -475,8 +483,12 @@ export class AppStore {
       { kek: pw.passwordKEK, aad: aad.userKey(user.id) },
       { kek: rk.recoveryKEK, aad: aad.userKeyRecovery(user.id) },
     );
-    await api.rotateRecoveryKey({ currentAuthKey: pw.authKey, recoveryAuth: rk.recoveryAuth, wrappedUserKeyRecovery });
-    return text;
+    return { text, body: { currentAuthKey: pw.authKey, recoveryAuth: rk.recoveryAuth, wrappedUserKeyRecovery } };
+  }
+
+  /** Step 2: the server swaps the recovery proof, so the prepared key works and the old one stops. */
+  async commitRecoveryKeyRotation(prepared: PreparedRecoveryKey): Promise<void> {
+    await api.rotateRecoveryKey(prepared.body);
   }
 
   /** Re-wraps only the userKey. Throws CryptoError('unwrap') for a wrong current password. */

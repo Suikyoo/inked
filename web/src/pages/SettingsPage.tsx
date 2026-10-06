@@ -9,9 +9,9 @@ import { CheckIcon, CopyIcon } from '../components/Icons';
 import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
 import { isCryptoError } from '../crypto';
 import { prefs } from '../lib/prefs';
-import { copyText, describeError, formatDateTime, MIN_PASSWORD, nextVaultColor, VAULT_COLORS } from '../lib/util';
+import { copyText, describeError, formatDateTime, MIN_PASSWORD, nextVaultColor, rotationCommitError, VAULT_COLORS } from '../lib/util';
 import { useAppState, useStore, vaultStats } from '../state/StoreContext';
-import type { VaultView } from '../state/store';
+import type { PreparedRecoveryKey, VaultView } from '../state/store';
 
 export function SettingsPage() {
   const state = useAppState();
@@ -155,21 +155,39 @@ function RecoveryKey() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  /** Shown first; the server only learns about it once the user confirms they saved it. */
+  const [prepared, setPrepared] = useState<PreparedRecoveryKey | null>(null);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!password) return setError('Enter your password.');
     setBusy(true);
     setError(null);
+    setDone(false);
     try {
-      const key = await store.rotateRecoveryKey(password);
+      setPrepared(await store.prepareRecoveryKeyRotation(password));
       setPassword('');
-      setRecoveryKey(key);
     } catch (err) {
-      if (isCryptoError(err, 'unwrap') || isApiError(err, 403)) setError('That password isn’t right.');
+      if (isCryptoError(err, 'unwrap')) setError('That password isn’t right.');
       else setError(describeError(err));
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const commit = async () => {
+    if (!prepared) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await store.commitRecoveryKeyRotation(prepared);
+      setDone(true);
+    } catch (err) {
+      // The user has already saved the new key; the message says which key(s) to keep.
+      setError(rotationCommitError(err));
+    } finally {
+      setPrepared(null);
       setBusy(false);
     }
   };
@@ -179,16 +197,23 @@ function RecoveryKey() {
       <h2 id="rk-h" className="card-title">
         Recovery key
       </h2>
-      {recoveryKey ? (
+      {prepared ? (
         <>
-          <p className="card-text">This is your new recovery key. It is shown once; the old key no longer works.</p>
+          <p className="card-text">
+            This is your new recovery key. It is shown once. Your old key keeps working until you confirm you saved this one.
+          </p>
           <div className="rk-settings">
-            <RecoveryKeyPanel recoveryKey={recoveryKey} doneLabel="Done" onDone={() => setRecoveryKey(null)} />
+            <RecoveryKeyPanel recoveryKey={prepared.text} doneLabel="Replace my recovery key" busy={busy} onDone={() => void commit()} />
           </div>
         </>
       ) : (
         <>
-          <p className="card-text">Lost it, or used it to reset your password? Make a new one. The old key stops working immediately.</p>
+          {done && (
+            <p className="ok-text" role="status">
+              <CheckIcon size={12} /> Recovery key replaced. The old key no longer works.
+            </p>
+          )}
+          <p className="card-text">Lost it, or used it to reset your password? Make a new one. You save it first; the old key stops working once you confirm.</p>
           <form className="form-narrow" onSubmit={submit} noValidate>
             <input type="text" name="username" autoComplete="username" value={username} hidden readOnly />
             <PasswordField

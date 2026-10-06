@@ -4,15 +4,17 @@ import { isApiError } from '../api/client';
 import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
 import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
 import { isCryptoError } from '../crypto';
-import { describeError, MIN_PASSWORD } from '../lib/util';
+import { describeError, MIN_PASSWORD, ROTATION_NOT_SAVED, rotationCommitError } from '../lib/util';
+import type { PreparedRecoveryKey } from '../state/store';
 import { useAppState, useStore } from '../state/StoreContext';
 import { AuthLayout } from './AuthLayout';
 
-type Step = 'form' | 'working' | 'rotating' | 'replaced' | 'rotateFailed';
+type Step = 'form' | 'working' | 'rotating' | 'replacing' | 'rotateFailed';
 
 /**
- * Resets the password with the recovery key, then immediately replaces that recovery key: once
- * used it may have been exposed, so the user leaves with a fresh one shown once.
+ * Resets the password with the recovery key, then replaces that recovery key: once used it may
+ * have been exposed. The new key is shown first and only sent to the server once the user confirms
+ * they saved it, so a key nobody saw can never become the only one that works.
  */
 export function RecoverPage() {
   const store = useStore();
@@ -24,7 +26,8 @@ export function RecoverPage() {
   const [recoveryKey, setRecoveryKey] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [newKey, setNewKey] = useState<string | null>(null);
+  const [newKey, setNewKey] = useState<PreparedRecoveryKey | null>(null);
+  const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [waitUntil, setWaitUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -73,10 +76,11 @@ export function RecoverPage() {
     setRecoveryKey('');
     setStep('rotating');
     try {
-      setNewKey(await store.rotateRecoveryKey(password));
-      setStep('replaced');
-    } catch (err) {
-      setError(describeError(err));
+      setNewKey(await store.prepareRecoveryKeyRotation(password));
+      setStep('replacing');
+    } catch {
+      // Nothing was sent, so the old key is untouched.
+      setError(ROTATION_NOT_SAVED);
       setStep('rotateFailed');
     } finally {
       setPassword('');
@@ -84,20 +88,35 @@ export function RecoverPage() {
     }
   };
 
-  if (step === 'replaced' && newKey) {
+  const commit = async () => {
+    if (!newKey) return;
+    setCommitting(true);
+    setError(null);
+    try {
+      await store.commitRecoveryKeyRotation(newKey);
+      setNewKey(null);
+      navigate('/', { replace: true });
+    } catch (err) {
+      setNewKey(null);
+      setError(rotationCommitError(err));
+      setStep('rotateFailed');
+    } finally {
+      setCommitting(false);
+    }
+  };
+
+  if (step === 'replacing' && newKey) {
     return (
       <AuthLayout
         wide
-        title="Your old recovery key has been replaced"
-        lead="Your password is reset. The key you just used no longer works, so save this new one. It is shown once."
+        title="Save your new recovery key"
+        lead="Your password is reset. The key you just used may have been exposed, so it is replaced by this new one once you confirm you saved it. It is shown once."
       >
         <RecoveryKeyPanel
-          recoveryKey={newKey}
-          doneLabel="Continue to Inked"
-          onDone={() => {
-            setNewKey(null);
-            navigate('/', { replace: true });
-          }}
+          recoveryKey={newKey.text}
+          doneLabel="Replace my recovery key"
+          busy={committing}
+          onDone={() => void commit()}
         />
       </AuthLayout>
     );
@@ -107,7 +126,7 @@ export function RecoverPage() {
     return (
       <AuthLayout
         title="Password reset"
-        lead="Your new password works, but your old recovery key couldn’t be replaced, so it still opens your account. Make a new one in Settings."
+        lead="Your new password works, but replacing your recovery key didn’t go through as planned. Make a new one in Settings."
       >
         <div className="auth-form">
           <FormError>{error}</FormError>

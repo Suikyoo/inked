@@ -25,6 +25,7 @@ vi.mock('../lib/argon2Worker', async () => {
 });
 
 import { ApiError } from '../api/client';
+import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
 import { newSaveState, settle } from '../pages/useNoteEditor';
 import { AppStore, LockedError } from './store';
 
@@ -192,26 +193,55 @@ describe('AppStore', () => {
     expect(api.updateNote).not.toHaveBeenCalled();
   });
 
-  it('rotateRecoveryKey sends a new recovery proof and wrapped key (I5)', async () => {
+  /** A registered store whose params/me reads answer like the server would. */
+  async function rotatableStore() {
     const s = await registeredStore();
     const setupBody = api.setup.mock.calls[0][0];
     api.params.mockResolvedValue({ kdfSalt: setupBody.kdfSalt, kdfParams: setupBody.kdfParams });
     api.me.mockResolvedValue({ user: { id: setupBody.userId, username: 'ann', isAdmin: true }, wrappedUserKey: setupBody.wrappedUserKey });
-    api.rotateRecoveryKey.mockResolvedValue({ ok: true });
-    const key = await s.rotateRecoveryKey('pw-ann-123456');
-    expect(key).toMatch(/^inked-rk1-/);
-    const sent = api.rotateRecoveryKey.mock.calls[0][0];
-    expect(sent.currentAuthKey).toBe(setupBody.authKey);
-    expect(sent.recoveryAuth).not.toBe(setupBody.recoveryAuth);
-    expect(sent.wrappedUserKeyRecovery).toMatch(/^v1\./);
+    const vaultDto: { id: string; wrappedKey: string } = api.createVault.mock.calls[0][0];
+    vi.clearAllMocks(); // keep the answers, forget the calls made while registering
+    return { s, setupBody, vaultDto };
+  }
+
+  it('prepares a new recovery key without sending anything (I-2)', async () => {
+    const { s, setupBody } = await rotatableStore();
+    const prepared = await s.prepareRecoveryKeyRotation('pw-ann-123456');
+    expect(prepared.text).toMatch(/^inked-rk1-/);
+    expect(prepared.body.currentAuthKey).toBe(setupBody.authKey);
+    expect(prepared.body.recoveryAuth).not.toBe(setupBody.recoveryAuth);
+    expect(prepared.body.wrappedUserKeyRecovery).toMatch(/^v1\./);
+    // Only reads: params and me.
+    const called = Object.entries(api).filter(([, fn]) => fn.mock.calls.length).map(([name]) => name);
+    expect(called.sort()).toEqual(['me', 'params']);
   });
 
-  it('rotateRecoveryKey refuses a wrong password without calling the API (I5)', async () => {
-    const s = await registeredStore();
-    const setupBody = api.setup.mock.calls[0][0];
-    api.params.mockResolvedValue({ kdfSalt: setupBody.kdfSalt, kdfParams: setupBody.kdfParams });
-    api.me.mockResolvedValue({ user: { id: setupBody.userId, username: 'ann', isAdmin: true }, wrappedUserKey: setupBody.wrappedUserKey });
-    await expect(s.rotateRecoveryKey('wrong-password')).rejects.toMatchObject({ name: 'CryptoError', code: 'unwrap' });
+  it('commits exactly the prepared body (I-2)', async () => {
+    const { s } = await rotatableStore();
+    const prepared = await s.prepareRecoveryKeyRotation('pw-ann-123456');
+    api.rotateRecoveryKey.mockResolvedValue({ ok: true });
+    await s.commitRecoveryKeyRotation(prepared);
+    expect(api.rotateRecoveryKey).toHaveBeenCalledTimes(1);
+    expect(api.rotateRecoveryKey.mock.calls[0][0]).toEqual(prepared.body);
+  });
+
+  it('the prepared recovery key really recovers the account (I-2)', async () => {
+    const { s, setupBody, vaultDto } = await rotatableStore();
+    const prepared = await s.prepareRecoveryKeyRotation('pw-ann-123456');
+    const rk = await deriveRecoveryKeys(parseRecoveryKey(prepared.text));
+    expect(rk.recoveryAuth).toBe(prepared.body.recoveryAuth);
+    const userKey = await unwrapKey(prepared.body.wrappedUserKeyRecovery, rk.recoveryKEK, aad.userKeyRecovery(setupBody.userId), 'userKey');
+    // The recovered key can wrap and unwrap a vault key...
+    const vaultId = crypto.randomUUID();
+    const { wrappedKey } = await generateVaultKey(vaultId, userKey);
+    await expect(unwrapVaultKey(wrappedKey, userKey, vaultId)).resolves.toBeDefined();
+    // ...and it is the account's userKey: it opens the vault made at registration.
+    await expect(unwrapVaultKey(vaultDto.wrappedKey, userKey, vaultDto.id)).resolves.toBeDefined();
+  });
+
+  it('refuses a wrong password before sending anything (I-2)', async () => {
+    const { s } = await rotatableStore();
+    await expect(s.prepareRecoveryKeyRotation('wrong-password')).rejects.toMatchObject({ name: 'CryptoError', code: 'unwrap' });
     expect(api.rotateRecoveryKey).not.toHaveBeenCalled();
   });
 
@@ -596,6 +626,21 @@ describe('AppStore', () => {
     const vaultId = Object.keys(s.getState().vaults)[0];
     await expect(s.stashUnsaved(vaultId, crypto.randomUUID(), 'x'.repeat(1_600_000))).rejects.toThrow(/too large/i);
     expect(s.getState().pendingCount).toBe(0);
+  });
+});
+
+describe('rotationCommitError (I-2)', () => {
+  it('says the old key still works only when the server definitely refused', async () => {
+    const { rotationCommitError } = await import('../lib/util');
+    const definite = 'Not saved — your old recovery key still works.';
+    const unknown = 'We couldn’t confirm the change. Keep BOTH your old and new recovery keys; one of them works. Try again from Settings to be sure.';
+    expect(rotationCommitError(new ApiError(403, 'invalid_credentials'))).toBe(definite);
+    expect(rotationCommitError(new ApiError(400, 'invalid_request'))).toBe(definite);
+    expect(rotationCommitError(new ApiError(429, 'locked'))).toBe(definite);
+    expect(rotationCommitError(new ApiError(0, 'network'))).toBe(unknown);
+    expect(rotationCommitError(new ApiError(500, 'internal'))).toBe(unknown);
+    expect(rotationCommitError(new ApiError(502, 'http_502'))).toBe(unknown);
+    expect(rotationCommitError(new TypeError('boom'))).toBe(unknown);
   });
 });
 

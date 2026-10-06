@@ -49,7 +49,7 @@ After unwrapping, keys are held as non-extractable `CryptoKey` objects in memory
 
 Argon2id parameter bounds are `65536 <= m <= 1048576`, `3 <= t <= 16`, `1 <= p <= 8`, enforced by the server wherever `kdfParams` is accepted and by the client, which refuses to derive from parameters below its floor `MIN_KDF_PARAMS` (`{m: 65536, t: 3, p: 1}`).
 
-Changing the password only re-wraps `userKey` (data is not re-keyed; see the threat model). Recovery: user enters the recovery key, proves `recoveryAuth`, gets `wrappedUserKeyRecovery`, unwraps `userKey`, sets a new password (new kdfSalt, authKey, wrappedUserKey). The recovery key can be rotated while signed in (Settings, "Make a new recovery key"): the client makes a new recovery key and sends its `recoveryAuth` plus `userKey` re-wrapped by it, and the old recovery key stops working. It is offered automatically right after a password reset.
+Changing the password only re-wraps `userKey` (data is not re-keyed; see the threat model). Recovery: user enters the recovery key, proves `recoveryAuth`, gets `wrappedUserKeyRecovery`, unwraps `userKey`, sets a new password (new kdfSalt, authKey, wrappedUserKey). The recovery key can be rotated while signed in (Settings, "Make a new recovery key"): the client makes a new recovery key and re-wraps `userKey` under it without sending anything, shows the key, and only after the user confirms they saved it sends its `recoveryAuth` plus the re-wrapped `userKey`; then the old recovery key stops working. If that request is refused (4xx) the old key still works; after a network error or 5xx the outcome is unknown, so the user is told to keep both keys and try again. It is offered automatically right after a password reset.
 
 ## Ciphertext format
 
