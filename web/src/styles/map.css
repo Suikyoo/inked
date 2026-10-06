@@ -1,0 +1,248 @@
+/* Concept map (Home) and local map (note page). Colours come from tokens.css. */
+.map {
+  flex: 999 1 520px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cmap {
+  position: relative;
+  aspect-ratio: 100 / 60;
+  min-height: 320px;
+  background: var(--canvas);
+  border: 1px solid var(--side-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.cmap-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.cmap-svg.is-dragging {
+  cursor: grabbing;
+}
+.cmap-svg:focus {
+  outline: none;
+}
+
+.cmap-pencil line {
+  stroke: var(--map-pencil);
+  stroke-width: 1;
+}
+.cmap-links line {
+  stroke: var(--map-pencil);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.cmap-ink path {
+  fill: var(--map-ink);
+  opacity: 0.9;
+}
+
+.cmap-node {
+  cursor: pointer;
+}
+.cmap-node:focus {
+  outline: none;
+}
+.cmap-node.is-faded {
+  opacity: 0.3;
+}
+.cmap-hit {
+  fill: transparent;
+}
+.cmap-node:focus-visible .cmap-hit {
+  stroke: var(--map-sel);
+  stroke-width: 1.5;
+}
+/* 2px surface ring keeps dots legible where they cross lines. */
+.cmap-dot {
+  stroke: var(--canvas);
+  stroke-width: 4;
+  paint-order: stroke;
+}
+.cmap-dot.tier-wet,
+.cmap-glow.tier-wet {
+  fill: var(--ink-wet);
+}
+.cmap-dot.tier-fresh,
+.cmap-glow.tier-fresh {
+  fill: var(--ink-fresh);
+}
+.cmap-dot.tier-drying {
+  fill: var(--ink-drying);
+}
+.cmap-dot.tier-dry {
+  fill: var(--ink-dry);
+}
+.cmap-glow.tier-wet {
+  opacity: 0.38;
+}
+.cmap-glow.tier-fresh {
+  opacity: 0.22;
+}
+.cmap-sel {
+  fill: none;
+  stroke: var(--map-sel);
+  stroke-width: 1.5;
+}
+
+.cmap-label,
+.cmap-folders text,
+.cmap-hub-name {
+  paint-order: stroke;
+  stroke: var(--canvas);
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.cmap-label {
+  font: 500 10.5px var(--font-ui);
+  fill: var(--text);
+  stroke-width: 3px;
+}
+.cmap-folders text {
+  font: 500 10.5px var(--font-ui);
+  fill: var(--muted);
+  stroke-width: 4px;
+}
+.cmap-hub {
+  cursor: zoom-in;
+}
+.cmap-hub-name {
+  font: italic 500 13px var(--font-serif);
+  fill: var(--text);
+  stroke-width: 4px;
+}
+.cmap-hub-note {
+  font: 500 10.5px var(--font-ui);
+  fill: var(--muted-3);
+}
+
+.cmap-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+.cmap-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--side-border);
+  border-radius: 6px;
+  background: var(--canvas);
+  color: var(--muted);
+  cursor: pointer;
+}
+.cmap-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.cmap-btn:focus-visible {
+  outline: 2px solid var(--ink-light);
+  outline-offset: 1px;
+}
+.cmap-msg {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted-3);
+  pointer-events: none;
+}
+
+.cmap-slip {
+  position: absolute;
+  width: 220px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.cmap-slip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.cmap-slip-path {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.cmap-slip-meta {
+  font-size: 11.5px;
+  color: var(--muted-2);
+}
+.cmap-slip-open {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-light);
+  text-decoration: none;
+}
+.cmap-slip-open:hover {
+  text-decoration: underline;
+}
+
+.cmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  font-size: 11px;
+  color: var(--muted-3);
+}
+.cmap-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lg-pencil,
+.lg-link {
+  width: 18px;
+  border-top: 1px solid var(--map-pencil);
+}
+.lg-link {
+  border-top-style: dashed;
+}
+.lg-ink {
+  width: 18px;
+  height: 3px;
+  background: var(--map-ink);
+  clip-path: polygon(0 0, 100% 38%, 100% 62%, 0 100%);
+}
+.lg-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.lg-dot.tier-wet {
+  background: var(--ink-wet);
+}
+.lg-dot.tier-fresh {
+  background: var(--ink-fresh);
+}
+.lg-dot.tier-drying {
+  background: var(--ink-drying);
+}
+.lg-dot.tier-dry {
+  background: var(--ink-dry);
+}
+.lg-note {
+  color: var(--muted-2);
+}

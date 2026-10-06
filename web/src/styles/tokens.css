@@ -36,6 +36,15 @@
   --selection: #4b3a80;
   --mark: rgba(124, 92, 230, 0.32);
 
+  /* Concept map: wet → dry is an ordinal one-hue ramp (validated against --canvas) */
+  --ink-wet: #b69cff;
+  --ink-fresh: #9d7cf2;
+  --ink-drying: #6b5a9e;
+  --ink-dry: #524b6e;
+  --map-pencil: #4a4659;
+  --map-ink: #9d7cf2;
+  --map-sel: #ede9ff;
+
   /* Status */
   --error: #f2a7b4;
   --error-bg: #241d2a;

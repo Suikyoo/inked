@@ -4,6 +4,8 @@ import { VaultIcon } from '../brand/VaultIcon';
 import { FOCUS_SEARCH_EVENT } from '../components/AppShell';
 import { PlusIcon, SearchIcon } from '../components/Icons';
 import { uniqueTitle } from '../components/VaultTree';
+import { ConceptMap, MapLegend } from '../map/ConceptMap';
+import { useVaultGraphs } from '../map/useVaultGraphs';
 import { highlightSegments } from '../search/fuzzy';
 import { searchBodies, searchTitles, type SearchEntry } from '../search/search';
 import { describeError, relativeTime } from '../lib/util';
@@ -61,6 +63,10 @@ export function HomePage() {
     const exclude = new Set(titleHits.map((h) => h.entry.noteId));
     return searchBodies(q, entries, state.bodies, exclude, 15);
   }, [q, entries, state.bodies, titleHits]);
+  const mapEntries = useVaultGraphs(state);
+  const hitIds = useMemo(() => new Set([...titleHits, ...bodyHits].map((h) => h.entry.noteId)), [titleHits, bodyHits]);
+  const [hot, setHot] = useState<string | null>(null);
+  const hotFrom = (t: EventTarget) => (t instanceof Element ? t.closest('a.res')?.getAttribute('data-note') ?? null : null);
   const recent = useMemo(() => [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10), [entries]);
 
   const bodiesPending = state.vaultOrder.some((id) => !state.vaults[id]?.broken && !state.bodiesReady[id]);
@@ -159,11 +165,24 @@ export function HomePage() {
       )}
 
       <div className="home-body">
-        <section className="map-placeholder" aria-label="Concept map">
-          <p>Concept map arrives in the next build</p>
-        </section>
+        {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
+          <section className="map" aria-label="Concept map">
+            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} />
+            <MapLegend linksPending={mapEntries.some((e) => !e.graph.linksReady)} />
+          </section>
+        )}
 
-        <aside className="results" aria-label="Search results" id="results" ref={listRef} onKeyDown={onListKey}>
+        <aside
+          className="results"
+          aria-label="Search results"
+          id="results"
+          ref={listRef}
+          onKeyDown={onListKey}
+          onMouseOver={(e) => setHot(hotFrom(e.target))}
+          onMouseLeave={() => setHot(null)}
+          onFocus={(e) => setHot(hotFrom(e.target))}
+          onBlur={() => setHot(null)}
+        >
           {state.vaultsStatus === 'ready' && vaults.length === 0 ? (
             <div className="empty">
               <p>You don’t have any vaults yet. A vault holds folders and notes, each encrypted with its own key.</p>
@@ -177,7 +196,7 @@ export function HomePage() {
               <ul className="res-list">
                 {titleHits.map(({ entry, match }) => (
                   <li key={entry.noteId}>
-                    <Link className="res" to={hrefFor(entry)}>
+                    <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
                       <span className="res-title">
                         <Highlighted text={entry.text.slice(entry.pathStart)} indices={match.indices} offset={entry.pathStart} />
                       </span>
@@ -192,7 +211,7 @@ export function HomePage() {
                   <ul className="res-list">
                     {bodyHits.map(({ entry, snippet }) => (
                       <li key={entry.noteId}>
-                        <Link className="res" to={hrefFor(entry)}>
+                        <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
                           <span className="res-title">{entry.text.slice(entry.pathStart)}</span>
                           <span className="res-snippet">
                             {snippet.before}
@@ -222,7 +241,7 @@ export function HomePage() {
                 <ul className="res-list">
                   {recent.map((entry) => (
                     <li key={entry.noteId}>
-                      <Link className="res" to={hrefFor(entry)}>
+                      <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
                         <span className="res-title">{entry.text.slice(entry.pathStart)}</span>
                         <ResultMeta state={state} entry={entry} />
                       </Link>

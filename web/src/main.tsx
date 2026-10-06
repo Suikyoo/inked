@@ -13,6 +13,7 @@ import './styles/base.css';
 import './styles/auth.css';
 import './styles/shell.css';
 import './styles/home.css';
+import './styles/map.css';
 import './styles/note.css';
 import './styles/settings.css';
 import { App } from './App';

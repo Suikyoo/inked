@@ -64,7 +64,17 @@ export const PlusIcon = (p: P) => (
     <path d="M12 5v14M5 12h14" />
   </Svg>
 );
-export const ChevronRight = (p: P) => (
+export const MinusIcon = (p: P) => (
+  <Svg strokeWidth={2.2} {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+);
+export const FitIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+  </Svg>
+);
+export const ChevronRight =(p: P) => (
   <Svg strokeWidth={2.6} {...p}>
     <path d="M9 6l6 6-6 6" />
   </Svg>

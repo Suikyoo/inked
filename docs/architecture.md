@@ -1,6 +1,6 @@
 # Inked — architecture (round 1: core)
 
-Inked is a self-hosted, multi-user Markdown notes app. Notes are encrypted in the browser, so the server stores only ciphertext. Round 1 covers: setup, invites, login, recovery, vaults, folders, notes, Markdown edit/view, fuzzy search, and Docker Compose. The concept map comes in round 2.
+Inked is a self-hosted, multi-user Markdown notes app. Notes are encrypted in the browser, so the server stores only ciphertext. Round 1 covers: setup, invites, login, recovery, vaults, folders, notes, Markdown edit/view, fuzzy search, and Docker Compose. Round 2 adds the concept map (`docs/superpowers/specs/2026-10-07-concept-map-design.md`).
 
 ## Layout
 
@@ -163,7 +163,7 @@ Cross-Origin-Opener-Policy: same-origin
 
 ## Web app
 
-- React 18 + react-router. Routes: `/setup`, `/join/:token`, `/login`, `/recover`, `/` (home: search + results + vault list; map placeholder for round 2), `/v/:vaultId` (vault: tree), `/v/:vaultId/n/:noteId` (note), `/settings` (password change, invites for admin).
+- React 18 + react-router. Routes: `/setup`, `/join/:token`, `/login`, `/recover`, `/` (home: search + results + concept map of every vault), `/v/:vaultId` (vault: tree), `/v/:vaultId/n/:noteId` (note), `/settings` (password change, invites for admin).
 - Fonts self-hosted via @fontsource (Public Sans, Spectral italic, JetBrains Mono). No CDN.
 - Markdown: markdown-it (CommonMark + GFM tables/strikethrough + linkify off) + task lists + `[[wiki-link]]` rule; output sanitized with DOMPurify before insertion. Links to external sites get `rel="noopener noreferrer" target="_blank"`.
 - Lock (button, idle) flushes pending saves, drops all keys, remembers only the username (`localStorage['inked.lastUsername']`) and calls `/api/auth/logout`, so the session dies with the keys. A lock while offline cannot reach the server; the session cookie stays valid until it expires or the next successful logout. Keys and plaintext are dropped either way. The login page then shows "Unlocking as <name> · Not you?".
