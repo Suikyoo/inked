@@ -27,7 +27,7 @@ vi.mock('../lib/argon2Worker', async () => {
 
 import { ApiError } from '../api/client';
 import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
-import { newSaveState, settle } from '../pages/useNoteEditor';
+import { adoptOwnHead, newSaveState, settle } from '../pages/useNoteEditor';
 import { AppStore, LockedError, LOGOUT_TIMEOUT_MS, QUEUE_REQUEST_TIMEOUT_MS } from './store';
 
 /** Captured before any test fakes timers: lets real async work (WebCrypto, argon2) run while fake time stands still. */
@@ -947,7 +947,7 @@ describe('AppStore', () => {
     expect(s.getState().pendingCount).toBe(0);
     await vi.waitFor(() => expect(s.getState().trees[vaultId].notes[created.id].updatedAt).toBe('2026-01-02T00:00:00.000Z'));
     expect(s.getState().bodies[created.id]).toBe('queued text');
-    expect(s.isOwnStamp(created.id, '2026-01-02T00:00:00.000Z')).toBe(true);
+    expect(s.isOwnStamp(created.id, '2026-01-02T00:00:00.000Z')).toBe(false); // not adopted by open editors
 
     // An editor opened on the note afterwards saves on top of the queued text without a conflict.
     const { head, body } = await s.loadNote(vaultId, created.id);
@@ -962,6 +962,48 @@ describe('AppStore', () => {
     expect(s.getState().bodies[created.id]).toBe('queued text, then more');
   });
 
+
+  it('a head refreshed after a queued save never moves an open editor’s base: its next save conflicts and the queued text survives (B2)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    const t1 = '2026-01-01T00:00:00.000Z';
+    const t2 = '2026-01-02T00:00:00.000Z';
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, t1));
+    const created = await s.createNote(vaultId, null, 'Plan', 'old text');
+    const noteSent: NoteBody = api.createNote.mock.calls[0][1];
+    // A tiny server: accepts a save only on top of its current version.
+    const server = { at: t1, encBody: noteSent.encBody, n: 1 };
+    api.updateNote.mockImplementation(async (_id: string, b: { encBody: string; baseUpdatedAt?: string }) => {
+      if (b.baseUpdatedAt !== server.at) throw new ApiError(409, 'conflict');
+      server.at = `2026-01-0${++server.n}T00:00:00.000Z`;
+      server.encBody = b.encBody;
+      return headFor(noteSent, server.at);
+    });
+    api.getNote.mockImplementation(async () => ({ note: { ...headFor(noteSent, server.at).note, encBody: server.encBody } }));
+    api.listVaults.mockResolvedValue({ vaults: [] });
+    // An editor opened the note before the queued save landed: old base, old text plus typing.
+    const ed = newSaveState(vaultId, created.id);
+    ed.base = t1;
+    ed.savedBody = 'old text';
+    ed.body = 'old text, typed in the editor';
+
+    await s.stashUnsaved(vaultId, created.id, 'queued text', t1);
+    await vi.waitFor(() => expect(s.getState().trees[vaultId].notes[created.id].updatedAt).toBe(t2));
+    const queued = server.encBody;
+    expect(s.isOwnStamp(created.id, t2)).toBe(false);
+    // NotePane hands every new head to the editor.
+    adoptOwnHead(s, ed, s.getState().trees[vaultId].notes[created.id]);
+    expect(ed.base).toBe(t1);
+
+    // The editor's next save conflicts instead of replacing the queued text...
+    await settle(s, ed, false);
+    expect(server.at).toBe(t2);
+    expect(server.encBody).toBe(queued);
+    // ...and the queue keeps the editor's text as a copy note.
+    expect(api.createNote).toHaveBeenCalledTimes(2);
+    expect(api.createNote.mock.calls[1][1].id).not.toBe(created.id);
+    expect(s.getState().pendingCount).toBe(0);
+  });
   it('a queued send that never answers times out after 30 s and is retried (B2)', async () => {
     const s = await registeredStore();
     const vaultId = Object.keys(s.getState().vaults)[0];

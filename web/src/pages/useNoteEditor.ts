@@ -163,6 +163,16 @@ function track(store: SettleStore, s: SaveState, snapshot: string, base: string 
   return save;
 }
 
+/**
+ * A head changed through another path (rename, move): move the conflict base onto it. Only this
+ * tab's own writes may move the base; anyone else's change must still raise a conflict.
+ */
+export function adoptOwnHead(store: Pick<AppStore, 'isOwnStamp'>, s: SaveState, head: NoteView) {
+  if (head.id === s.noteId && !s.inFlight && store.isOwnStamp(head.id, head.updatedAt) && (!s.base || head.updatedAt > s.base)) {
+    s.base = head.updatedAt;
+  }
+}
+
 export interface NoteEditor {
   status: 'loading' | 'ready' | 'error';
   loadError: string | null;
@@ -324,21 +334,7 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
     void doSave();
   }, [doSave]);
 
-  const adoptHead = useCallback(
-    (head: NoteView) => {
-      const s = r.current;
-      // Only this tab's own writes may move the base; anyone else's change must still raise a conflict.
-      if (
-        head.id === s.noteId &&
-        !s.inFlight &&
-        store.isOwnStamp(head.id, head.updatedAt) &&
-        (!s.base || head.updatedAt > s.base)
-      ) {
-        s.base = head.updatedAt;
-      }
-    },
-    [store],
-  );
+  const adoptHead = useCallback((head: NoteView) => adoptOwnHead(store, r.current, head), [store]);
 
   return { status, loadError, body, setBody, save, saveError, reload, overwrite, adoptHead };
 }

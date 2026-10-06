@@ -1272,7 +1272,8 @@ export class AppStore {
       const prev = this.state.trees[vaultId]?.notes[noteId];
       // Something newer already arrived here; this read is stale.
       if (prev && prev.updatedAt > note.updatedAt) return;
-      this.markOwn(noteId, note.updatedAt);
+      // Not marked as own: an editor opened before this save never saw the queued text, so adopting
+      // this stamp would let its next autosave replace that text silently. It must hit the conflict path.
       this.putHead(vaultId, {
         id: noteId,
         vaultId,
