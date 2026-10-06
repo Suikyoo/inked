@@ -136,8 +136,11 @@ async function checkSecret(
 ): Promise<UserRow> {
   const key = `${scope}|${request.ip}|${name}`;
   const accountKey = `${scope}|${name}`;
-  const wait = Math.max(ctx.limiter.attempt(key), ctx.accountLimiter.attempt(accountKey));
-  if (wait > 0) throw lockedError(wait);
+  // Check both before recording either, so a request one limiter rejects never spends the other's budget.
+  const locked = Math.max(ctx.limiter.retryAfter(key), ctx.accountLimiter.retryAfter(accountKey));
+  if (locked > 0) throw lockedError(locked);
+  ctx.limiter.attempt(key);
+  ctx.accountLimiter.attempt(accountKey);
 
   const user = findUser(ctx.db, name);
   const ok = user ? await verifySecret(secret, stored(user)) : (await burnScrypt(secret), false);

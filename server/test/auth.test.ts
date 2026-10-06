@@ -117,6 +117,32 @@ describe('login', () => {
     expect(codes.filter((c) => c === 429).length).toBeGreaterThanOrEqual(35);
   });
 
+  const login = (authKey: string, ip: string) =>
+    call(t.app, 'POST', '/api/auth/login', { body: { username: 'admin', authKey }, ip });
+
+  it('caps an account across many IPs', async () => {
+    for (let i = 0; i < 30; i++) expect((await login(key32(), `10.1.0.${i}`)).statusCode).toBe(401);
+    expect((await login(admin.authKey, '10.2.0.1')).statusCode).toBe(429);
+  });
+
+  it('does not spend the account budget on requests the per-IP limiter rejects', async () => {
+    for (let i = 0; i < 5; i++) expect((await login(key32(), '10.3.0.1')).statusCode).toBe(401);
+    for (let i = 0; i < 40; i++) expect((await login(key32(), '10.3.0.1')).statusCode).toBe(429);
+    // 5 of 30 spent; exactly 25 remain for other IPs.
+    for (let i = 0; i < 25; i++) expect((await login(key32(), `10.4.0.${i}`)).statusCode).toBe(401);
+    expect((await login(admin.authKey, '10.5.0.1')).statusCode).toBe(429);
+  });
+
+  it('resets both limiters on a successful login', async () => {
+    for (let i = 0; i < 4; i++) await login(key32(), '10.6.0.1');
+    expect((await login(admin.authKey, '10.6.0.1')).statusCode).toBe(200);
+    for (let i = 0; i < 4; i++) expect((await login(key32(), '10.6.0.1')).statusCode).toBe(401);
+
+    for (let i = 0; i < 20; i++) await login(key32(), `10.7.0.${i}`);
+    expect((await login(admin.authKey, '10.8.0.1')).statusCode).toBe(200);
+    for (let i = 0; i < 25; i++) expect((await login(key32(), `10.9.0.${i}`)).statusCode).toBe(401);
+  });
+
   it('logout ends the session', async () => {
     const out = await call(t.app, 'POST', '/api/auth/logout', { cookie: admin.cookie });
     expect(out.json()).toEqual({ ok: true });
