@@ -123,20 +123,34 @@ export function deleteExpiredSessions(db: Db): void {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(iso(Date.now()));
 }
 
-/** preHandler: requires a valid session and sets request.user. */
-export function requireUser(ctx: AppContext) {
+/** The account a client expects its session to belong to; optional (older clients, auth routes). */
+export const USER_HEADER = 'x-inked-user';
+
+/**
+ * onRequest guard: requires a valid session and sets request.user.
+ *
+ * All tabs of a browser share the session cookie, so a tab can hold one account's keys and queued
+ * ciphertext while another tab has signed in as someone else. When the request names its account in
+ * X-Inked-User and that is not the session's, it is refused with 409 `user_mismatch` before any lookup,
+ * rather than answered (wrongly) as the other account. `ignoreUserHeader` is for the auth routes.
+ */
+export function requireUser(ctx: AppContext, opts: { ignoreUserHeader?: boolean } = {}) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const session = loadSession(ctx, request, reply);
     if (!session) {
       if (request.cookies[SESSION_COOKIE]) clearSessionCookie(ctx, reply);
       throw unauthorized();
     }
+    const expected = request.headers[USER_HEADER];
+    if (!opts.ignoreUserHeader && expected !== undefined && expected !== session.user.id) {
+      throw new ApiError(409, 'user_mismatch');
+    }
     request.user = session.user;
     request.sessionHash = session.tokenHash;
   };
 }
 
-/** preHandler: requires a valid session for an admin user. */
+/** onRequest guard: requires a valid session (bound like requireUser) for an admin user. */
 export function requireAdmin(ctx: AppContext) {
   const userCheck = requireUser(ctx);
   return async (request: FastifyRequest, reply: FastifyReply) => {

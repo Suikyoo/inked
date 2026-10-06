@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isApiError } from '../api/client';
+import { isApiError, isUserMismatch } from '../api/client';
 import { describeError } from '../lib/util';
 import { LockedError, NoteTooLargeError, type AppStore, type NoteView } from '../state/store';
 import { useStore } from '../state/StoreContext';
@@ -164,6 +164,12 @@ function track(store: SettleStore, s: SaveState, snapshot: string, base: string 
 }
 
 /**
+ * Someone saved this note in between. A 409 user_mismatch is not: another tab signed in as someone
+ * else, and the store ends this tab's session (flushing this text into the queue).
+ */
+export const isSaveConflict = (e: unknown): boolean => isApiError(e, 409) && !isUserMismatch(e);
+
+/**
  * A head changed through another path (rename, move): move the conflict base onto it. Only this
  * tab's own writes may move the base; anyone else's change must still raise a conflict.
  */
@@ -233,7 +239,7 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
           setSave(s.body === snapshot ? 'saved' : 'pending');
         }
       } catch (e) {
-        if (isApiError(e, 409)) {
+        if (isSaveConflict(e)) {
           s.conflict = true;
           if (s.alive) setSave('conflict');
         } else if (!(e instanceof LockedError)) {

@@ -1,4 +1,4 @@
-import { api, ApiError, setUnauthorizedHandler } from '../api/client';
+import { api, ApiError, setRequestUser, setUnauthorizedHandler, setUserMismatchHandler } from '../api/client';
 import type { FolderDTO, NoteHeadDTO, User, VaultDTO } from '../api/types';
 import {
   aad,
@@ -148,13 +148,19 @@ function bounded<T>(p: Promise<T>): Promise<T> {
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** How queued saves reach the server: ciphertext only, every request bounded. */
+/**
+ * How queued saves reach the server: ciphertext only, every request bounded, and each one naming
+ * the item's owner (X-Inked-User) so another account's session refuses it instead of answering 404.
+ */
 const QUEUE_IO = {
-  updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) =>
-    bounded(api.updateNote(id, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS })),
-  createNote: (vaultId: string, b: PendingSave['copy']) =>
-    bounded(api.createNote(vaultId, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS })),
+  updateNote: (owner: string, id: string, b: { encBody: string; baseUpdatedAt?: string }) =>
+    bounded(api.updateNote(id, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: owner })),
+  createNote: (owner: string, vaultId: string, b: PendingSave['copy']) =>
+    bounded(api.createNote(vaultId, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: owner })),
 };
+
+const SESSION_ENDED_NOTICE = 'Your session ended. Sign in again.';
+const USER_MISMATCH_NOTICE = 'You signed in as someone else in another tab. Sign in again here.';
 
 const DROP_NOTICES: Record<DropReason, [one: string, many: string]> = {
   deleted: [
@@ -290,6 +296,8 @@ export class AppStore {
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
+    // Another tab signed in as someone else, so the shared cookie is theirs now: end this tab's session too.
+    setUserMismatchHandler(() => this.sessionEnded(USER_MISMATCH_NOTICE));
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         if (this.state.phase === 'unlocked') void this.retryPending();
@@ -392,6 +400,7 @@ export class AppStore {
     this.vaultKeys.clear();
     this.ownStamps.clear();
     this.lastUserId = user.id;
+    setRequestUser(user.id);
     const deferred = this.deferredNotices.get(user.id) ?? null;
     this.deferredNotices.delete(user.id);
     rememberUsername(user.username);
@@ -406,6 +415,8 @@ export class AppStore {
     this.vaultKeys.clear();
     this.ownStamps.clear();
     for (const e of this.pending) e.copyTitle = null;
+    // Every signed-out transition passes here: data requests name nobody until the next sign-in.
+    setRequestUser(null);
   }
 
   /** `final` is true when the keys are about to be dropped (lock, sign out); each flusher bounds its own wait. */
@@ -583,9 +594,10 @@ export class AppStore {
    * The server ended the session (401): a lock in another tab, a password change or a recovery
    * elsewhere. Open editors are flushed while the keys are still here; their saves fail with 401
    * (transient), so the text is stashed as ciphertext and sent after the next sign-in. Further 401s
-   * while this runs (or during a lock) are ignored.
+   * while this runs (or during a lock) are ignored. Also run when another tab signed in as someone
+   * else (409 user_mismatch, with its own notice): the same flush, and no logout, since the cookie is theirs.
    */
-  private async sessionEnded(): Promise<void> {
+  private async sessionEnded(notice = SESSION_ENDED_NOTICE): Promise<void> {
     if (this.state.phase === 'signedOut' || this.state.phase === 'setup' || this.state.locking) return;
     this.set({ locking: true });
     try {
@@ -597,7 +609,7 @@ export class AppStore {
         phase: 'signedOut',
         user: null,
         ...(forget ? { lastUsername: '' } : {}),
-        notice: 'Your session ended. Sign in again.',
+        notice,
         locking: false,
         ...EMPTY_DATA,
       });
@@ -1221,10 +1233,12 @@ export class AppStore {
     const sameSession = () => this.state.phase === 'unlocked' && this.state.user?.id === userId;
     const guard = <T>(send: () => Promise<T>): Promise<T> =>
       sameSession() ? send() : Promise.reject(new ApiError(0, 'network'));
-    const io = {
-      updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) => guard(() => QUEUE_IO.updateNote(id, b)),
-      createNote: (vaultId: string, b: PendingSave['copy']) => guard(() => QUEUE_IO.createNote(vaultId, b)),
-    };
+    // Each request names the item's owner (always userId here), not whoever the client thinks is
+    // signed in, so a cookie swapped by another tab is refused (user_mismatch: kept) even if state lags.
+    const ioFor = (owner: string) => ({
+      updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) => guard(() => QUEUE_IO.updateNote(owner, id, b)),
+      createNote: (vaultId: string, b: PendingSave['copy']) => guard(() => QUEUE_IO.createNote(owner, vaultId, b)),
+    });
     const copied: QueueEntry[] = [];
     let atRoot = 0;
     const dropped: Record<DropReason, number> = { deleted: 0, rejected: 0, too_large: 0 };
@@ -1233,7 +1247,7 @@ export class AppStore {
       if (entry.held || !this.pending.includes(entry)) continue;
       // Only ever send with the owning account's session (never another's, never none).
       if (entry.owner !== userId) continue;
-      const { outcome, reason } = await sendPending(entry.item, io);
+      const { outcome, reason } = await sendPending(entry.item, ioFor(entry.owner));
       if (outcome === 'retry') {
         entry.item.attempts++;
         continue;

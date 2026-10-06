@@ -23,19 +23,43 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn;
 }
 
+/**
+ * The account whose keys this tab holds. Every tab shares the session cookie, so another tab may
+ * have signed in as someone else: data requests name this account (X-Inked-User) and the server
+ * refuses them (409 user_mismatch) instead of answering as the other account.
+ */
+let requestUser: string | null = null;
+export function setRequestUser(id: string | null) {
+  requestUser = id;
+}
+
+/** Called when a request naming the signed-in account met another account's session. */
+let onUserMismatch: (() => void) | null = null;
+export function setUserMismatchHandler(fn: (() => void) | null) {
+  onUserMismatch = fn;
+}
+
+export const isUserMismatch = (e: unknown): e is ApiError => isApiError(e, 409) && e.code === 'user_mismatch';
+
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 interface RequestOptions {
   authed?: boolean;
+  /** A data route: names the account in X-Inked-User. The auth routes never do. */
+  bound?: boolean;
+  /** Names this account instead of the signed-in one (queued sends name their owner); a mismatch is then the caller's to handle. */
+  asUser?: string;
   /** Aborting it fails the request with the same network error as a dropped connection (status 0). */
   signal?: AbortSignal;
   /** Gives up after this many milliseconds: the request is aborted, with the same network error. */
   timeoutMs?: number;
 }
 
-/** Per-call options for requests whose wait the caller bounds. */
+/** Per-call options for requests whose wait the caller bounds, or that act for a given account. */
 export interface CallOptions {
   timeoutMs?: number;
+  /** The account this request is for (X-Inked-User); see RequestOptions.asUser. */
+  asUser?: string;
 }
 
 const networkError = () => new ApiError(0, 'network', 'Can’t reach the server. Check your connection and try again.');
@@ -44,6 +68,8 @@ async function request<T>(method: Method, path: string, body?: unknown, opts: Re
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (method !== 'GET') headers['X-Inked'] = '1';
   if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const user = opts.bound ? (opts.asUser ?? requestUser) : null;
+  if (user) headers['X-Inked-User'] = user;
   let signal = opts.signal;
   let timer: ReturnType<typeof setTimeout> | undefined;
   if (opts.timeoutMs !== undefined) {
@@ -86,12 +112,19 @@ async function request<T>(method: Method, path: string, body?: unknown, opts: Re
     const retryAfter = typeof d.retryAfter === 'number' ? d.retryAfter : Number.isFinite(headerRetry) && headerRetry > 0 ? headerRetry : undefined;
     const err = new ApiError(res.status, d.error ?? `http_${res.status}`, d.message, retryAfter);
     if (res.status === 401 && opts.authed !== false) onUnauthorized?.();
+    // Only while this tab still holds the account it named: a late answer to a request sent before
+    // this tab itself switched accounts must not end the new session.
+    if (isUserMismatch(err) && opts.asUser === undefined && user === requestUser) onUserMismatch?.();
     throw err;
   }
   return data as T;
 }
 
 const enc = encodeURIComponent;
+
+/** A request to a data route (vaults, folders, notes, invites): bound to the account, see setRequestUser. */
+const data = <T>(method: Method, path: string, body?: unknown, opts: CallOptions = {}) =>
+  request<T>(method, path, body, { bound: true, timeoutMs: opts.timeoutMs, asUser: opts.asUser });
 
 export const api = {
   status: () => request<{ needsSetup: boolean }>('GET', '/api/status', undefined, { authed: false }),
@@ -131,38 +164,38 @@ export const api = {
   }) => request<{ user: User; wrappedUserKey: string }>('POST', '/api/auth/recover/finish', body, { authed: false }),
 
   createInvite: (expiresInHours?: number) =>
-    request<{ token: string; expiresAt: string }>('POST', '/api/invites', expiresInHours ? { expiresInHours } : {}),
-  listInvites: () => request<{ invites: InviteDTO[] }>('GET', '/api/invites'),
-  revokeInvite: (id: string) => request<{ ok: true }>('DELETE', `/api/invites/${enc(id)}`),
+    data<{ token: string; expiresAt: string }>('POST', '/api/invites', expiresInHours ? { expiresInHours } : {}),
+  listInvites: () => data<{ invites: InviteDTO[] }>('GET', '/api/invites'),
+  revokeInvite: (id: string) => data<{ ok: true }>('DELETE', `/api/invites/${enc(id)}`),
   checkInvite: (token: string) =>
     request<{ valid: boolean }>('GET', `/api/invites/check?token=${enc(token)}`, undefined, { authed: false }),
 
-  listVaults: () => request<{ vaults: VaultDTO[] }>('GET', '/api/vaults'),
+  listVaults: () => data<{ vaults: VaultDTO[] }>('GET', '/api/vaults'),
   createVault: (body: { id: string; encMeta: string; wrappedKey: string }) =>
-    request<{ vault: VaultDTO }>('POST', '/api/vaults', body),
-  updateVault: (id: string, encMeta: string) => request<{ vault: VaultDTO }>('PATCH', `/api/vaults/${enc(id)}`, { encMeta }),
-  deleteVault: (id: string) => request<unknown>('DELETE', `/api/vaults/${enc(id)}`),
+    data<{ vault: VaultDTO }>('POST', '/api/vaults', body),
+  updateVault: (id: string, encMeta: string) => data<{ vault: VaultDTO }>('PATCH', `/api/vaults/${enc(id)}`, { encMeta }),
+  deleteVault: (id: string) => data<unknown>('DELETE', `/api/vaults/${enc(id)}`),
   tree: (vaultId: string) =>
-    request<{ folders: FolderDTO[]; notes: NoteHeadDTO[] }>('GET', `/api/vaults/${enc(vaultId)}/tree`),
+    data<{ folders: FolderDTO[]; notes: NoteHeadDTO[] }>('GET', `/api/vaults/${enc(vaultId)}/tree`),
   bodies: (vaultId: string) =>
-    request<{ notes: { id: string; encBody: string; updatedAt: string }[] }>('GET', `/api/vaults/${enc(vaultId)}/bodies`),
+    data<{ notes: { id: string; encBody: string; updatedAt: string }[] }>('GET', `/api/vaults/${enc(vaultId)}/bodies`),
 
   createFolder: (vaultId: string, body: { id: string; parentId: string | null; encMeta: string }) =>
-    request<{ folder: FolderDTO }>('POST', `/api/vaults/${enc(vaultId)}/folders`, body),
+    data<{ folder: FolderDTO }>('POST', `/api/vaults/${enc(vaultId)}/folders`, body),
   updateFolder: (id: string, body: { encMeta?: string; parentId?: string | null }) =>
-    request<{ folder: FolderDTO }>('PATCH', `/api/folders/${enc(id)}`, body),
-  deleteFolder: (id: string) => request<unknown>('DELETE', `/api/folders/${enc(id)}`),
+    data<{ folder: FolderDTO }>('PATCH', `/api/folders/${enc(id)}`, body),
+  deleteFolder: (id: string) => data<unknown>('DELETE', `/api/folders/${enc(id)}`),
 
   createNote: (
     vaultId: string,
     body: { id: string; folderId: string | null; encMeta: string; encBody: string },
     opts: CallOptions = {},
-  ) => request<{ note: NoteHeadDTO }>('POST', `/api/vaults/${enc(vaultId)}/notes`, body, { timeoutMs: opts.timeoutMs }),
-  getNote: (id: string) => request<{ note: NoteDTO }>('GET', `/api/notes/${enc(id)}`),
+  ) => data<{ note: NoteHeadDTO }>('POST', `/api/vaults/${enc(vaultId)}/notes`, body, opts),
+  getNote: (id: string) => data<{ note: NoteDTO }>('GET', `/api/notes/${enc(id)}`),
   updateNote: (
     id: string,
     body: { encMeta?: string; encBody?: string; folderId?: string | null; baseUpdatedAt?: string },
     opts: CallOptions = {},
-  ) => request<{ note: NoteHeadDTO }>('PUT', `/api/notes/${enc(id)}`, body, { timeoutMs: opts.timeoutMs }),
-  deleteNote: (id: string) => request<{ ok: true }>('DELETE', `/api/notes/${enc(id)}`),
+  ) => data<{ note: NoteHeadDTO }>('PUT', `/api/notes/${enc(id)}`, body, opts),
+  deleteNote: (id: string) => data<{ ok: true }>('DELETE', `/api/notes/${enc(id)}`),
 };

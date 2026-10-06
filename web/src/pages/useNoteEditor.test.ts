@@ -5,6 +5,7 @@ import { LockedError, NoteTooLargeError, type NoteView } from '../state/store';
 import {
   adoptOwnHead,
   FINAL_WAIT_MS,
+  isSaveConflict,
   leaveNote,
   LEAVE_WAIT_MS,
   newSaveState,
@@ -169,6 +170,14 @@ describe('settle (I4)', () => {
     await settle(store, s, false);
     expect(store.saveNoteBody).not.toHaveBeenCalled();
     expect(store.stashUnsaved).not.toHaveBeenCalled();
+  });
+});
+
+describe('isSaveConflict (X-Inked-User)', () => {
+  it('a save refused as another account’s is not a conflict', () => {
+    expect(isSaveConflict(new ApiError(409, 'conflict'))).toBe(true);
+    expect(isSaveConflict(new ApiError(409, 'user_mismatch'))).toBe(false);
+    expect(isSaveConflict(new ApiError(404, 'not_found'))).toBe(false);
   });
 });
 

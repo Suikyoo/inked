@@ -263,7 +263,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
     return { ok: true };
   });
 
-  app.get('/api/me', { onRequest: requireUser(ctx) }, async (request) => {
+  app.get('/api/me', { onRequest: requireUser(ctx, { ignoreUserHeader: true }) }, async (request) => {
     const user = currentUser(request);
     return { user: publicUser(user), wrappedUserKey: user.wrapped_user_key };
   });
@@ -291,7 +291,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.post<{ Body: NewCredentials & { currentAuthKey: string } }>(
     '/api/auth/password',
-    { schema: passwordSchema, onRequest: requireUser(ctx) },
+    { schema: passwordSchema, onRequest: requireUser(ctx, { ignoreUserHeader: true }) },
     async (request) => {
       const user = currentUser(request);
       const key = `password|${request.ip}|${user.id}`;
@@ -311,7 +311,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.post<{ Body: { currentAuthKey: string; recoveryAuth: string; wrappedUserKeyRecovery: string } }>(
     '/api/auth/recovery-key',
-    { schema: recoveryKeySchema, onRequest: requireUser(ctx) },
+    { schema: recoveryKeySchema, onRequest: requireUser(ctx, { ignoreUserHeader: true }) },
     async (request) => {
       const user = currentUser(request);
       const key = `recoverykey|${request.ip}|${user.id}`;

@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type Account, call, fakeCipher, inviteUser, makeApp, setupAdmin, type TestApp } from './helpers.js';
+import { type Account, call, fakeCipher, inviteUser, kdfParams, key32, makeApp, setupAdmin, type TestApp } from './helpers.js';
 
 let t: TestApp;
 let alice: Account;
@@ -296,5 +296,112 @@ describe('note size limit', () => {
     const r = await as(alice).put(`/api/notes/${note.id}`, { encBody: huge });
     expect(r.statusCode).toBe(413);
     expect(r.json().error).toBe('too_large');
+  });
+});
+
+describe('X-Inked-User binds a data request to the expected account', () => {
+  /** `who`'s session, claiming to act for `claimed`. */
+  const claiming = (who: Account, claimed: string | null) => {
+    const headers: Record<string, string> = claimed === null ? {} : { 'x-inked-user': claimed };
+    return {
+      get: (url: string) => call(t.app, 'GET', url, { cookie: who.cookie, headers }),
+      post: (url: string, body: unknown) => call(t.app, 'POST', url, { cookie: who.cookie, body, headers }),
+      put: (url: string, body: unknown) => call(t.app, 'PUT', url, { cookie: who.cookie, body, headers }),
+      patch: (url: string, body: unknown) => call(t.app, 'PATCH', url, { cookie: who.cookie, body, headers }),
+      del: (url: string) => call(t.app, 'DELETE', url, { cookie: who.cookie, headers }),
+    };
+  };
+
+  it('answers 409 user_mismatch on every data route when the header names someone else, before any lookup', async () => {
+    const vault = await createVault(alice);
+    const folder = await createFolder(alice, vault.id);
+    const note = await createNote(alice, vault.id);
+    const invite = (await as(alice).post('/api/invites', {})).json();
+    expect(invite.token).toBeTruthy();
+    const invitesBefore = (await as(alice).get('/api/invites')).json().invites;
+    const inviteId = invitesBefore.at(-1).id;
+    // Alice's session, but the tab still thinks it is bob (or the reverse): nothing is read or written.
+    const wrong = claiming(alice, bob.userId);
+    const responses = [
+      await wrong.get('/api/vaults'),
+      await wrong.post('/api/vaults', { id: randomUUID(), encMeta: fakeCipher(), wrappedKey: fakeCipher(60) }),
+      await wrong.patch(`/api/vaults/${vault.id}`, { encMeta: fakeCipher() }),
+      await wrong.get(`/api/vaults/${vault.id}/tree`),
+      await wrong.get(`/api/vaults/${vault.id}/bodies`),
+      await wrong.post(`/api/vaults/${vault.id}/folders`, { id: randomUUID(), parentId: null, encMeta: fakeCipher() }),
+      await wrong.patch(`/api/folders/${folder.id}`, { encMeta: fakeCipher() }),
+      await wrong.post(`/api/vaults/${vault.id}/notes`, { id: randomUUID(), folderId: null, encMeta: fakeCipher(), encBody: fakeCipher() }),
+      await wrong.get(`/api/notes/${note.id}`),
+      await wrong.put(`/api/notes/${note.id}`, { encBody: fakeCipher() }),
+      await wrong.del(`/api/notes/${note.id}`),
+      await wrong.del(`/api/folders/${folder.id}`),
+      await wrong.del(`/api/vaults/${vault.id}`),
+      await wrong.get('/api/invites'),
+      await wrong.post('/api/invites', {}),
+      await wrong.del(`/api/invites/${inviteId}`),
+      // Bob's session naming alice, on alice's note: still the mismatch, not a 404.
+      await claiming(bob, alice.userId).put(`/api/notes/${note.id}`, { encBody: fakeCipher() }),
+      // Checked before validation too.
+      await wrong.get('/api/vaults/not-a-uuid/tree'),
+    ];
+    for (const r of responses) {
+      expect([r.statusCode, r.json()]).toEqual([409, { error: 'user_mismatch' }]);
+    }
+    // Nothing changed.
+    const read = (await as(alice).get(`/api/notes/${note.id}`)).json().note;
+    expect(read.updatedAt).toBe(note.updatedAt);
+    expect((await as(alice).get('/api/vaults')).json().vaults).toHaveLength(1);
+    expect((await as(alice).get('/api/invites')).json().invites).toEqual(invitesBefore);
+  });
+
+  it('a matching header passes', async () => {
+    const vault = await createVault(alice);
+    const note = await createNote(alice, vault.id);
+    const right = claiming(alice, alice.userId);
+    expect((await right.get('/api/vaults')).statusCode).toBe(200);
+    expect((await right.get(`/api/notes/${note.id}`)).statusCode).toBe(200);
+    const put = await right.put(`/api/notes/${note.id}`, { encBody: fakeCipher(), baseUpdatedAt: note.updatedAt });
+    expect(put.statusCode).toBe(200);
+    expect((await right.get('/api/invites')).statusCode).toBe(200);
+    // Another account's note under a matching header is still simply not found.
+    expect((await claiming(bob, bob.userId).get(`/api/notes/${note.id}`)).statusCode).toBe(404);
+  });
+
+  it('an absent header passes (older clients)', async () => {
+    const vault = await createVault(alice);
+    const none = claiming(alice, null);
+    expect((await none.get('/api/vaults')).statusCode).toBe(200);
+    expect((await none.get(`/api/vaults/${vault.id}/tree`)).statusCode).toBe(200);
+    expect((await none.get('/api/invites')).statusCode).toBe(200);
+  });
+
+  it('without a session the answer is still 401, header or not', async () => {
+    const r = await call(t.app, 'GET', '/api/vaults', { headers: { 'x-inked-user': alice.userId } });
+    expect(r.statusCode).toBe(401);
+  });
+
+  it('the auth routes ignore the header', async () => {
+    const headers = { 'x-inked-user': bob.userId };
+    const me = await call(t.app, 'GET', '/api/me', { cookie: alice.cookie, headers });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().user.id).toBe(alice.userId);
+    expect((await call(t.app, 'GET', '/api/status', { headers })).statusCode).toBe(200);
+    expect((await call(t.app, 'GET', '/api/auth/params?username=alice', { headers })).statusCode).toBe(200);
+    // The proof is checked as usual (403), not the header (409).
+    const pw = await call(t.app, 'POST', '/api/auth/password', {
+      cookie: alice.cookie,
+      headers,
+      body: { currentAuthKey: key32(), kdfSalt: randomBytes(16).toString('base64url'), kdfParams, authKey: key32(), wrappedUserKey: fakeCipher(60) },
+    });
+    expect(pw.statusCode).toBe(403);
+    const rk = await call(t.app, 'POST', '/api/auth/recovery-key', {
+      cookie: alice.cookie,
+      headers,
+      body: { currentAuthKey: key32(), recoveryAuth: key32(), wrappedUserKeyRecovery: fakeCipher(60) },
+    });
+    expect(rk.statusCode).toBe(403);
+    const login = await call(t.app, 'POST', '/api/auth/login', { headers, body: { username: 'bob', authKey: bob.authKey } });
+    expect(login.statusCode).toBe(200);
+    expect((await call(t.app, 'POST', '/api/auth/logout', { cookie: alice.cookie, headers })).statusCode).toBe(200);
   });
 });

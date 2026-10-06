@@ -80,6 +80,18 @@ describe('sendPending', () => {
     }
   });
 
+  it('keeps an item refused as another account’s (409 user_mismatch): never a conflict, never an existing copy', async () => {
+    const mismatch = new ApiError(409, 'user_mismatch');
+    const io = { updateNote: vi.fn().mockRejectedValue(mismatch), createNote: vi.fn().mockResolvedValue({}) };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'retry' });
+    expect(io.createNote).not.toHaveBeenCalled();
+    const copy = { updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')), createNote: vi.fn().mockRejectedValue(mismatch) };
+    expect(await sendPending(item(), copy)).toEqual({ outcome: 'retry' });
+    const root = { updateNote: vi.fn().mockRejectedValue(new ApiError(404, 'not_found')), createNote: vi.fn().mockRejectedValue(mismatch) };
+    expect(await sendPending({ ...item(), copy: { ...item().copy, folderId: 'f1' } }, root)).toEqual({ outcome: 'retry' });
+    expect(root.createNote).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps retrying on 401, 5xx and rate limits, also for the copy', async () => {
     for (const err of [new ApiError(401, 'unauthorized'), new ApiError(503, 'unavailable'), new ApiError(429, 'rate_limited')]) {
       const io = { updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')), createNote: vi.fn().mockRejectedValue(err) };

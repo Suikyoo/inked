@@ -9,10 +9,14 @@ const api = vi.hoisted(() => ({
 }));
 /** The store's 401 handler, as the real client would call it. */
 const unauthorized = vi.hoisted(() => ({ handler: null as null | (() => unknown) }));
+/** The store's user_mismatch handler, and the account each request would name (X-Inked-User). */
+const mismatch = vi.hoisted(() => ({ handler: null as null | (() => unknown), requestUser: null as string | null }));
 vi.mock('../api/client', async (orig) => ({
   ...(await orig<typeof import('../api/client')>()),
   api,
   setUnauthorizedHandler: (fn: () => unknown) => { unauthorized.handler = fn; },
+  setUserMismatchHandler: (fn: () => unknown) => { mismatch.handler = fn; },
+  setRequestUser: (id: string | null) => { mismatch.requestUser = id; },
 }));
 vi.mock('../crypto/kdf', async (orig) => {
   const m = await orig<typeof import('../crypto/kdf')>();
@@ -1095,7 +1099,7 @@ describe('AppStore', () => {
       let done = false;
       const stashing = s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0').then(() => (done = true));
       while (!api.updateNote.mock.calls.length) await realWait(5); // encryption runs on real crypto
-      expect(api.updateNote.mock.calls[0][2]).toEqual({ timeoutMs: QUEUE_REQUEST_TIMEOUT_MS });
+      expect(api.updateNote.mock.calls[0][2]).toEqual({ timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: s.getState().user!.id });
       expect(QUEUE_REQUEST_TIMEOUT_MS).toBe(30_000);
       await vi.advanceTimersByTimeAsync(29_999);
       expect(done).toBe(false);
@@ -1256,6 +1260,95 @@ describe('AppStore', () => {
     api.updateNote.mockResolvedValueOnce(headFor(sent, '2026-01-02T00:00:00.000Z'));
     await s.saveNoteBody(vaultId, created.id, 'older body');
     expect(s.getState().bodies[created.id]).toBe('newest body');
+  });
+
+  // ---- X-Inked-User: another tab signed in as someone else -----------------------------------
+
+  const MISMATCH_NOTICE = 'You signed in as someone else in another tab. Sign in again here.';
+
+  it('names the signed-in account for data requests while unlocked, and nobody once the keys are gone', async () => {
+    const s = await registeredStore();
+    const ann = s.getState().user!.id;
+    expect(mismatch.requestUser).toBe(ann);
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    expect(mismatch.requestUser).toBeNull();
+    mockUnlock();
+    await s.unlock('ann', 'pw-ann-123456');
+    expect(mismatch.requestUser).toBe(ann);
+    await s.signOut();
+    expect(mismatch.requestUser).toBeNull();
+    const t = await registeredStore();
+    unauthorized.handler!();
+    await vi.waitFor(() => expect(t.getState().phase).toBe('signedOut'));
+    expect(mismatch.requestUser).toBeNull();
+  });
+
+  it('a queued item refused as another account’s (user_mismatch) stays queued: not copied, not dropped', async () => {
+    const s = await registeredStore(); // ann
+    const ann = s.getState().user!.id;
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    // Another tab signed in as bob: the shared cookie is bob's now.
+    api.updateNote.mockRejectedValue(new ApiError(409, 'user_mismatch'));
+    api.createNote.mockRejectedValue(new ApiError(409, 'user_mismatch'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'ann text', 't0');
+    // The send names the item's owner itself.
+    expect(api.updateNote.mock.calls[0][2]).toMatchObject({ asUser: ann });
+    expect(api.createNote).not.toHaveBeenCalled();
+    expect(s.getState().pendingCount).toBe(1);
+    expect(s.getState().notice).toBeNull();
+    await s.retryPending();
+    expect(s.getState().pendingCount).toBe(1);
+    expect(api.createNote).not.toHaveBeenCalled();
+    expect(s.hasUnsavedWork()).toBe(true);
+    // Once ann's session is back, it is sent.
+    api.updateNote.mockResolvedValue({ note: { updatedAt: 't1' } });
+    await s.retryPending();
+    expect(s.getState().pendingCount).toBe(0);
+  });
+
+  it('an editor save refused as another account’s ends this tab’s session; the text is stashed and sent after sign-in', async () => {
+    const s = await registeredStore();
+    const ann = s.getState().user!.id;
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Plan', '');
+    const noteSent: NoteBody = api.createNote.mock.calls[0][1];
+    const ed = newSaveState(vaultId, created.id);
+    ed.base = 't1';
+    ed.body = 'typed while bob signed in elsewhere';
+    s.registerFlusher((final) => settle(s, ed, final));
+    // Every request now meets bob's cookie. The client reports a mismatch only for requests that name
+    // the signed-in account (not for queued sends, which name their owner).
+    api.updateNote.mockImplementation(async (_id: string, _b: unknown, opts?: { asUser?: string }) => {
+      if (!opts?.asUser) mismatch.handler!();
+      throw new ApiError(409, 'user_mismatch');
+    });
+    api.createNote.mockReset();
+    api.createNote.mockRejectedValue(new ApiError(409, 'user_mismatch'));
+    // The editor's autosave.
+    await expect(s.saveNoteBody(vaultId, created.id, ed.body, ed.base)).rejects.toMatchObject({ code: 'user_mismatch' });
+    await vi.waitFor(() => expect(s.getState().phase).toBe('signedOut'));
+    expect(s.getState().notice).toBe(MISMATCH_NOTICE);
+    expect(s.getState().pendingCount).toBe(1);
+    expect(s.getState().bodies).toEqual({});
+    expect(api.createNote).not.toHaveBeenCalled(); // never mistaken for a conflict
+    expect(api.logout).not.toHaveBeenCalled(); // the cookie is bob's: never end his session
+    for (const call of api.updateNote.mock.calls.filter(([, , o]) => o?.asUser)) expect(call[2].asUser).toBe(ann);
+
+    // Ann signs in again here: the queued ciphertext is sent and decrypts to the typed text.
+    const vaultDto = { ...api.createVault.mock.calls[0][0], createdAt: 'x', updatedAt: 'x', noteCount: 1, activeNoteCount7d: 1 };
+    mockUnlock([vaultDto]);
+    api.updateNote.mockReset();
+    api.updateNote.mockResolvedValue({ note: { updatedAt: 't2' } });
+    await s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
+    const [id, sent] = api.updateNote.mock.calls.at(-1)!;
+    expect(id).toBe(created.id);
+    expect(sent.baseUpdatedAt).toBe('t1');
+    await vi.waitFor(() => expect(s.getState().vaults[vaultId]?.name).toBe('Personal'));
+    api.getNote.mockResolvedValue({ note: { ...headFor(noteSent, 't2').note, encBody: sent.encBody } });
+    expect((await s.loadNote(vaultId, created.id)).body).toBe('typed while bob signed in elsewhere');
   });
 });
 

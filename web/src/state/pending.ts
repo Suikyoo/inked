@@ -1,4 +1,4 @@
-import { ApiError } from '../api/client';
+import { ApiError, isUserMismatch } from '../api/client';
 
 /** A note body that could not be saved yet. Ciphertext only, so it can wait out a lock. */
 export interface PendingSave {
@@ -25,9 +25,18 @@ export interface PendingResult {
   reason?: DropReason;
 }
 
-/** Worth trying again later: offline, signed out, server trouble, rate limits. */
+/**
+ * Worth trying again later: offline, signed out, server trouble, rate limits, or another account's
+ * session in this browser (409 user_mismatch: never a conflict, never an existing copy).
+ */
 const transient = (e: unknown) =>
-  !(e instanceof ApiError) || e.status === 0 || e.status === 401 || e.status === 408 || e.status === 429 || e.status >= 500;
+  !(e instanceof ApiError) ||
+  e.status === 0 ||
+  e.status === 401 ||
+  e.status === 408 ||
+  e.status === 429 ||
+  e.status >= 500 ||
+  isUserMismatch(e);
 
 const dropped = (reason: DropReason): PendingResult => ({ outcome: 'dropped', reason });
 
@@ -41,7 +50,7 @@ type PendingIO = {
 
 /**
  * Sends one queued save. A conflict (409) or a note deleted elsewhere (404) becomes a copy note,
- * so the text is never lost; network, 5xx and 401 errors leave the item for a later retry.
+ * so the text is never lost; network, 5xx, 401 and user_mismatch errors leave the item for a later retry.
  * Other client errors can never succeed, so the item is dropped (and the user told why).
  */
 export async function sendPending(p: PendingSave, io: PendingIO): Promise<PendingResult> {

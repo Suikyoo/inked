@@ -104,6 +104,8 @@ export function describeError(e: unknown, fallback = 'Something went wrong. Try 
         return NOTE_TOO_LARGE_MESSAGE;
       case 'conflict':
         return 'This note changed somewhere else.';
+      case 'user_mismatch':
+        return 'You signed in as someone else in another tab. Sign in again here.';
       case 'cycle':
         return 'A folder can’t be moved inside itself.';
       case 'forbidden':
