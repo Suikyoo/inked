@@ -91,6 +91,9 @@ server {
     listen 80;
     server_name _;
 
+    # Off on purpose: request lines hold invite tokens and usernames. Inked logs every request itself, redacted.
+    access_log off;
+
     client_max_body_size 5m;
     proxy_connect_timeout 5s;
     proxy_send_timeout 60s;
