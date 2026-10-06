@@ -3,8 +3,10 @@ import {
   type AppContext,
   currentUser,
   endSession,
+  isKnownDevice,
   publicUser,
   requireUser,
+  setDeviceCookie,
   startSession,
 } from '../context.js';
 import { burnScrypt, fakeKdfSalt, hashSecret, safeEqualStrings, sha256Hex, verifySecret } from '../crypto.js';
@@ -139,6 +141,8 @@ const invalidCredentials = () => new ApiError(401, 'invalid_credentials');
 /**
  * Verifies a client-derived secret for `name` with lockout on repeated failure.
  * Unknown users cost the same scrypt work and fail identically.
+ * A known device (valid `inked_device` cookie for this user) skips the per-account cap entirely,
+ * so an attacker who trips it only blocks new devices; the per-(IP, user) limit always applies.
  */
 async function checkSecret(
   ctx: AppContext,
@@ -150,17 +154,19 @@ async function checkSecret(
 ): Promise<UserRow> {
   const key = `${scope}|${request.ip}|${name}`;
   const accountKey = `${scope}|${name}`;
+  const user = findUser(ctx.db, name);
+  // Without a valid cookie for this very user the account limiter is consulted as before.
+  const useAccountLimit = !isKnownDevice(ctx, request, user);
   // Check both before recording either, so a request one limiter rejects never spends the other's budget.
-  const locked = Math.max(ctx.limiter.retryAfter(key), ctx.accountLimiter.retryAfter(accountKey));
+  const locked = Math.max(ctx.limiter.retryAfter(key), useAccountLimit ? ctx.accountLimiter.retryAfter(accountKey) : 0);
   if (locked > 0) throw lockedError(locked);
   ctx.limiter.attempt(key);
-  ctx.accountLimiter.attempt(accountKey);
+  if (useAccountLimit) ctx.accountLimiter.attempt(accountKey);
 
-  const user = findUser(ctx.db, name);
   const ok = user ? await verifySecret(secret, stored(user)) : (await burnScrypt(secret), false);
   if (!user || !ok) throw invalidCredentials();
   ctx.limiter.reset(key);
-  ctx.accountLimiter.reset(accountKey);
+  if (useAccountLimit) ctx.accountLimiter.reset(accountKey);
   return user;
 }
 
@@ -246,6 +252,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
       const name = request.body.username.toLowerCase();
       const user = await checkSecret(ctx, request, 'login', name, request.body.authKey, authOf);
       startSession(ctx, reply, user.id);
+      setDeviceCookie(ctx, reply, user.id);
       return { user: publicUser(user), wrappedUserKey: user.wrapped_user_key };
     },
   );
@@ -340,6 +347,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
       await replaceCredentials(db, user.id, request.body);
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
       startSession(ctx, reply, user.id);
+      setDeviceCookie(ctx, reply, user.id);
       return { user: publicUser(user), wrappedUserKey: request.body.wrappedUserKey };
     },
   );

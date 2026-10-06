@@ -1,6 +1,9 @@
+import { createHmac, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as cryptoMod from '../src/crypto.js';
-import { type Account, call, fakeCipher, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
+import { type Account, call, fakeCipher, inviteUser, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
 
 let t: TestApp;
 beforeEach(async () => {
@@ -205,6 +208,89 @@ describe('login', () => {
     expect(res.statusCode).toBe(401);
     expect(res.json()).toEqual({ error: 'unauthorized' });
     expect((await call(t.app, 'GET', '/api/me', { cookie: 'garbage' })).statusCode).toBe(401);
+  });
+});
+
+describe('known devices (I-3)', () => {
+  let admin: Account;
+  beforeEach(async () => {
+    admin = await setupAdmin(t.app, 'admin');
+  });
+
+  const secret = () => readFileSync(path.join(t.dataDir, 'server-secret'));
+  const deviceValue = (userId: string) =>
+    `${Buffer.from(userId).toString('base64url')}.${createHmac('sha256', secret()).update(`device:${userId}`).digest('base64url')}`;
+  const deviceCookie = (res: { cookies: Array<{ name: string; value: string }> }) =>
+    res.cookies.find((c) => c.name === 'inked_device');
+  const login = (authKey: string, ip: string, device?: string) =>
+    call(t.app, 'POST', '/api/auth/login', {
+      body: { username: 'admin', authKey },
+      ip,
+      headers: device ? { cookie: `inked_device=${device}` } : {},
+    });
+  const lockAccount = async () => {
+    for (let i = 0; i < 30; i++) expect((await login(key32(), `10.20.0.${i}`)).statusCode).toBe(401);
+    expect((await login(admin.authKey, '10.21.0.1')).statusCode).toBe(429);
+  };
+
+  it('sets the device cookie on a successful login', async () => {
+    const res = await login(admin.authKey, '10.19.0.1');
+    expect(res.statusCode).toBe(200);
+    const c = deviceCookie(res)!;
+    expect(c.value).toBe(deviceValue(admin.userId));
+    expect(c.httpOnly).toBe(true);
+    expect(c.sameSite).toBe('Strict');
+    expect(c.path).toBe('/api/auth');
+    expect(c.maxAge).toBe(180 * 24 * 60 * 60);
+    expect(c.secure).toBeFalsy();
+    expect(deviceCookie(await login(key32(), '10.19.0.2'))).toBeUndefined();
+  });
+
+  it('sets the device cookie on recover/finish', async () => {
+    const next = registerBody('admin');
+    const res = await call(t.app, 'POST', '/api/auth/recover/finish', {
+      body: { username: 'admin', recoveryAuth: admin.recoveryAuth, kdfSalt: next.kdfSalt, kdfParams: next.kdfParams, authKey: next.authKey, wrappedUserKey: next.wrappedUserKey },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(deviceCookie(res)?.value).toBe(deviceValue(admin.userId));
+    expect(deviceCookie(res)?.path).toBe('/api/auth');
+  });
+
+  it('keeps the device cookie on logout', async () => {
+    const out = await call(t.app, 'POST', '/api/auth/logout', { cookie: admin.cookie });
+    expect(deviceCookie(out)).toBeUndefined();
+  });
+
+  it('lets a known device log in while the account is capped for new devices', async () => {
+    const device = deviceCookie(await login(admin.authKey, '10.19.0.1'))!.value;
+    await lockAccount();
+    expect((await login(admin.authKey, '10.22.0.1', device)).statusCode).toBe(200);
+    // Still capped for a client without the cookie.
+    expect((await login(admin.authKey, '10.22.0.2')).statusCode).toBe(429);
+  });
+
+  it('keeps the per-(IP, user) limit for a known device', async () => {
+    const device = deviceCookie(await login(admin.authKey, '10.19.0.1'))!.value;
+    for (let i = 0; i < 5; i++) expect((await login(key32(), '10.23.0.1', device)).statusCode).toBe(401);
+    expect((await login(admin.authKey, '10.23.0.1', device)).statusCode).toBe(429);
+  });
+
+  it('does not exempt a forged or another user’s device cookie', async () => {
+    const bob = await inviteUser(t.app, admin, 'bob');
+    const bobDevice = deviceCookie(
+      await call(t.app, 'POST', '/api/auth/login', { body: { username: 'bob', authKey: bob.authKey }, ip: '10.19.0.3' }),
+    )!.value;
+    await lockAccount();
+    const forged = [
+      bobDevice,
+      `${Buffer.from(admin.userId).toString('base64url')}.${randomBytes(32).toString('base64url')}`,
+      `${Buffer.from(admin.userId).toString('base64url')}.${bobDevice.split('.')[1]}`,
+      Buffer.from(admin.userId).toString('base64url'),
+      'garbage',
+    ];
+    for (const device of forged) {
+      expect((await login(admin.authKey, '10.24.0.1', device)).statusCode, device).toBe(429);
+    }
   });
 });
 

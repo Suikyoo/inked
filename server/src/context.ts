@@ -1,5 +1,6 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { randomToken, sha256Hex } from './crypto.js';
+import { deviceTag, randomToken, sha256Hex } from './crypto.js';
 import type { Db, UserRow } from './db.js';
 import { ApiError, unauthorized } from './errors.js';
 import type { FailureLimiter } from './limiter.js';
@@ -24,6 +25,9 @@ declare module 'fastify' {
 }
 
 export const SESSION_COOKIE = 'inked_session';
+/** Marks a browser that has signed in to an account before; exempts it from the per-account login cap. */
+export const DEVICE_COOKIE = 'inked_device';
+const DEVICE_TTL_S = 180 * 24 * 60 * 60;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Sliding expiry is refreshed at most this often, to avoid a DB write per request.
 const SESSION_REFRESH_MS = 60 * 60 * 1000;
@@ -44,6 +48,36 @@ function setSessionCookie(ctx: AppContext, reply: FastifyReply, token: string): 
 
 export function clearSessionCookie(ctx: AppContext, reply: FastifyReply): void {
   reply.clearCookie(SESSION_COOKIE, { httpOnly: true, sameSite: 'strict', path: '/', secure: ctx.cookieSecure });
+}
+
+/**
+ * Issued on every successful password login and recover/finish: base64url(userId) + "." +
+ * base64url(HMAC-SHA256(serverSecret, "device:" + userId)). Logout leaves it in place on purpose.
+ */
+export function setDeviceCookie(ctx: AppContext, reply: FastifyReply, userId: string): void {
+  const value = `${Buffer.from(userId).toString('base64url')}.${deviceTag(ctx.serverSecret, userId).toString('base64url')}`;
+  reply.setCookie(DEVICE_COOKIE, value, {
+    httpOnly: true,
+    sameSite: 'strict',
+    path: '/api/auth',
+    secure: ctx.cookieSecure,
+    maxAge: DEVICE_TTL_S,
+  });
+}
+
+/**
+ * True only when the request carries a device cookie this server minted for `user`. The tag is
+ * checked (in constant time) whether or not the user exists, so the cost never depends on that.
+ */
+export function isKnownDevice(ctx: AppContext, request: FastifyRequest, user: UserRow | undefined): boolean {
+  const value = request.cookies[DEVICE_COOKIE];
+  const dot = value ? value.indexOf('.') : -1;
+  if (!value || dot < 0) return false;
+  const claimedId = Buffer.from(value.slice(0, dot), 'base64url').toString('utf8');
+  const tag = Buffer.from(value.slice(dot + 1), 'base64url');
+  const expected = deviceTag(ctx.serverSecret, claimedId);
+  const valid = tag.length === expected.length && timingSafeEqual(tag, expected);
+  return valid && user !== undefined && claimedId === user.id;
 }
 
 export function startSession(ctx: AppContext, reply: FastifyReply, userId: string): void {

@@ -23,6 +23,7 @@ Residual risks we accept and state plainly:
 
 - **Rollback, replay and structure.** AAD binds a ciphertext to its slot, not to a version or to the structure. A malicious server can serve an older ciphertext for the same slot (rollback or replay), and can see or alter folder membership, `parentId`, timestamps and deletions. It cannot read or forge content for a slot.
 - **Password change does not re-key data.** Changing the password re-wraps `userKey` but does not re-key vaults or notes. Anyone holding an old backup plus the old password can still decrypt data from that backup.
+- **Login blocking for new devices.** The per-account login cap (30 attempts per 15 min) still applies to devices that have never signed in to the account, so a determined attacker who knows a username can keep blocking logins and recovery from new devices. Known devices (those holding a valid `inked_device` cookie for the account) are exempt and can still sign in.
 - **Enhanced browser spell-check.** Some browsers send text to a remote service for enhanced spell-check, which would take plaintext off-device. Spell-check is therefore off by default, with a toggle in Settings.
 
 ## Key hierarchy (browser)
@@ -71,7 +72,8 @@ IDs (users, vaults, folders, notes) are UUIDv4 strings. Vault/folder/note IDs ar
 - `authHash = scrypt(authKey, perUserServerSalt, N=16384, r=8, p=1, 32 bytes)`; compare with `timingSafeEqual`. Same for `recoveryAuthHash`.
 - Sessions: 32 random bytes, sent as cookie `inked_session` (HttpOnly, SameSite=Strict, Path=/, Secure when `COOKIE_SECURE=true`). DB stores SHA-256 of the token. Lifetime 7 days sliding; logout deletes.
 - CSRF: SameSite=Strict plus every non-GET request must carry header `X-Inked: 1` (else 403).
-- Lockout (in memory) counts an attempt before the secret is verified, so parallel bursts cannot outrun it; success resets the counters. Login and recovery (`/recover/start`, `/recover/finish`) use two limiters. Per (IP, username): 5 attempts in 15 min → 60 s lock. Per account, independent of IP: 30 attempts in 15 min → 15 min lock. `retryAfter` is checked on both before either records an attempt, so a request one limiter rejects spends none of the other's budget. A locked request gets 429 `{error:"locked", retryAfter}` and a `Retry-After` header. Password change and recovery-key rotation count attempts before verifying too, against a per-(IP, user) limiter with the 5 / 15 min → 60 s rule.
+- Lockout (in memory) counts an attempt before the secret is verified, so parallel bursts cannot outrun it; success resets the counters. Login and recovery (`/recover/start`, `/recover/finish`) use two limiters. Per (IP, username): 5 attempts in 15 min → 60 s lock. Per account, independent of IP: 30 attempts in 15 min → 15 min lock. `retryAfter` is checked on both before either records an attempt, so a request one limiter rejects spends none of the other's budget. A locked request gets 429 `{error:"locked", retryAfter}` and a `Retry-After` header. Known devices skip the per-account limiter (they neither consult nor count against it) but keep the per-(IP, username) one; the cap therefore still applies to new devices, so a determined attacker can block logins from new devices (see the threat model). Password change and recovery-key rotation count attempts before verifying too, against a per-(IP, user) limiter with the 5 / 15 min → 60 s rule.
+- Device cookie: every successful password login and `/recover/finish` sets `inked_device` = base64url(userId) + "." + base64url(HMAC-SHA256(serverSecret, "device:" + userId)) (HttpOnly, SameSite=Strict, Path=/api/auth, Max-Age 180 days, Secure when `COOKIE_SECURE=true`). Logout does not clear it. The login/recovery check looks the user up first, verifies the tag in constant time (the same work whether or not the user exists), and treats the request as a known device only when the tag is valid and its user id matches the looked-up user.
 - `TRUST_PROXY` (how the server learns the client IP, which lockouts key on): unset, `false`, `0` or `off` trusts no proxy. A number N trusts N hops; it is implemented as a trust function because Fastify 5 treats a raw number as "trust nothing". `true` means 1 hop. Anything else is a comma-separated list of IPs/CIDRs, validated with `isIP` plus the prefix range (invalid values fail startup). A hop count is only safe when the container is reachable solely through the proxy; otherwise give the proxy's IP or CIDR.
 - First-run setup token: when there are no users, the server generates a token in memory and logs it at warn level as `Inked first-run setup token: …`. `/api/setup` requires it as `setupToken` (8–128 chars). It is cleared once setup succeeds.
 - Registration checks the invite before hashing the password and re-checks it inside the transaction that consumes it.
@@ -90,14 +92,14 @@ JSON in/out. Errors: `{ "error": "<code>", "message"?: string }` with 4xx. All `
 | GET | /api/status | – | `{ needsSetup: boolean }` |
 | POST | /api/setup | RegisterBody (no inviteToken) plus `setupToken` | only when zero users; creates admin; sets cookie; `{ user }`. 409 `already_setup` is checked first, then a wrong token gets 403 `invalid_setup_token` |
 | GET | /api/auth/params?username= | – | `{ kdfSalt, kdfParams }` |
-| POST | /api/auth/login | `{ username, authKey }` | sets cookie; `{ user, wrappedUserKey }` |
+| POST | /api/auth/login | `{ username, authKey }` | sets the session and device cookies; `{ user, wrappedUserKey }` |
 | POST | /api/auth/logout | – | `{ ok: true }` |
 | GET | /api/me | – | `{ user, wrappedUserKey }` (used after reload; browser must still re-enter password to unlock) |
 | POST | /api/auth/register | RegisterBody with `inviteToken` | consumes invite; sets cookie; `{ user }` |
 | POST | /api/auth/password | `{ currentAuthKey, kdfSalt, kdfParams, authKey, wrappedUserKey }` | `{ ok: true }` |
 | POST | /api/auth/recovery-key | `{ currentAuthKey, recoveryAuth, wrappedUserKeyRecovery }` | needs a session and the current authKey; 403 `invalid_credentials` if wrong, else `{ ok: true }`; the old recovery key stops working |
 | POST | /api/auth/recover/start | `{ username, recoveryAuth }` | `{ userId, wrappedUserKeyRecovery }` (same 401 for unknown user or bad proof) |
-| POST | /api/auth/recover/finish | `{ username, recoveryAuth, kdfSalt, kdfParams, authKey, wrappedUserKey }` | sets cookie; `{ user, wrappedUserKey }` |
+| POST | /api/auth/recover/finish | `{ username, recoveryAuth, kdfSalt, kdfParams, authKey, wrappedUserKey }` | sets the session and device cookies; `{ user, wrappedUserKey }` |
 
 `RegisterBody = { inviteToken?, userId, username, kdfSalt, kdfParams, authKey, wrappedUserKey, recoveryAuth, wrappedUserKeyRecovery }`. `userId` is client-generated (needed for AAD). `kdfParams = { alg: "argon2id", m: 65536, t: 3, p: 1 }` (bounds `65536 <= m <= 1048576`, `3 <= t <= 16`, `1 <= p <= 8`). `kdfSalt` = base64url of 16 random bytes. `user = { id, username, isAdmin }`.
 

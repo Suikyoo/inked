@@ -48,6 +48,11 @@ export function fakeKdfSalt(serverSecret: Buffer, username: string): string {
   return createHmac('sha256', serverSecret).update(`salt:${username}`).digest().subarray(0, 16).toString('base64url');
 }
 
+/** HMAC-SHA256(serverSecret, "device:" + userId): proves a device cookie was issued by this server for this user. */
+export function deviceTag(serverSecret: Buffer, userId: string): Buffer {
+  return createHmac('sha256', serverSecret).update(`device:${userId}`).digest();
+}
+
 /** Loads DATA_DIR/server-secret, creating the directory and a 32-byte secret (mode 0600) on first boot. */
 export function loadServerSecret(dataDir: string): Buffer {
   mkdirSync(dataDir, { recursive: true });
