@@ -1,6 +1,6 @@
 # Deploying Inked behind nginx and cloudflared
 
-Inked runs on a Linux server and is reached on a public hostname over HTTPS. Cloudflare Tunnel terminates TLS, so nginx needs no certificates.
+Inked runs on a Linux server and is reached on a public hostname over HTTPS. Cloudflare Tunnel terminates TLS, so nginx needs no certificates (and Cloudflare is in the trust path; see section 8).
 
 ```
 Internet --HTTPS--> Cloudflare edge ==tunnel==> cloudflared   (network: cloudflared-net, external)
@@ -60,6 +60,10 @@ nginx resolves the `inked` address once, at startup. After recreating the `inked
 docker compose restart nginx
 ```
 
+### Subnet collisions
+
+If `docker compose up` fails with "Pool overlaps with other one on this network", another Docker network already uses `inked-internal`'s subnet (172.31.250.0/28). Pick a free private /28 and change it in both places in `compose.yaml`: the `ipam` subnet of `inked-internal` and `TRUST_PROXY` on the `inked` service. If only the subnet changes, Inked stops trusting nginx, and every visitor shares the lockout bucket of nginx's address.
+
 ### Logging
 
 nginx's access log is off on purpose (`access_log off;` in the template). Its default format writes the full request line, with the real client IP, to stdout, and Docker keeps that on disk. Request lines carry secrets: invite tokens (`/join/<token>`, `/api/invites/check?token=<token>`) and usernames (`/api/auth/params?username=<name>`). Inked already logs every request with the real client IP (it trusts nginx), and it strips query strings and reduces `/join/...` to `/join/[redacted]`. Read those logs with `docker compose logs inked`.
@@ -85,6 +89,21 @@ Copy the first-run setup token, open the hostname, and create the admin account.
 ## 7. Accepted risk
 
 Any container placed on `cloudflared-net` can reach nginx and could forge `CF-Connecting-IP`, which would let it choose the IP that login lockouts are keyed on. Only trusted containers belong on that network. The Docker host itself can do the same: its bridge gateway address sits inside the trusted range, so a process on the host can also set `CF-Connecting-IP`. The per-account lockout cap still applies.
+
+## 8. Cloudflare in the trust path
+
+Cloudflare terminates TLS, so it sees every request in the clear: URLs (including invite tokens and usernames), `authKey`, cookies and the ciphertext of notes. It never sees the password, any key that can decrypt, or plaintext; those exist only in the browser. (`authKey` only proves the password to the server; it cannot decrypt anything.)
+
+Cloudflare also serves the JavaScript, so it could inject or rewrite it. That makes it part of the "malicious JavaScript" residual risk in `docs/architecture.md`, alongside a compromised server: rewritten JavaScript could read keys and plaintext in the browser.
+
+In the Cloudflare dashboard for the zone, turn off the features that rewrite HTML or inject scripts:
+
+- Rocket Loader
+- Email Address Obfuscation
+- Web Analytics injection (automatic setup) and Zaraz
+- Automatic HTTPS Rewrites
+
+Inked does not need them, and its CSP (`script-src 'self'` and `style-src 'self'`, so no inline or third-party scripts and no inline styles) blocks what they inject anyway, which can break pages.
 
 ## Local test
 
