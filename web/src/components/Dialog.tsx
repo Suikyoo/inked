@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { prefs } from '../lib/prefs';
 
 interface DialogProps {
   open: boolean;
@@ -173,6 +174,7 @@ export function PromptDialog({
           onChange={(e) => setValue(e.target.value)}
           autoFocus
           autoComplete="off"
+          spellCheck={prefs.spellcheck()}
           maxLength={200}
           disabled={busy}
         />

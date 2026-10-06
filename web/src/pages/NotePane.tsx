@@ -163,6 +163,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
               value={title}
               size={Math.max(8, Math.min(48, title.length + 1))}
               maxLength={200}
+              spellCheck={prefs.spellcheck()}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() => void commitTitle()}
               onKeyDown={(e) => {

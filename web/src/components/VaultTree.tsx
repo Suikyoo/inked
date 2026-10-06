@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { prefs } from '../lib/prefs';
 import { describeError } from '../lib/util';
 import { folderPath, useStore } from '../state/StoreContext';
 import type { FolderView, NoteView, TreeView, VaultView } from '../state/store';
@@ -559,6 +560,7 @@ function RenameInput({ initial, label, onDone }: { initial: string; label: strin
         if (e.key === 'Escape') finish(null);
       }}
       onBlur={() => finish(value.trim() || null)}
+      spellCheck={prefs.spellcheck()}
       maxLength={200}
     />
   );

@@ -69,11 +69,11 @@ function Editing() {
             setSpell(e.target.checked);
           }}
         />
-        <span>Spell-check while editing</span>
+        <span>Spell-check notes and names</span>
       </label>
       <p className="field-hint">
         Off by default. Some browsers send text to an online service for enhanced spell-check, which would expose note
-        content.
+        content and the names of your notes, folders and vaults.
       </p>
     </section>
   );
@@ -279,7 +279,15 @@ function Vaults() {
       )}
 
       <form className="vault-new" onSubmit={create} noValidate>
-        <TextField label="New vault" placeholder="Vault name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} disabled={busy} />
+        <TextField
+          label="New vault"
+          placeholder="Vault name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={80}
+          spellCheck={prefs.spellcheck()}
+          disabled={busy}
+        />
         <ColorPicker value={color} onChange={setColor} label="New vault colour" />
         <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
           {busy ? 'Creating…' : 'Create vault'}
@@ -372,6 +380,7 @@ function VaultSettingsRow({ vault, onDelete }: { vault: VaultView; onDelete: () 
             setStatus('idle');
           }}
           maxLength={80}
+          spellCheck={prefs.spellcheck()}
         />
         <ColorPicker
           value={color}
