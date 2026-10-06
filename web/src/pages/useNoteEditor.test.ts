@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import { LockedError, NoteTooLargeError, type NoteView } from '../state/store';
-import { FINAL_WAIT_MS, LEAVE_WAIT_MS, newSaveState, settle, type SaveState, type SettleStore } from './useNoteEditor';
+import { FINAL_WAIT_MS, leaveNote, LEAVE_WAIT_MS, newSaveState, settle, type SaveState, type SettleStore } from './useNoteEditor';
 
 const head = (updatedAt: string) => ({ updatedAt }) as NoteView;
 
@@ -160,5 +160,35 @@ describe('settle (I4)', () => {
     await settle(store, s, false);
     expect(store.saveNoteBody).not.toHaveBeenCalled();
     expect(store.stashUnsaved).not.toHaveBeenCalled();
+  });
+});
+
+describe('leaving a note (unmount, C1/B6)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('settles through trackSettle and unregisters the flusher only after it settles', async () => {
+    const store = fakeStore();
+    const slow = deferred<NoteView>();
+    store.saveNoteBody.mockReturnValue(slow.promise);
+    const unregister = vi.fn();
+    const s = editing('a', 'ab');
+    const left = leaveNote(store, s, unregister);
+    expect(store.trackSettle).toHaveBeenCalledTimes(1);
+    expect(store.saveNoteBody).toHaveBeenCalledWith('v1', 'n1', 'ab', 't1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(unregister).not.toHaveBeenCalled();
+    slow.resolve(head('t2'));
+    await left;
+    expect(unregister).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failing settle still unregisters and never rejects', async () => {
+    const store = fakeStore();
+    store.trackSettle.mockImplementation((p) => p.then(() => Promise.reject(new Error('boom'))));
+    store.saveNoteBody.mockResolvedValue(head('t2'));
+    const unregister = vi.fn();
+    await expect(leaveNote(store, editing('a', 'ab'), unregister)).resolves.toBeUndefined();
+    expect(unregister).toHaveBeenCalledTimes(1);
   });
 });

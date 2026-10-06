@@ -29,6 +29,13 @@ interface RequestOptions {
   authed?: boolean;
   /** Aborting it fails the request with the same network error as a dropped connection (status 0). */
   signal?: AbortSignal;
+  /** Gives up after this many milliseconds: the request is aborted, with the same network error. */
+  timeoutMs?: number;
+}
+
+/** Per-call options for requests whose wait the caller bounds. */
+export interface CallOptions {
+  timeoutMs?: number;
 }
 
 const networkError = () => new ApiError(0, 'network', 'Can’t reach the server. Check your connection and try again.');
@@ -37,6 +44,16 @@ async function request<T>(method: Method, path: string, body?: unknown, opts: Re
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (method !== 'GET') headers['X-Inked'] = '1';
   if (body !== undefined) headers['Content-Type'] = 'application/json';
+  let signal = opts.signal;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (opts.timeoutMs !== undefined) {
+    const ac = new AbortController();
+    const outer = opts.signal;
+    if (outer?.aborted) ac.abort();
+    else outer?.addEventListener('abort', () => ac.abort(), { once: true });
+    timer = setTimeout(() => ac.abort(), opts.timeoutMs);
+    signal = ac.signal;
+  }
   let res: Response;
   let text: string;
   try {
@@ -46,12 +63,14 @@ async function request<T>(method: Method, path: string, body?: unknown, opts: Re
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: 'same-origin',
       cache: 'no-store',
-      signal: opts.signal,
+      signal,
     });
     // An abort (or a dropped connection) can also land while the body is read.
     text = await res.text();
   } catch {
     throw networkError();
+  } finally {
+    clearTimeout(timer);
   }
   let data: unknown = null;
   if (text) {
@@ -134,12 +153,16 @@ export const api = {
     request<{ folder: FolderDTO }>('PATCH', `/api/folders/${enc(id)}`, body),
   deleteFolder: (id: string) => request<unknown>('DELETE', `/api/folders/${enc(id)}`),
 
-  createNote: (vaultId: string, body: { id: string; folderId: string | null; encMeta: string; encBody: string }) =>
-    request<{ note: NoteHeadDTO }>('POST', `/api/vaults/${enc(vaultId)}/notes`, body),
+  createNote: (
+    vaultId: string,
+    body: { id: string; folderId: string | null; encMeta: string; encBody: string },
+    opts: CallOptions = {},
+  ) => request<{ note: NoteHeadDTO }>('POST', `/api/vaults/${enc(vaultId)}/notes`, body, { timeoutMs: opts.timeoutMs }),
   getNote: (id: string) => request<{ note: NoteDTO }>('GET', `/api/notes/${enc(id)}`),
   updateNote: (
     id: string,
     body: { encMeta?: string; encBody?: string; folderId?: string | null; baseUpdatedAt?: string },
-  ) => request<{ note: NoteHeadDTO }>('PUT', `/api/notes/${enc(id)}`, body),
+    opts: CallOptions = {},
+  ) => request<{ note: NoteHeadDTO }>('PUT', `/api/notes/${enc(id)}`, body, { timeoutMs: opts.timeoutMs }),
   deleteNote: (id: string) => request<{ ok: true }>('DELETE', `/api/notes/${enc(id)}`),
 };

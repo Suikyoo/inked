@@ -92,6 +92,17 @@ export function settle(store: SettleStore, s: SaveState, final: boolean): Promis
   return s.settling;
 }
 
+/**
+ * Leaving a note (unmount, note switch): flush it, and stay registered as a flusher until its edits
+ * are saved or queued, so a lock in the meantime still waits for them (and caps the wait).
+ * Never rejects.
+ */
+export function leaveNote(store: SettleStore, s: SaveState, unregister: () => void): Promise<void> {
+  return settle(store, s, false)
+    .catch(() => undefined)
+    .finally(unregister);
+}
+
 async function settleOnce(store: SettleStore, s: SaveState): Promise<void> {
   window.clearTimeout(s.timer);
   s.timer = undefined;
@@ -270,9 +281,7 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
     return () => {
       cancelled = true;
       s.alive = false;
-      // Flush the note we are leaving. Stay registered until its edits are saved or queued,
-      // so a lock in the meantime still waits for them (and caps the wait).
-      void settle(store, s, false).finally(unregister);
+      void leaveNote(store, s, unregister);
     };
   }, [vaultId, noteId, reloadTick, store]);
 

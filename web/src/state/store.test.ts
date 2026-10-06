@@ -28,7 +28,7 @@ vi.mock('../lib/argon2Worker', async () => {
 import { ApiError } from '../api/client';
 import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
 import { newSaveState, settle } from '../pages/useNoteEditor';
-import { AppStore, LockedError, LOGOUT_TIMEOUT_MS } from './store';
+import { AppStore, LockedError, LOGOUT_TIMEOUT_MS, QUEUE_REQUEST_TIMEOUT_MS } from './store';
 
 /** Captured before any test fakes timers: lets real async work (WebCrypto, argon2) run while fake time stands still. */
 const realSetTimeout = globalThis.setTimeout;
@@ -389,10 +389,11 @@ describe('AppStore', () => {
     await s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' });
     await s.retryPending();
     expect(api.updateNote.mock.calls.length).toBe(calls);
-    expect(s.getState().pendingCount).toBe(1);
+    expect(s.getState().pendingCount).toBe(0); // bob's count (B2); ann's item stays queued
+    expect(s.hasUnsavedWork()).toBe(true);
   });
 
-  it('puts the copy at the vault root when the note’s folder was deleted elsewhere (I4)', async () => {
+  it('puts the copy at the vault root when the note’s folder was deleted elsewhere, and says why (I4, B1)', async () => {
     const s = await registeredStore();
     const vaultId = Object.keys(s.getState().vaults)[0];
     api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
@@ -407,7 +408,7 @@ describe('AppStore', () => {
     expect(api.createNote.mock.calls[0][1].folderId).toBe(folder.id);
     expect(api.createNote.mock.calls[1][1].folderId).toBeNull();
     expect(s.getState().pendingCount).toBe(0);
-    expect(s.getState().notice).toBe('Saved your changes as “Plan (unsaved copy)” because the note changed elsewhere.');
+    expect(s.getState().notice).toBe('Your changes to a note were saved as an “(unsaved copy)” note at the top of the vault because its folder was deleted.');
   });
 
   it('drops queued text whose vault was deleted elsewhere, and says so (I4)', async () => {
@@ -421,7 +422,7 @@ describe('AppStore', () => {
     expect(s.hasUnsavedWork()).toBe(false);
   });
 
-  it('drops queued text the server refuses, with one notice for several (I4)', async () => {
+  it('drops queued text the server refuses, with one notice for several (I4, B1)', async () => {
     const s = await registeredStore();
     const vaultId = Object.keys(s.getState().vaults)[0];
     api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
@@ -431,7 +432,7 @@ describe('AppStore', () => {
     api.updateNote.mockRejectedValue(new ApiError(400, 'invalid_request'));
     await s.retryPending();
     expect(s.getState().pendingCount).toBe(0);
-    expect(s.getState().notice).toBe('Some unsaved changes couldn’t be kept because their note or vault was deleted elsewhere.');
+    expect(s.getState().notice).toBe('Some unsaved changes were rejected by the server and couldn’t be saved.');
   });
 
   it('counts a flush in progress as unsaved work, for the close-tab prompt (I4)', async () => {
@@ -796,6 +797,293 @@ describe('AppStore', () => {
     const vaultId = Object.keys(s.getState().vaults)[0];
     await expect(s.stashUnsaved(vaultId, crypto.randomUUID(), 'x'.repeat(1_600_000))).rejects.toThrow(/too large/i);
     expect(s.getState().pendingCount).toBe(0);
+  });
+
+  // ---- Task 4: queue follow-ups (B1, B2, B6, C1) -------------------------------------------
+
+  it('names the real cause when queued text is dropped, one notice per cause (B1)', async () => {
+    const network = new ApiError(0, 'network');
+    const cases: { reason: string; setup: () => void; one: string; many: string }[] = [
+      {
+        reason: 'deleted',
+        setup: () => {
+          api.updateNote.mockRejectedValue(new ApiError(404, 'not_found'));
+          api.createNote.mockRejectedValue(new ApiError(404, 'not_found'));
+        },
+        one: 'An unsaved change couldn’t be kept because its note or vault was deleted elsewhere.',
+        many: 'Some unsaved changes couldn’t be kept because their note or vault was deleted elsewhere.',
+      },
+      {
+        reason: 'rejected',
+        setup: () => api.updateNote.mockRejectedValue(new ApiError(400, 'invalid_request')),
+        one: 'An unsaved change was rejected by the server and couldn’t be saved.',
+        many: 'Some unsaved changes were rejected by the server and couldn’t be saved.',
+      },
+      {
+        reason: 'too_large',
+        setup: () => api.updateNote.mockRejectedValue(new ApiError(413, 'too_large')),
+        one: 'An unsaved change was too large to save.',
+        many: 'Some unsaved changes were too large to save.',
+      },
+    ];
+    for (const c of cases) {
+      for (const n of [1, 2]) {
+        const s = await registeredStore();
+        const vaultId = Object.keys(s.getState().vaults)[0];
+        api.updateNote.mockRejectedValue(network);
+        for (let i = 0; i < n; i++) await s.stashUnsaved(vaultId, crypto.randomUUID(), `text ${i}`, 't1');
+        expect(s.getState().pendingCount).toBe(n);
+        c.setup();
+        await s.retryPending();
+        expect(s.getState().pendingCount).toBe(0);
+        expect([c.reason, s.getState().notice]).toEqual([c.reason, n === 1 ? c.one : c.many]);
+      }
+    }
+  });
+
+  it('says several copies went to the vault root because their folders were deleted (B1)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    api.createFolder.mockImplementation(async (_v: string, b: { id: string; parentId: null }) => ({ folder: { ...b, createdAt: 'x', updatedAt: 'x' } }));
+    const folder = await s.createFolder(vaultId, null, 'Work');
+    const one = await s.createNote(vaultId, folder.id, 'One', '');
+    const two = await s.createNote(vaultId, folder.id, 'Two', '');
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, one.id, 'one text', 't1');
+    await s.stashUnsaved(vaultId, two.id, 'two text', 't1');
+    api.updateNote.mockRejectedValue(new ApiError(404, 'not_found'));
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => {
+      if (b.folderId) throw new ApiError(400, 'invalid_folder');
+      return headFor(b, 't2');
+    });
+    api.listVaults.mockResolvedValue({ vaults: [] });
+    await s.retryPending();
+    expect(s.getState().pendingCount).toBe(0);
+    expect(s.getState().notice).toBe(
+      'Your changes to 2 notes were saved as “(unsaved copy)” notes at the top of the vault because their folders were deleted.',
+    );
+  });
+
+  it('keeps a copy notice produced during a lock’s flush and shows it after the next unlock (B1)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Secret plan', '');
+    api.updateNote.mockRejectedValue(new ApiError(409, 'conflict'));
+    s.registerFlusher(() => s.stashUnsaved(vaultId, created.id, 'my plan text', 't1'));
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    expect(api.createNote).toHaveBeenCalledTimes(2); // the copy was made during the flush
+    expect(s.getState().notice).toBeNull();
+    mockUnlock();
+    await s.unlock('ann', 'pw-ann-123456');
+    const notice = s.getState().notice;
+    expect(notice).toBe('A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.');
+    // The plaintext title never outlives the keys.
+    expect(notice).not.toContain('Secret');
+  });
+
+  it('counts only the signed-in account’s queued edits, and sends them only with its session (B2)', async () => {
+    const s = await registeredStore(); // ann
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'ann text', 't0');
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    expect(s.getState().pendingCount).toBe(1); // ann was the last account here
+    const sent = api.updateNote.mock.calls.length;
+    await s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' });
+    await s.retryPending();
+    expect(s.getState().pendingCount).toBe(0);
+    expect(api.updateNote.mock.calls.length).toBe(sent);
+    await s.lock();
+    expect(s.getState().pendingCount).toBe(0); // bob was the last account here
+    mockUnlock();
+    let release!: (v: unknown) => void;
+    api.updateNote.mockReturnValue(new Promise((r) => (release = r)));
+    await s.unlock('ann', 'pw-ann-123456');
+    expect(s.getState().pendingCount).toBe(1);
+    await vi.waitFor(() => expect(api.updateNote.mock.calls.length).toBe(sent + 1));
+    release({ note: { updatedAt: 't1' } });
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
+  });
+
+  it('shows no count while signed out once the account is forgotten (B2)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0');
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    expect(s.getState().pendingCount).toBe(1);
+    s.forgetUsername();
+    expect(s.getState().pendingCount).toBe(0);
+    expect(s.hasUnsavedWork()).toBe(true); // still queued, still warned about
+
+    const t = await registeredStore();
+    await t.stashUnsaved(Object.keys(t.getState().vaults)[0], crypto.randomUUID(), 'text', 't0');
+    expect(t.getState().pendingCount).toBe(1);
+    await t.signOut();
+    expect(t.getState().pendingCount).toBe(0);
+  });
+
+  it('refreshes the note’s head and loaded body after a queued save lands; a later save uses the new base (B2)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, '2026-01-01T00:00:00.000Z'));
+    const created = await s.createNote(vaultId, null, 'Plan', 'old text');
+    const noteSent: NoteBody = api.createNote.mock.calls[0][1];
+    // A tiny server: accepts a save only on top of its current version.
+    const server = { at: '2026-01-01T00:00:00.000Z', encBody: noteSent.encBody, n: 1 };
+    api.updateNote.mockImplementation(async (_id: string, b: { encBody: string; baseUpdatedAt?: string }) => {
+      if (b.baseUpdatedAt !== server.at) throw new ApiError(409, 'conflict');
+      server.at = `2026-01-0${++server.n}T00:00:00.000Z`;
+      server.encBody = b.encBody;
+      return headFor(noteSent, server.at);
+    });
+    api.getNote.mockImplementation(async () => ({ note: { ...headFor(noteSent, server.at).note, encBody: server.encBody } }));
+    await s.stashUnsaved(vaultId, created.id, 'queued text', '2026-01-01T00:00:00.000Z');
+    expect(s.getState().pendingCount).toBe(0);
+    await vi.waitFor(() => expect(s.getState().trees[vaultId].notes[created.id].updatedAt).toBe('2026-01-02T00:00:00.000Z'));
+    expect(s.getState().bodies[created.id]).toBe('queued text');
+    expect(s.isOwnStamp(created.id, '2026-01-02T00:00:00.000Z')).toBe(true);
+
+    // An editor opened on the note afterwards saves on top of the queued text without a conflict.
+    const { head, body } = await s.loadNote(vaultId, created.id);
+    const ed = newSaveState(vaultId, created.id);
+    ed.base = head.updatedAt;
+    ed.savedBody = body;
+    ed.body = `${body}, then more`;
+    await settle(s, ed, false);
+    expect(ed.base).toBe('2026-01-03T00:00:00.000Z');
+    expect(s.getState().pendingCount).toBe(0);
+    expect(api.createNote).toHaveBeenCalledTimes(1); // no copy note
+    expect(s.getState().bodies[created.id]).toBe('queued text, then more');
+  });
+
+  it('a queued send that never answers times out after 30 s and is retried (B2)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockReturnValueOnce(new Promise(() => undefined)).mockResolvedValue({ note: { updatedAt: 't2' } });
+    vi.useFakeTimers();
+    try {
+      let done = false;
+      const stashing = s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0').then(() => (done = true));
+      while (!api.updateNote.mock.calls.length) await realWait(5); // encryption runs on real crypto
+      expect(api.updateNote.mock.calls[0][2]).toEqual({ timeoutMs: QUEUE_REQUEST_TIMEOUT_MS });
+      expect(QUEUE_REQUEST_TIMEOUT_MS).toBe(30_000);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(done).toBe(false);
+      expect(api.updateNote).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await stashing;
+      expect(api.updateNote).toHaveBeenCalledTimes(2);
+      expect(s.getState().pendingCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a racing save that never answers holds the queued edit for at most 30 s (B2)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockResolvedValue({ note: { updatedAt: 't2' } });
+    vi.useFakeTimers();
+    try {
+      await s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0', { racing: { save: new Promise(() => undefined), sameText: true } });
+      expect(s.getState().pendingCount).toBe(1);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(api.updateNote).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(api.updateNote).toHaveBeenCalledTimes(1);
+      expect(api.updateNote.mock.calls[0][1].baseUpdatedAt).toBe('t0');
+      expect(s.getState().pendingCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries the queue when the browser comes back online (C1)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0');
+    expect(s.getState().pendingCount).toBe(1);
+    api.updateNote.mockResolvedValue({ note: { updatedAt: 't1' } });
+    window.dispatchEvent(new Event('online'));
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
+  });
+
+  it('retries every 30 s while edits are queued, and stops once the queue is empty (C1)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    vi.useFakeTimers();
+    try {
+      await s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0');
+      expect(s.getState().pendingCount).toBe(1);
+      expect(vi.getTimerCount()).toBe(1); // the retry interval
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(api.updateNote).toHaveBeenCalledTimes(2);
+      expect(s.getState().pendingCount).toBe(1);
+      api.updateNote.mockResolvedValue({ note: { updatedAt: 't1' } });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(api.updateNote).toHaveBeenCalledTimes(3);
+      expect(s.getState().pendingCount).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(api.updateNote).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks before the tab closes while edits are queued (C1)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0');
+    expect(s.hasUnsavedWork()).toBe(true);
+    // jsdom has no BeforeUnloadEvent: give a plain event a writable returnValue like the real one.
+    const e = new Event('beforeunload', { cancelable: true });
+    Object.defineProperty(e, 'returnValue', { value: '', writable: true, configurable: true });
+    window.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect((e as unknown as { returnValue: unknown }).returnValue).toBe(true);
+  });
+
+  it('register waits, right before its session request, for a peer lock that arrived while it derived keys (A3)', async () => {
+    const s = await registeredStore();
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'lock', tab: 'peer', id: 'L9', notice: null });
+    const registering = s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' });
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'L9' }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(api.setup).toHaveBeenCalledTimes(1); // only ann's
+    peer.postMessage({ type: 'lock-end', tab: 'peer', id: 'L9' });
+    await registering;
+    expect(api.setup).toHaveBeenCalledTimes(2);
+    expect(s.getState().user?.username).toBe('bob');
+  });
+
+  it('a sign-out from another tab during this tab’s own lock forgets the username (A2)', async () => {
+    const s = await registeredStore();
+    let release!: () => void;
+    s.registerFlusher(() => new Promise<void>((r) => (release = r)));
+    api.logout.mockResolvedValue({ ok: true });
+    const locking = s.lock();
+    expect(s.getState().locking).toBe(true);
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'signout', tab: 'peer', id: 'S9' });
+    await vi.waitFor(() => expect(FakeChannel.bus[0].received).toContainEqual({ type: 'signout', tab: 'peer', id: 'S9' }));
+    release();
+    await locking;
+    expect(s.getState().phase).toBe('signedOut');
+    expect(localStorage.getItem('inked.lastUsername')).toBeNull();
+    expect(s.getState().lastUsername).toBe('');
   });
 });
 

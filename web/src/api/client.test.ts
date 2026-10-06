@@ -45,3 +45,30 @@ describe('api client abort (A3)', () => {
     expect(await p).toMatchObject({ name: 'ApiError', status: 0, code: 'network' });
   });
 });
+
+describe('api client timeout (B2)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('aborts a request that takes longer than timeoutMs, as a network error', async () => {
+    vi.useFakeTimers();
+    const fetch = hangingFetch();
+    vi.stubGlobal('fetch', fetch);
+    let settled = false;
+    const p = api.updateNote('n1', { encBody: 'v1.x' }, { timeoutMs: 30_000 }).catch((e) => e).finally(() => (settled = true));
+    expect(fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await p).toMatchObject({ name: 'ApiError', status: 0, code: 'network' });
+  });
+
+  it('clears the timer once the request is answered', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ note: { id: 'c1' } }), { status: 200 })));
+    await api.createNote('v1', { id: 'c1', folderId: null, encMeta: 'm', encBody: 'b' }, { timeoutMs: 30_000 });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

@@ -29,7 +29,7 @@ import {
 } from '../crypto';
 import { argon2InWorker } from '../lib/argon2Worker';
 import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
-import { sendPending, type PendingSave } from './pending';
+import { sendPending, type DropReason, type PendingSave } from './pending';
 import { TabLink } from './tabs';
 
 export type Phase = 'booting' | 'offline' | 'setup' | 'signedOut' | 'locked' | 'unlocked';
@@ -87,7 +87,7 @@ export interface AppState {
   /** Decrypted note bodies, for full-text search and backlinks. Memory only. */
   bodies: Record<string, string>;
   bodiesReady: Record<string, boolean>;
-  /** Saves waiting in the ciphertext queue. Survives lock (not part of EMPTY_DATA). */
+  /** This account's saves waiting in the ciphertext queue (see syncPendingCount). Survives lock (not part of EMPTY_DATA). */
   pendingCount: number;
   /** A lock, sign-out or session end is flushing edits before the keys go: editing is paused. */
   locking: boolean;
@@ -132,6 +132,71 @@ export class NoteTooLargeError extends Error {
 }
 
 const PENDING_RETRY_MS = 30_000;
+
+/** A queued send (or the save it waits for) that takes longer than this is given up and retried later. */
+export const QUEUE_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Settles like `p`, or fails with the network error (retried later) after QUEUE_REQUEST_TIMEOUT_MS.
+ * Raced as well as aborted (see QUEUE_IO), so even a request that ignores its abort cannot hold the queue.
+ */
+function bounded<T>(p: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new ApiError(0, 'network')), QUEUE_REQUEST_TIMEOUT_MS);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** How queued saves reach the server: ciphertext only, every request bounded. */
+const QUEUE_IO = {
+  updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) =>
+    bounded(api.updateNote(id, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS })),
+  createNote: (vaultId: string, b: PendingSave['copy']) =>
+    bounded(api.createNote(vaultId, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS })),
+};
+
+const DROP_NOTICES: Record<DropReason, [one: string, many: string]> = {
+  deleted: [
+    'An unsaved change couldn’t be kept because its note or vault was deleted elsewhere.',
+    'Some unsaved changes couldn’t be kept because their note or vault was deleted elsewhere.',
+  ],
+  rejected: [
+    'An unsaved change was rejected by the server and couldn’t be saved.',
+    'Some unsaved changes were rejected by the server and couldn’t be saved.',
+  ],
+  too_large: ['An unsaved change was too large to save.', 'Some unsaved changes were too large to save.'],
+};
+
+/**
+ * What one pass of the queue tells the user. `copies` holds each copy's title, or null where the
+ * title must not be shown (keys gone or going).
+ */
+function queueNotice(copies: (string | null)[], atRoot: number, dropped: Record<DropReason, number>): string | null {
+  const out: string[] = [];
+  if (copies.length) {
+    const title = copies.length === 1 ? copies[0] : null;
+    out.push(
+      title
+        ? `Saved your changes as “${title}” because the note changed elsewhere.`
+        : copies.length === 1
+          ? 'A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.'
+          : `${copies.length} notes changed elsewhere; your versions were saved as “(unsaved copy)” notes.`,
+    );
+  }
+  if (atRoot) {
+    out.push(
+      atRoot === 1
+        ? 'Your changes to a note were saved as an “(unsaved copy)” note at the top of the vault because its folder was deleted.'
+        : `Your changes to ${atRoot} notes were saved as “(unsaved copy)” notes at the top of the vault because their folders were deleted.`,
+    );
+  }
+  for (const reason of ['deleted', 'rejected', 'too_large'] as const) {
+    const n = dropped[reason];
+    if (n) out.push(DROP_NOTICES[reason][n === 1 ? 0 : 1]);
+  }
+  return out.length ? out.join(' ') : null;
+}
 
 /** Every logout call is aborted after this long: the keys are already gone, and a new sign-in waits for it. */
 export const LOGOUT_TIMEOUT_MS = 5000;
@@ -216,6 +281,12 @@ export class AppStore {
    * Never rejects.
    */
   private unlocking: Promise<void> | null = null;
+  /** The account last signed in in this tab, so a locked tab still counts its queued edits. Memory only. */
+  private lastUserId: string | null = null;
+  /** A queue notice produced while the keys were going (or gone); shown when its account signs in again. */
+  private deferredNotice: { owner: string; text: string } | null = null;
+  /** Another tab signed out while this tab's own lock was running: that lock forgets the username too. */
+  private forgetOnEnd = false;
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
@@ -224,7 +295,10 @@ export class AppStore {
         if (this.state.phase === 'unlocked') void this.retryPending();
       });
       window.addEventListener('beforeunload', (e) => {
-        if (this.hasUnsavedWork()) e.preventDefault();
+        if (!this.hasUnsavedWork()) return;
+        e.preventDefault();
+        // Older browsers only ask when returnValue is set.
+        e.returnValue = true;
       });
     }
   }
@@ -317,8 +391,12 @@ export class AppStore {
     this.userKey = userKey;
     this.vaultKeys.clear();
     this.ownStamps.clear();
+    this.lastUserId = user.id;
+    const deferred = this.deferredNotice?.owner === user.id ? this.deferredNotice.text : null;
+    if (deferred) this.deferredNotice = null;
     rememberUsername(user.username);
-    this.set({ phase: 'unlocked', user, lastUsername: user.username, notice: null, ...EMPTY_DATA });
+    this.set({ phase: 'unlocked', user, lastUsername: user.username, notice: deferred, ...EMPTY_DATA });
+    this.syncPendingCount();
     void this.retryPending();
   }
 
@@ -394,10 +472,14 @@ export class AppStore {
     try {
       const peers = opts.fromPeer ? null : this.tabs.announceLock(notice);
       await this.flushAll(true);
-      const lastUsername = this.state.user?.username ?? this.state.lastUsername;
+      // A sign-out from another tab arrived meanwhile: it wins, so the username is forgotten.
+      const forget = this.takeForgetOnEnd();
+      const lastUsername = forget ? '' : (this.state.user?.username ?? this.state.lastUsername);
       this.dropKeys();
-      rememberUsername(lastUsername);
+      if (forget) this.forgetAccount();
+      else rememberUsername(lastUsername);
       this.set({ phase: 'signedOut', user: null, lastUsername, notice, locking: false, ...EMPTY_DATA });
+      this.syncPendingCount();
       if (!peers) return;
       this.sessionEnd = (async () => {
         await peers.peersDone;
@@ -412,8 +494,22 @@ export class AppStore {
 
   /** "Not you?" on the unlock screen when there is no session: forget the remembered username. */
   forgetUsername() {
-    forgetRememberedUsername();
+    this.forgetAccount();
     this.set({ lastUsername: '' });
+    this.syncPendingCount();
+  }
+
+  /** Forgets the remembered username and which account this tab last held (no count while signed out). */
+  private forgetAccount() {
+    forgetRememberedUsername();
+    this.lastUserId = null;
+  }
+
+  /** Reads and clears forgetOnEnd; every lock, sign-out and session end calls it once its flush is done. */
+  private takeForgetOnEnd(): boolean {
+    const forget = this.forgetOnEnd;
+    this.forgetOnEnd = false;
+    return forget;
   }
 
   /**
@@ -427,9 +523,11 @@ export class AppStore {
     try {
       const peers = this.tabs.announceSignOut();
       await this.flushAll(true);
+      this.takeForgetOnEnd(); // forgetting anyway
       this.dropKeys();
-      forgetRememberedUsername();
+      this.forgetAccount();
       this.set({ phase: 'signedOut', user: null, lastUsername: '', notice: null, locking: false, ...EMPTY_DATA });
+      this.syncPendingCount();
       this.sessionEnd = (async () => {
         await peers.peersDone;
         await this.logoutBounded();
@@ -450,21 +548,32 @@ export class AppStore {
     const { phase } = this.state;
     if (phase === 'signedOut' || phase === 'setup') {
       // No keys here; still stop showing the name the user chose to forget.
-      if (!opts.remember && this.state.lastUsername) {
-        forgetRememberedUsername();
-        this.set({ lastUsername: '' });
+      if (!opts.remember) {
+        if (this.state.lastUsername) {
+          forgetRememberedUsername();
+          this.set({ lastUsername: '' });
+        }
+        this.lastUserId = null;
+        this.syncPendingCount();
       }
       return;
     }
-    if (this.state.locking) return;
+    if (this.state.locking) {
+      // This tab's own lock (or session end) is flushing: let it forget the username when it finishes.
+      if (!opts.remember) this.forgetOnEnd = true;
+      return;
+    }
     this.set({ locking: true });
     try {
       await this.flushAll(true);
-      const lastUsername = opts.remember ? (this.state.user?.username ?? this.state.lastUsername) : '';
+      const forget = this.takeForgetOnEnd();
+      const remember = opts.remember && !forget;
+      const lastUsername = remember ? (this.state.user?.username ?? this.state.lastUsername) : '';
       this.dropKeys();
-      if (opts.remember) rememberUsername(lastUsername);
-      else forgetRememberedUsername();
+      if (remember) rememberUsername(lastUsername);
+      else this.forgetAccount();
       this.set({ phase: 'signedOut', user: null, lastUsername, notice: null, locking: false, ...EMPTY_DATA });
+      this.syncPendingCount();
     } finally {
       if (this.state.locking) this.set({ locking: false });
     }
@@ -481,8 +590,18 @@ export class AppStore {
     this.set({ locking: true });
     try {
       await this.flushAll(true);
+      const forget = this.takeForgetOnEnd();
       this.dropKeys();
-      this.set({ phase: 'signedOut', user: null, notice: 'Your session ended. Sign in again.', locking: false, ...EMPTY_DATA });
+      if (forget) this.forgetAccount();
+      this.set({
+        phase: 'signedOut',
+        user: null,
+        ...(forget ? { lastUsername: '' } : {}),
+        notice: 'Your session ended. Sign in again.',
+        locking: false,
+        ...EMPTY_DATA,
+      });
+      this.syncPendingCount();
     } finally {
       if (this.state.locking) this.set({ locking: false });
     }
@@ -497,15 +616,18 @@ export class AppStore {
     inviteToken?: string;
     setupToken?: string;
   }): Promise<string> {
-    await this.previousSessionGone();
     const userId = uuid();
     const kdfSalt = generateKdfSalt();
     const kdfParams: KdfParams = { ...DEFAULT_KDF_PARAMS };
     const pw = await derive(opts.password, kdfSalt, kdfParams);
     const rkBytes = generateRecoveryKey();
     const recoveryKeyText = formatRecoveryKey(rkBytes);
-    const rk = await deriveRecoveryKeys(rkBytes);
-    wipe(rkBytes);
+    let rk: Awaited<ReturnType<typeof deriveRecoveryKeys>>;
+    try {
+      rk = await deriveRecoveryKeys(rkBytes);
+    } finally {
+      wipe(rkBytes);
+    }
     const uk = await generateUserKey(userId, pw.passwordKEK, rk.recoveryKEK);
     const body = {
       userId,
@@ -518,6 +640,8 @@ export class AppStore {
       wrappedUserKeyRecovery: uk.wrappedUserKeyRecovery,
     };
     await this.signingIn(async () => {
+      // Right before the session starts, so a lock elsewhere during the slow derivation is waited out too.
+      await this.previousSessionGone();
       const { user } = opts.inviteToken
         ? await api.register({ ...body, inviteToken: opts.inviteToken })
         : await api.setup({ ...body, setupToken: opts.setupToken ?? '' });
@@ -535,9 +659,12 @@ export class AppStore {
 
   async recover(username: string, recoveryKeyText: string, newPassword: string): Promise<void> {
     const rkBytes = parseRecoveryKey(recoveryKeyText);
-    await this.previousSessionGone();
-    const rk = await deriveRecoveryKeys(rkBytes);
-    wipe(rkBytes);
+    let rk: Awaited<ReturnType<typeof deriveRecoveryKeys>>;
+    try {
+      rk = await deriveRecoveryKeys(rkBytes);
+    } finally {
+      wipe(rkBytes);
+    }
     const { userId, wrappedUserKeyRecovery } = await api.recoverStart(username, rk.recoveryAuth);
     const kdfSalt = generateKdfSalt();
     const kdfParams: KdfParams = { ...DEFAULT_KDF_PARAMS };
@@ -548,6 +675,8 @@ export class AppStore {
       { kek: pw.passwordKEK, aad: aad.userKey(userId) },
     );
     await this.signingIn(async () => {
+      // Right before the session starts, so a lock elsewhere during the slow derivation is waited out too.
+      await this.previousSessionGone();
       const res = await api.recoverFinish({
         username,
         recoveryAuth: rk.recoveryAuth,
@@ -1038,10 +1167,11 @@ export class AppStore {
     };
     const entry: QueueEntry = { item, owner, held: !!opts.racing, copyTitle: ep === this.epoch ? copyTitle : null };
     this.pending.push(entry);
-    this.set({ pendingCount: this.pending.length });
+    this.syncPendingCount();
     if (opts.racing) {
       const { save, sameText } = opts.racing;
-      save
+      // A racing save that never answers holds the item for at most QUEUE_REQUEST_TIMEOUT_MS; it is then sent on its own base.
+      bounded(save)
         .then(
           (h) => {
             if (sameText) this.removeEntry(entry);
@@ -1082,43 +1212,80 @@ export class AppStore {
   private async sendQueued(): Promise<void> {
     if (!this.pending.length) return;
     const userId = this.state.user?.id ?? null;
+    if (!userId) return;
     const copied: QueueEntry[] = [];
-    let dropped = 0;
+    let atRoot = 0;
+    const dropped: Record<DropReason, number> = { deleted: 0, rejected: 0, too_large: 0 };
     for (const entry of [...this.pending]) {
       if (entry.held || !this.pending.includes(entry)) continue;
       // Only ever send with the owning account's session (never another's, never none).
-      if (!userId || entry.owner !== userId) continue;
-      const out = await sendPending(entry.item, { updateNote: api.updateNote, createNote: api.createNote });
-      if (out === 'retry') {
+      if (entry.owner !== userId) continue;
+      const { outcome, reason } = await sendPending(entry.item, QUEUE_IO);
+      if (outcome === 'retry') {
         entry.item.attempts++;
         continue;
       }
       // Remove by identity: entries stashed during this pass stay queued.
       this.pending = this.pending.filter((e) => e !== entry);
-      if (out === 'copied') copied.push(entry);
-      if (out === 'dropped') dropped++;
+      if (outcome === 'saved') {
+        if (this.state.phase === 'unlocked' && this.state.user?.id === userId) {
+          void this.refreshNoteHead(entry.item.vaultId, entry.item.noteId);
+        }
+      } else if (outcome === 'copied') copied.push(entry);
+      else if (outcome === 'copiedToRoot') atRoot++;
+      else dropped[reason ?? 'rejected']++;
     }
     this.syncPendingCount();
-    const notices: string[] = [];
-    if (copied.length) {
-      const title = copied.length === 1 ? copied[0].copyTitle : null;
-      notices.push(
-        title
-          ? `Saved your changes as “${title}” because the note changed elsewhere.`
-          : copied.length === 1
-            ? 'A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.'
-            : `${copied.length} notes changed elsewhere; your versions were saved as “(unsaved copy)” notes.`,
-      );
+    // Shown now only while this account's keys are here and staying; titles are plaintext.
+    const live = this.state.phase === 'unlocked' && !this.state.locking && this.state.user?.id === userId;
+    const notice = queueNotice(
+      copied.map((e) => (live ? e.copyTitle : null)),
+      atRoot,
+      dropped,
+    );
+    if (notice) {
+      if (live) this.set({ notice });
+      else this.deferNotice(userId, notice);
     }
-    if (dropped) {
-      notices.push(
-        dropped === 1
-          ? 'An unsaved change couldn’t be kept because its note or vault was deleted elsewhere.'
-          : 'Some unsaved changes couldn’t be kept because their note or vault was deleted elsewhere.',
-      );
+    if ((copied.length || atRoot) && live) void this.loadAll().catch(() => undefined);
+  }
+
+  /** Keeps a queue notice for the next time `owner` signs in (title-free text only). */
+  private deferNotice(owner: string, text: string) {
+    const prev = this.deferredNotice;
+    this.deferredNotice = { owner, text: prev?.owner === owner ? `${prev.text} ${text}` : text };
+  }
+
+  /**
+   * After a queued save landed: re-reads the note so the tree, search and the conflict base are
+   * current. Its body is decrypted only if it was loaded already. Best effort: failures are ignored.
+   */
+  private async refreshNoteHead(vaultId: string, noteId: string): Promise<void> {
+    const ep = this.epoch;
+    try {
+      const key = this.vaultKey(vaultId);
+      const { note } = await api.getNote(noteId);
+      if (ep !== this.epoch) return;
+      const meta = await decryptNoteMeta(key, vaultId, noteId, note.encMeta);
+      const body = noteId in this.state.bodies ? await decryptNoteBody(key, vaultId, noteId, note.encBody) : undefined;
+      if (ep !== this.epoch) return;
+      const prev = this.state.trees[vaultId]?.notes[noteId];
+      // Something newer already arrived here; this read is stale.
+      if (prev && prev.updatedAt > note.updatedAt) return;
+      this.markOwn(noteId, note.updatedAt);
+      this.putHead(vaultId, {
+        id: noteId,
+        vaultId,
+        folderId: note.folderId,
+        title: meta.title,
+        size: note.size,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+      });
+      if (body !== undefined) this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
+    } catch {
+      // The tree catches up on the next load.
     }
-    if (notices.length) this.set({ notice: notices.join(' ') });
-    if (copied.length && this.state.phase === 'unlocked') void this.loadAll().catch(() => undefined);
   }
 
   /** True while edits exist only in this tab: queued, or still being flushed by a closed editor. */
@@ -1139,8 +1306,14 @@ export class AppStore {
     this.syncPendingCount();
   }
 
+  /**
+   * `pendingCount` covers only the items the current account may send: the signed-in one, or while
+   * signed out the account last signed in here (none once it signed out or was forgotten).
+   */
   private syncPendingCount() {
-    if (this.state.pendingCount !== this.pending.length) this.set({ pendingCount: this.pending.length });
+    const owner = this.state.user?.id ?? this.lastUserId;
+    const count = owner ? this.pending.filter((e) => e.owner === owner).length : 0;
+    if (this.state.pendingCount !== count) this.set({ pendingCount: count });
     if (!this.pending.length && this.retryTimer) {
       clearInterval(this.retryTimer);
       this.retryTimer = null;
