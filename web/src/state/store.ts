@@ -187,6 +187,8 @@ export class AppStore {
   private retryRun: Promise<void> | null = null;
   private retryAgain = false;
   private retryTimer: ReturnType<typeof setInterval> | null = null;
+  /** Editor flushes in progress (see trackSettle). */
+  private settling = 0;
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
@@ -195,7 +197,7 @@ export class AppStore {
         if (this.state.phase === 'unlocked') void this.retryPending();
       });
       window.addEventListener('beforeunload', (e) => {
-        if (this.pending.length) e.preventDefault();
+        if (this.hasUnsavedWork()) e.preventDefault();
       });
     }
   }
@@ -904,6 +906,7 @@ export class AppStore {
     if (!this.pending.length) return;
     const userId = this.state.user?.id ?? null;
     const copied: QueueEntry[] = [];
+    let dropped = 0;
     for (const entry of [...this.pending]) {
       if (entry.held || !this.pending.includes(entry)) continue;
       // Never send one account's edits with another account's session.
@@ -916,18 +919,42 @@ export class AppStore {
       // Remove by identity: entries stashed during this pass stay queued.
       this.pending = this.pending.filter((e) => e !== entry);
       if (out === 'copied') copied.push(entry);
+      if (out === 'dropped') dropped++;
     }
     this.syncPendingCount();
-    if (!copied.length) return;
-    const title = copied.length === 1 ? copied[0].copyTitle : null;
-    this.set({
-      notice: title
-        ? `Saved your changes as “${title}” because the note changed elsewhere.`
-        : copied.length === 1
-          ? 'A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.'
-          : `${copied.length} notes changed elsewhere; your versions were saved as “(unsaved copy)” notes.`,
+    const notices: string[] = [];
+    if (copied.length) {
+      const title = copied.length === 1 ? copied[0].copyTitle : null;
+      notices.push(
+        title
+          ? `Saved your changes as “${title}” because the note changed elsewhere.`
+          : copied.length === 1
+            ? 'A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.'
+            : `${copied.length} notes changed elsewhere; your versions were saved as “(unsaved copy)” notes.`,
+      );
+    }
+    if (dropped) {
+      notices.push(
+        dropped === 1
+          ? 'An unsaved change couldn’t be kept because its note or vault was deleted elsewhere.'
+          : 'Some unsaved changes couldn’t be kept because their note or vault was deleted elsewhere.',
+      );
+    }
+    if (notices.length) this.set({ notice: notices.join(' ') });
+    if (copied.length && this.state.phase === 'unlocked') void this.loadAll().catch(() => undefined);
+  }
+
+  /** True while edits exist only in this tab: queued, or still being flushed by a closed editor. */
+  hasUnsavedWork(): boolean {
+    return this.pending.length > 0 || this.settling > 0;
+  }
+
+  /** Counts an editor flush as unsaved work until it finishes, so closing the tab meanwhile prompts. */
+  trackSettle(p: Promise<void>): Promise<void> {
+    this.settling++;
+    return p.finally(() => {
+      this.settling--;
     });
-    if (this.state.phase === 'unlocked') void this.loadAll().catch(() => undefined);
   }
 
   private removeEntry(entry: QueueEntry) {

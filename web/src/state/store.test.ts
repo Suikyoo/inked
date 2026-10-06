@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   status: vi.fn(), me: vi.fn(), params: vi.fn(), login: vi.fn(), logout: vi.fn(), setup: vi.fn(),
   listVaults: vi.fn(), createVault: vi.fn(), createNote: vi.fn(), getNote: vi.fn(), updateNote: vi.fn(),
-  rotateRecoveryKey: vi.fn(), tree: vi.fn(), bodies: vi.fn(),
+  rotateRecoveryKey: vi.fn(), tree: vi.fn(), bodies: vi.fn(), createFolder: vi.fn(),
 }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 vi.mock('../crypto/kdf', async (orig) => {
@@ -305,6 +305,59 @@ describe('AppStore', () => {
     await s.retryPending();
     expect(api.updateNote.mock.calls.length).toBe(calls);
     expect(s.getState().pendingCount).toBe(1);
+  });
+
+  it('puts the copy at the vault root when the note’s folder was deleted elsewhere (I4)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    api.createFolder.mockImplementation(async (_v: string, b: { id: string; parentId: null }) => ({ folder: { ...b, createdAt: 'x', updatedAt: 'x' } }));
+    const folder = await s.createFolder(vaultId, null, 'Work');
+    const created = await s.createNote(vaultId, folder.id, 'Plan', '');
+    api.updateNote.mockRejectedValue(new ApiError(404, 'not_found'));
+    api.createNote.mockReset();
+    api.createNote.mockRejectedValueOnce(new ApiError(400, 'invalid_folder')).mockResolvedValue(headFor({ id: 'c', folderId: null, encMeta: '', encBody: '' }, 't2'));
+    api.listVaults.mockResolvedValue({ vaults: [] });
+    await s.stashUnsaved(vaultId, created.id, 'kept text', 't1');
+    expect(api.createNote.mock.calls[0][1].folderId).toBe(folder.id);
+    expect(api.createNote.mock.calls[1][1].folderId).toBeNull();
+    expect(s.getState().pendingCount).toBe(0);
+    expect(s.getState().notice).toBe('Saved your changes as “Plan (unsaved copy)” because the note changed elsewhere.');
+  });
+
+  it('drops queued text whose vault was deleted elsewhere, and says so (I4)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(404, 'not_found'));
+    api.createNote.mockRejectedValue(new ApiError(404, 'not_found'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'orphan text', 't1');
+    expect(s.getState().pendingCount).toBe(0);
+    expect(s.getState().notice).toBe('An unsaved change couldn’t be kept because its note or vault was deleted elsewhere.');
+    expect(s.hasUnsavedWork()).toBe(false);
+  });
+
+  it('drops queued text the server refuses, with one notice for several (I4)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'one', 't1');
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'two', 't1');
+    expect(s.getState().pendingCount).toBe(2);
+    api.updateNote.mockRejectedValue(new ApiError(400, 'invalid_request'));
+    await s.retryPending();
+    expect(s.getState().pendingCount).toBe(0);
+    expect(s.getState().notice).toBe('Some unsaved changes couldn’t be kept because their note or vault was deleted elsewhere.');
+  });
+
+  it('counts a flush in progress as unsaved work, for the close-tab prompt (I4)', async () => {
+    const s = await registeredStore();
+    expect(s.hasUnsavedWork()).toBe(false);
+    let release!: () => void;
+    const tracked = s.trackSettle(new Promise<void>((r) => (release = r)));
+    expect(s.hasUnsavedWork()).toBe(true);
+    release();
+    await tracked;
+    expect(s.hasUnsavedWork()).toBe(false);
   });
 
   it('refuses to queue a body the server would never take (I4)', async () => {

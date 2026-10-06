@@ -9,23 +9,27 @@ export type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'co
 const AUTOSAVE_MS = 800;
 /** Once the keys are about to go (lock, sign out), how long a flush waits for the network before queueing. */
 export const FINAL_WAIT_MS = 4000;
+/** When leaving a note, how long its flush waits for the network before queueing. */
+export const LEAVE_WAIT_MS = 10_000;
 
-/** Never resolves until `arm()`; then resolves FINAL_WAIT_MS later. Bounds every wait in `settle`. */
+/** Never resolves until `arm(ms)`; then resolves `ms` later. A later, sooner arm wins. Bounds every wait in `settle`. */
 interface Cutoff {
   promise: Promise<void>;
-  arm: () => void;
+  arm: (ms: number) => void;
 }
 
 function cutoff(): Cutoff {
-  let arm!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    let armed = false;
-    arm = () => {
-      if (armed) return;
-      armed = true;
-      window.setTimeout(resolve, FINAL_WAIT_MS);
-    };
-  });
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => (resolve = r));
+  let deadline = Infinity;
+  let timer: number | undefined;
+  const arm = (ms: number) => {
+    const at = Date.now() + ms;
+    if (at >= deadline) return;
+    deadline = at;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(resolve, ms);
+  };
   return { promise, arm };
 }
 
@@ -68,17 +72,19 @@ export function newSaveState(vaultId: string, noteId: string): SaveState {
   };
 }
 
-export type SettleStore = Pick<AppStore, 'saveNoteBody' | 'stashUnsaved'>;
+export type SettleStore = Pick<AppStore, 'saveNoteBody' | 'stashUnsaved' | 'trackSettle'>;
 
 /**
- * Saves the note's edits if possible; anything that can't be saved now goes to the store's
- * ciphertext queue, so no text is dropped. `final` (lock / sign out) caps every wait at
- * FINAL_WAIT_MS, including one already running. Concurrent calls share one pass.
+ * Saves the note's edits if possible; anything that can't be saved in time goes to the store's
+ * ciphertext queue, so no text is dropped. Every wait is capped: FINAL_WAIT_MS when the keys are
+ * about to go (`final`: lock / sign out), LEAVE_WAIT_MS when leaving the note; a final call also
+ * shortens a pass already running. Concurrent calls share one pass, which the store counts as
+ * unsaved work (close-tab prompt) until it ends.
  */
 export function settle(store: SettleStore, s: SaveState, final: boolean): Promise<void> {
-  if (final) s.cutoff.arm();
+  s.cutoff.arm(final ? FINAL_WAIT_MS : LEAVE_WAIT_MS);
   if (!s.settling) {
-    s.settling = settleOnce(store, s).finally(() => {
+    s.settling = store.trackSettle(settleOnce(store, s)).finally(() => {
       s.settling = null;
     });
   }

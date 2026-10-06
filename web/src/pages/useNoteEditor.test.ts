@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import { LockedError, NoteTooLargeError, type NoteView } from '../state/store';
-import { FINAL_WAIT_MS, newSaveState, settle, type SaveState, type SettleStore } from './useNoteEditor';
+import { FINAL_WAIT_MS, LEAVE_WAIT_MS, newSaveState, settle, type SaveState, type SettleStore } from './useNoteEditor';
 
 const head = (updatedAt: string) => ({ updatedAt }) as NoteView;
 
@@ -20,6 +20,7 @@ function fakeStore() {
   return {
     saveNoteBody: vi.fn<SettleStore['saveNoteBody']>(),
     stashUnsaved: vi.fn<SettleStore['stashUnsaved']>().mockResolvedValue(undefined),
+    trackSettle: vi.fn<SettleStore['trackSettle']>((p) => p),
   };
 }
 
@@ -101,7 +102,7 @@ describe('settle (I4)', () => {
     const s = editing('a', 'abc');
     const wire = inFlight(s, 'ab');
     const done = settle(store, s, false);
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(LEAVE_WAIT_MS - 1);
     expect(store.saveNoteBody).not.toHaveBeenCalled();
     wire.resolve(head('t2'));
     await done;
@@ -121,6 +122,23 @@ describe('settle (I4)', () => {
     expect(store.saveNoteBody).not.toHaveBeenCalled();
     expect(store.stashUnsaved).toHaveBeenCalledWith('v1', 'n1', 'abc', 't1', {
       racing: { save: wire.promise, sameText: false },
+      until: expect.any(Promise),
+    });
+  });
+
+  it('leaving a note queues a save that never answers, after a bounded wait', async () => {
+    const store = fakeStore();
+    const hung = deferred<NoteView>();
+    store.saveNoteBody.mockReturnValue(hung.promise);
+    const s = editing('a', 'ab');
+    const done = settle(store, s, false);
+    expect(store.trackSettle).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(LEAVE_WAIT_MS - 1);
+    expect(store.stashUnsaved).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await done;
+    expect(store.stashUnsaved).toHaveBeenCalledWith('v1', 'n1', 'ab', 't1', {
+      racing: { save: hung.promise, sameText: true },
       until: expect.any(Promise),
     });
   });
