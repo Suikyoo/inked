@@ -1,0 +1,9 @@
+# Local testing override: publishes nginx on localhost and allows non-HTTPS cookies.
+# Needs the network once: docker network create cloudflared-net
+services:
+  inked:
+    environment:
+      COOKIE_SECURE: "false"
+  nginx:
+    ports:
+      - "127.0.0.1:${INKED_PORT:-8088}:80"

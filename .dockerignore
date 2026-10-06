@@ -7,3 +7,4 @@ server/data
 .impeccable
 *.log
 .env
+deploy

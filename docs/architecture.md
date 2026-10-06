@@ -5,7 +5,7 @@ Inked is a self-hosted, multi-user Markdown notes app. Notes are encrypted in th
 ## Layout
 
 ```
-/compose.yaml            one service "inked", volume ./data -> /data
+/compose.yaml            `inked` (private network only) + `nginx` (joins external `cloudflared-net`); see `docs/deploy.md`
 /Dockerfile              multi-stage: build web, build server, run on node:22-alpine
 /package.json            npm workspaces: server, web
 /server                  Fastify API + static hosting of web/dist, node:sqlite storage

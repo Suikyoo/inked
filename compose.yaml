@@ -1,25 +1,48 @@
-# First run: open http://localhost:${INKED_PORT:-8088}, then copy the setup token from `docker compose logs inked`.
-# Browsers only allow encryption over HTTPS or localhost; to use Inked from other devices put it behind an
-# HTTPS reverse proxy and set COOKIE_SECURE and TRUST_PROXY.
+# Inked behind nginx on the external cloudflared-net network. No host ports are published.
+# Deploy guide: docs/deploy.md. Local testing: docker compose -f compose.yaml -f compose.local.yaml up -d --build
 services:
   inked:
     build: .
-    ports:
-      # Host port is configurable: INKED_PORT=9000 docker compose up -d
-      - "${INKED_PORT:-8088}:8080"
-    volumes:
-      # On Linux the container runs as uid 1000 (user "node"); make sure ./data is writable by it,
-      # e.g. `mkdir -p data && sudo chown 1000:1000 data`.
-      - ./data:/data
-    environment:
-      # Set to "true" when Inked is served over HTTPS (e.g. behind a TLS reverse proxy).
-      COOKIE_SECURE: "false"
-      # Behind a reverse proxy (Traefik, Caddy, nginx) set this so login lockouts apply per real client IP.
-      # A hop count ("1") is only safe when the container is reachable solely through the proxy;
-      # otherwise give the proxy's IP or CIDR (for a Docker network, e.g. "172.16.0.0/12").
-      # Leave unset when exposed directly.
-      # Behind a proxy, also bind the published port to localhost so only the proxy can reach Inked
-      # (ports: - "127.0.0.1:${INKED_PORT:-8088}:8080"), and give the narrowest CIDR that covers the proxy
-      # (its exact IP, or the compose network's subnet rather than all of 172.16.0.0/12).
-      # TRUST_PROXY: "172.16.0.0/12"
     restart: unless-stopped
+    volumes:
+      # The container runs as uid 1000 ("node"); on Linux: mkdir -p data && sudo chown 1000:1000 data
+      - ${INKED_DATA_DIR:-./data}:/data
+    environment:
+      COOKIE_SECURE: "true"
+      # Only nginx on the private network may set the client IP (it forwards Cloudflare's CF-Connecting-IP).
+      TRUST_PROXY: "172.31.250.0/28"
+    networks:
+      - inked-internal
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      inked:
+        condition: service_healthy
+    environment:
+      # Subnet of cloudflared-net; see .env.example for how to look it up.
+      CLOUDFLARED_NET_CIDR: ${CLOUDFLARED_NET_CIDR:-172.16.0.0/12}
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      # Blank out the image's default server, which would otherwise answer first on :80.
+      - ./deploy/nginx/empty.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      inked-internal: {}
+      cloudflared-net:
+        aliases:
+          - inked-nginx
+
+networks:
+  inked-internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.250.0/28
+  cloudflared-net:
+    external: true
