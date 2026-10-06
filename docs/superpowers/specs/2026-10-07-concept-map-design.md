@@ -78,15 +78,15 @@ export function layoutWorld(layouts: VaultLayout[], gap?: number): Record<string
 ```
 
 - **Coordinates.** `layoutVault` works in vault-local units with the hub at (0,0). `parent` maps every folder id and note id to its parent folder id, or to `null` for the hub. Pencil lines and ink paths are drawn from `parent`.
-- **Slices.** The full circle is split among the top-level entries: each top-level folder, plus one "root notes" slice if any note has no folder. A slice's angle is proportional to its weight. The weight is the number of notes and subfolders in that subtree, with a minimum of 1.
-- **Folder rings.** A folder at depth `d` sits at radius `R0 + d·RSTEP`, at the angular centre of its slice. Child folders split the parent's slice the same way.
-- **Note arcs.** A folder's own notes sit on an arc centred on the folder, at distance `NR` from it, facing away from the hub. The arc is no wider than the folder's slice. If the notes don't fit at the minimum spacing `MIN_GAP`, they wrap onto further arcs at `NR + k·NSTEP`.
-- **Root notes.** They sit at radius `R0` inside their own slice, using the same wrapping.
+- **Slices.** The full circle is split among the top-level entries: each top-level folder, plus one "root notes" slice if any note has no folder. A slice's angle is proportional to its weight. The weight is `1 + the weight of each child folder`, so it counts folders only. Notes are left out so that adding a note never resizes another folder's slice (see Stability).
+- **Folder rings.** A top-level folder sits at radius `R0`, at the angular centre of its slice. Child folders split the parent's slice by weight in the same way. They sit at `max(r + RSTEP, outermost note row of the parent + NR)`, which depends only on the parent's own notes.
+- **Note rows.** A folder's own notes sit in the folder's slice, in hub-centred rows at radius `r + NR + k·NSTEP` (k = 0, 1, …), spread evenly across the slice. A row holds as many notes as fit with a chord of at least `MIN_GAP` between neighbours. Any notes left over wrap to the next row out.
+- **Root notes.** They sit in their own slice using the same rows, starting at radius `R0`.
 - **Order.** Siblings are sorted by `name.localeCompare` (folders) or `title.localeCompare` (notes), with the id as tie-break. Nothing is random.
 - **Radius.** `radius` is the distance from the hub to the farthest dot, plus the label margin.
 - **Constants.** `R0`, `RSTEP`, `NR`, `NSTEP` and `MIN_GAP` are exported constants. The plan chooses their values. They must keep dots in one arc at least `MIN_GAP` apart.
 - **World layout.** `layoutWorld` places the vault circles in rows, in the given (sidebar) order, with the row width capped at about the square root of the total area. It returns each vault's world-space centre.
-- **Stability.** Links never affect positions. A dot moves only when its own subtree changes.
+- **Stability.** Links and edit times never affect positions. Adding, removing or renaming a note moves only dots in that note's folder and that folder's descendant folders. Adding or removing a folder rebalances the slices.
 
 ### `recency.ts`
 
@@ -100,7 +100,7 @@ export function inkTier(updatedAt: string, now: number): InkTier;
 | under 24 h | wet | `#B69CFF` | `0 0 9px 3px rgba(182,156,255,.38)` |
 | under 7 d | fresh | `#9D7CF2` | `0 0 4px 1px rgba(157,124,242,.22)` |
 | under 30 d | drying | `#6B5A9E` | none |
-| 30 d or more | dry | `#3F3A52` | none |
+| 30 d or more | dry | `#524B6E` | none |
 
 - Boundaries are exclusive at the upper end: exactly 24 h is `fresh`.
 - A timestamp that won't parse, or lies in the future, counts as `wet`.
@@ -139,7 +139,7 @@ export function inkTier(updatedAt: string, now: number): InkTier;
   1. Pencil lines: `parent` → child, 1 px, `--map-pencil`.
   2. Link lines: 1 px dashed (`3 3`), `--map-pencil`. Drawn only when `linksReady`.
   3. Ink: one tapered filled path per inked note, following the hub → folder chain → note, in `--map-ink`. The polygon is wider at the hub end and narrower at the note end.
-  4. Dots: radius 3.5 px, or 4.5 px when selected or hot. Filled with the tier colour.
+  4. Dots: radius 4 px (8 px marker), or 5 px when selected, hot or hovered. Filled with the tier colour, with a 2 px ring in the canvas colour. Each dot has a transparent hit circle of radius 12 px (24 px target).
   5. Folder labels: Public Sans 10.5 px on a canvas-coloured pill.
   6. Hubs: the `VaultIcon` plus the vault name in Spectral italic.
 - **Note labels** show when `scale ≥ 1.6`, or when the note is hovered, focused, selected, hot or a hit.
@@ -211,12 +211,13 @@ export function localGraph(graph: VaultGraph, noteId: string): LocalGraph | null
 
 - It is a section at the top of `aside.ctx`, titled "Local map", above Backlinks.
 - It uses a fixed frame (`aspect-ratio: 100 / 78`) and the same SVG approach as the Home map, with no pan or zoom.
-- **Placement:**
-  - the centre note sits in the middle, with a 1.5 px ring in `--map-ink`;
-  - the parent (folder label, or the vault drop icon) sits above it;
-  - siblings sit on the lower arc, joined to the parent by pencil lines;
-  - outgoing notes sit on the right arc and incoming notes on the left arc, with dashed lines to the centre;
-  - "+N more" labels sit at the end of each arc.
+- **Placement** (in a 320×250 viewBox). Twelve always-labelled notes per group don't fit on arcs in a side panel, so each group gets a column:
+  - the parent (folder label, or the vault drop icon plus the vault name) sits at the top centre;
+  - the centre note sits below it, with a 1.5 px ring in `--map-ink`;
+  - underneath are three captioned columns: "links in" on the left, "same folder" in the middle and "links out" on the right;
+  - each column is a vertical list of dots with their labels to the right;
+  - pencil lines join the parent to the centre and to each sibling, and dashed lines join the centre to each linked note;
+  - a "+N more" label ends any column that was capped.
 - Labels are always visible, cut to 14 characters with "…". The full title is in the `aria-label` and the SVG `<title>`.
 - Clicking a dot, or pressing Enter or Space, navigates to `/v/{vaultId}/n/{id}`.
 - Keyboard behaviour is the same roving tabindex and arrow-key model as the Home map.
@@ -253,7 +254,7 @@ export function localGraph(graph: VaultGraph, noteId: string): LocalGraph | null
   - adding a note to folder A moves no dot in folder B;
   - root notes are placed;
   - nesting four levels deep works;
-  - all dot pairs in one arc are at least `MIN_GAP` apart;
+  - all dot pairs in one row are at least `MIN_GAP` apart;
   - `layoutWorld` produces no overlapping vault circles;
   - 1,000 notes across 40 folders lay out in under 50 ms.
 - **`recency.test.ts`:**
@@ -278,7 +279,7 @@ export function localGraph(graph: VaultGraph, noteId: string): LocalGraph | null
   - Escape clears the selection;
   - the empty vault and the error hub render.
 - **`LocalMap.test.tsx`:**
-  - the groups render;
+  - the three columns render;
   - clicking a dot navigates;
   - the "+N more" label;
   - the "Drawing links…" state.
