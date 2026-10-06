@@ -17,9 +17,12 @@ function getPurifier(): DOMPurify {
   p.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName === 'A') {
       const href = node.getAttribute('href') ?? '';
-      if (/^(https?:|mailto:)/i.test(href)) {
+      if (/^(https?:|mailto:)/i.test(href) || href.startsWith('//')) {
         node.setAttribute('target', '_blank');
         node.setAttribute('rel', 'noopener noreferrer');
+      } else if (href.startsWith('/')) {
+        node.setAttribute('data-internal', '1');
+        node.removeAttribute('target');
       } else {
         node.removeAttribute('target');
       }
@@ -34,7 +37,7 @@ function getPurifier(): DOMPurify {
 export function sanitizeHtml(html: string): string {
   return getPurifier().sanitize(html, {
     USE_PROFILES: { html: true },
-    ADD_ATTR: ['target'],
+    ADD_ATTR: ['target', 'data-internal'],
     FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'iframe', 'object', 'embed'],
     FORBID_ATTR: ['style'],
   });

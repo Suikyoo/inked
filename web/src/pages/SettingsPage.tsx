@@ -7,6 +7,7 @@ import { ConfirmDialog } from '../components/Dialog';
 import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
 import { CheckIcon, CopyIcon } from '../components/Icons';
 import { isCryptoError } from '../crypto';
+import { prefs } from '../lib/prefs';
 import { copyText, describeError, formatDateTime, MIN_PASSWORD, nextVaultColor, VAULT_COLORS } from '../lib/util';
 import { useAppState, useStore, vaultStats } from '../state/StoreContext';
 import type { VaultView } from '../state/store';
@@ -42,10 +43,37 @@ export function SettingsPage() {
         </div>
       </section>
 
+      <Editing />
       <ChangePassword />
       <Vaults />
       {state.user?.isAdmin && <Invites />}
     </div>
+  );
+}
+
+function Editing() {
+  const [spell, setSpell] = useState(prefs.spellcheck());
+  return (
+    <section className="card" aria-labelledby="edit-h">
+      <h2 id="edit-h" className="card-title">
+        Editing
+      </h2>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={spell}
+          onChange={(e) => {
+            prefs.setSpellcheck(e.target.checked);
+            setSpell(e.target.checked);
+          }}
+        />
+        <span>Spell-check while editing</span>
+      </label>
+      <p className="field-hint">
+        Off by default. Some browsers send text to an online service for enhanced spell-check, which would expose note
+        content.
+      </p>
+    </section>
   );
 }
 

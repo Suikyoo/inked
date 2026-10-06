@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Spinner } from '../components/Fields';
 import { renderMarkdown, toggleTaskAtLine, wikiLinkTargets } from '../markdown/render';
+import { prefs } from '../lib/prefs';
 import { describeError, formatDate, relativeTime, wordCount } from '../lib/util';
 import { folderPath, titleIndex, useAppState, useStore } from '../state/StoreContext';
 import type { VaultView } from '../state/store';
@@ -121,7 +122,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
       return;
     }
     const a = t.closest('a');
-    if (a?.hasAttribute('data-wikilink')) {
+    if (a?.hasAttribute('data-wikilink') || a?.getAttribute('data-internal') === '1') {
       e.preventDefault();
       const href = a.getAttribute('href');
       if (href) navigate(href);
@@ -230,7 +231,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
             aria-label={`Markdown source of ${head?.title ?? 'note'}`}
             value={editor.body}
             onChange={(e) => editor.setBody(e.target.value)}
-            spellCheck
+            spellCheck={prefs.spellcheck()}
             placeholder={'# Heading\n\nWrite in Markdown. Link notes with [[Note title]].'}
           />
         ) : editor.body.trim() === '' ? (

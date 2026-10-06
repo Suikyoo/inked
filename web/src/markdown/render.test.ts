@@ -98,3 +98,12 @@ describe('markdown features', () => {
     expect([...wikiLinkTargets('[[A]] and [[b c|label]] and `[[C]]`')]).toEqual(['a', 'b c', 'c']);
   });
 });
+
+describe('internal links', () => {
+  it('marks same-origin links internal so the router handles them (M9)', () => {
+    const html = renderMarkdown('[a](/v/123) [b](https://example.com) [c](//evil.example)');
+    expect(html).toContain('href="/v/123" data-internal="1"');
+    expect(html).toContain('target="_blank"');
+    expect(html).not.toMatch(/href="\/\/evil\.example"[^>]*data-internal/);
+  });
+});

@@ -13,6 +13,7 @@ import {
   decryptString,
   decryptVaultMeta,
   DEFAULT_KDF_PARAMS,
+  MIN_KDF_PARAMS,
   deriveFromPassword,
   deriveRecoveryKeys,
   encryptFolderMeta,
@@ -363,5 +364,14 @@ describe('recovery key', () => {
       { kek: pw.passwordKEK, aad: aad.userKey(USER) },
     ).catch((e: unknown) => e);
     expect(isCryptoError(err, 'unwrap')).toBe(true);
+  });
+});
+
+describe('kdf floor', () => {
+  it('assertKdfParams floor is MIN_KDF_PARAMS, independent of defaults (M5)', () => {
+    expect(MIN_KDF_PARAMS).toEqual({ alg: 'argon2id', m: 65536, t: 3, p: 1 });
+    expect(() => assertKdfParams({ alg: 'argon2id', m: 65536, t: 3, p: 1 })).not.toThrow();
+    expect(() => assertKdfParams({ alg: 'argon2id', m: 32768, t: 3, p: 1 })).toThrow();
+    expect(() => assertKdfParams({ alg: 'argon2id', m: 131072, t: 4, p: 2 })).not.toThrow();
   });
 });

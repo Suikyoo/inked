@@ -12,6 +12,9 @@ export interface KdfParams {
 
 export const DEFAULT_KDF_PARAMS: Readonly<KdfParams> = Object.freeze({ alg: 'argon2id', m: 65536, t: 3, p: 1 });
 
+/** Lowest work factor the client will accept from a server. Independent of the defaults used for new accounts. */
+export const MIN_KDF_PARAMS: KdfParams = Object.freeze({ alg: 'argon2id', m: 65536, t: 3, p: 1 });
+
 /** Raw Argon2id returning 32 bytes. Injectable so the app can run it in a Web Worker. */
 export type Argon2Fn = (password: Bytes, salt: Bytes, params: KdfParams) => Promise<Bytes>;
 
@@ -36,7 +39,7 @@ export function generateKdfSalt(): string {
  * Validates KDF params received from the server. A hostile server must not be able to
  * downgrade the work factor, or make the browser allocate absurd amounts of memory.
  */
-export function assertKdfParams(p: unknown, floor: KdfParams = DEFAULT_KDF_PARAMS): KdfParams {
+export function assertKdfParams(p: unknown, floor: KdfParams = MIN_KDF_PARAMS): KdfParams {
   const o = p as Partial<KdfParams> | null;
   const int = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
   if (

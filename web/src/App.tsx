@@ -10,6 +10,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { JoinPage, SetupPage } from './pages/SetupPage';
 import { VaultPage } from './pages/VaultPage';
 import { AuthLayout } from './pages/AuthLayout';
+import { InsecureContextPage } from './pages/InsecureContextPage';
 import { AppStore } from './state/store';
 import { StoreProvider, useAppState, useStore } from './state/StoreContext';
 
@@ -73,9 +74,14 @@ function NotFound() {
 }
 
 export function App({ store }: { store: AppStore }) {
+  // Only an explicit false (or missing WebCrypto) counts as insecure; test DOMs may leave isSecureContext undefined.
+  const insecure = window.isSecureContext === false || !globalThis.crypto?.subtle;
+
   useEffect(() => {
-    void store.boot();
-  }, [store]);
+    if (!insecure) void store.boot();
+  }, [store, insecure]);
+
+  if (insecure) return <InsecureContextPage />;
 
   return (
     <StoreProvider store={store}>
