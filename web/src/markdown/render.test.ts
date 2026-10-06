@@ -106,4 +106,44 @@ describe('internal links', () => {
     expect(html).toContain('target="_blank"');
     expect(html).not.toMatch(/href="\/\/evil\.example"[^>]*data-internal/);
   });
+
+  const ORIGIN = 'https://inked.test';
+  /** Every link marked internal stays on this origin: a single leading slash, nothing the browser reads as `//`. */
+  const expectInternalSafe = (html: string) => {
+    for (const a of dom(html).querySelectorAll('a[data-internal]')) {
+      const href = a.getAttribute('href') ?? '';
+      expect(href.startsWith('/')).toBe(true);
+      expect(href.startsWith('//')).toBe(false);
+      expect(href.startsWith('/\\')).toBe(false);
+      expect(new URL(href, ORIGIN).origin).toBe(ORIGIN);
+    }
+  };
+
+  it('a backslash link cannot leave the origin (B4)', () => {
+    const html = renderMarkdown('[x](/\\evil.example)');
+    const a = dom(html).querySelector('a')!;
+    const href = a.getAttribute('href')!;
+    expect(href).toBe('/%5Cevil.example');
+    expect(new URL(href, ORIGIN).origin).toBe(ORIGIN);
+    expectInternalSafe(html);
+  });
+
+  it('a javascript: link renders no javascript: href (B4)', () => {
+    const html = renderMarkdown('[j](javascript:alert(1))');
+    for (const a of dom(html).querySelectorAll('a')) expect(a.getAttribute('href') ?? '').not.toMatch(/javascript:/i);
+    expect(html).not.toMatch(/href="javascript:/i);
+    expectInternalSafe(html);
+  });
+
+  it('strips data-internal from any link whose href is not a single-slash path (B4)', () => {
+    const html = sanitizeHtml(
+      '<a href="https://evil.example/" data-internal="1">a</a>' +
+        '<a href="//evil.example/" data-internal="1">b</a>' +
+        '<a href="/\\evil.example" data-internal="1">c</a>' +
+        '<a href="relative/path" data-internal="1">d</a>' +
+        '<a href="mailto:x@example.com" data-internal="1">e</a>',
+    );
+    expect(dom(html).querySelectorAll('a[data-internal]')).toHaveLength(0);
+    expect(dom(html).querySelectorAll('a')).toHaveLength(5);
+  });
 });

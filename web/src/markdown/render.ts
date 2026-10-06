@@ -17,14 +17,17 @@ function getPurifier(): DOMPurify {
   p.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName === 'A') {
       const href = node.getAttribute('href') ?? '';
+      // Only a path on this origin is internal: one leading slash, not `//` or `/\` (browsers read both as another host).
       if (/^(https?:|mailto:)/i.test(href) || href.startsWith('//')) {
         node.setAttribute('target', '_blank');
         node.setAttribute('rel', 'noopener noreferrer');
-      } else if (href.startsWith('/')) {
+        node.removeAttribute('data-internal');
+      } else if (/^\/(?![/\\])/.test(href)) {
         node.setAttribute('data-internal', '1');
         node.removeAttribute('target');
       } else {
         node.removeAttribute('target');
+        node.removeAttribute('data-internal');
       }
     } else if (node.tagName === 'INPUT') {
       node.setAttribute('type', 'checkbox');

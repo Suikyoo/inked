@@ -28,7 +28,7 @@ vi.mock('../lib/argon2Worker', async () => {
 import { ApiError } from '../api/client';
 import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
 import { adoptOwnHead, newSaveState, settle } from '../pages/useNoteEditor';
-import { AppStore, LockedError, LOGOUT_TIMEOUT_MS, QUEUE_REQUEST_TIMEOUT_MS } from './store';
+import { AppStore, LockedError, LOGOUT_TIMEOUT_MS, QUEUE_REQUEST_TIMEOUT_MS, type NoteView } from './store';
 
 /** Captured before any test fakes timers: lets real async work (WebCrypto, argon2) run while fake time stands still. */
 const realSetTimeout = globalThis.setTimeout;
@@ -1208,6 +1208,54 @@ describe('AppStore', () => {
     expect(s.getState().phase).toBe('signedOut');
     expect(localStorage.getItem('inked.lastUsername')).toBeNull();
     expect(s.getState().lastUsername).toBe('');
+  });
+
+  // ---- Task 5: stale responses (B3) ----------------------------------------------------------
+
+  it('drops a head older than the stored one instead of merging it (B3)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't2'));
+    const created = await s.createNote(vaultId, null, 'Newer title', '');
+    const putHead = (s as unknown as { putHead: (v: string, h: NoteView) => boolean }).putHead.bind(s);
+    const stale: NoteView = { ...created, title: 'Older title', size: 99, updatedAt: 't1' };
+    expect(putHead(vaultId, stale)).toBe(false);
+    const stored = s.getState().trees[vaultId].notes[created.id];
+    expect(stored.title).toBe('Newer title');
+    expect(stored.updatedAt).toBe('t2');
+    expect(stored.size).toBe(1);
+    // A newer (or equal) head is stored.
+    expect(putHead(vaultId, { ...created, title: 'Newest title', updatedAt: 't3' })).toBe(true);
+    expect(s.getState().trees[vaultId].notes[created.id].title).toBe('Newest title');
+  });
+
+  it('a late note load older than the stored head leaves the loaded body alone (B3)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, '2026-01-01T00:00:00.000Z'));
+    const created = await s.createNote(vaultId, null, 'Plan', 'old body');
+    const old: NoteBody = api.createNote.mock.calls[0][1];
+    api.updateNote.mockResolvedValueOnce(headFor(old, '2026-01-02T00:00:00.000Z'));
+    await s.saveNoteBody(vaultId, created.id, 'new body', '2026-01-01T00:00:00.000Z');
+    expect(s.getState().bodies[created.id]).toBe('new body');
+    // A read that left the server before the save landed answers last.
+    api.getNote.mockResolvedValue({ note: { ...headFor(old, '2026-01-01T00:00:00.000Z').note, encBody: old.encBody } });
+    await s.loadNote(vaultId, created.id);
+    expect(s.getState().bodies[created.id]).toBe('new body');
+    expect(s.getState().trees[vaultId].notes[created.id].updatedAt).toBe('2026-01-02T00:00:00.000Z');
+  });
+
+  it('a late save response older than the stored head leaves the loaded body alone (B3)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, '2026-01-01T00:00:00.000Z'));
+    const created = await s.createNote(vaultId, null, 'Plan', '');
+    const sent: NoteBody = api.createNote.mock.calls[0][1];
+    api.updateNote.mockResolvedValueOnce(headFor(sent, '2026-01-03T00:00:00.000Z'));
+    await s.saveNoteBody(vaultId, created.id, 'newest body');
+    api.updateNote.mockResolvedValueOnce(headFor(sent, '2026-01-02T00:00:00.000Z'));
+    await s.saveNoteBody(vaultId, created.id, 'older body');
+    expect(s.getState().bodies[created.id]).toBe('newest body');
   });
 });
 

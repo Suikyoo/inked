@@ -1002,13 +1002,15 @@ export class AppStore {
 
   // ---- Note mutations ----------------------------------------------------------------------
 
-  /** Stores a note head; a late response never moves `updatedAt` backwards. */
-  private putHead(vaultId: string, head: NoteView) {
-    this.patchTree(vaultId, (t) => {
-      const prev = t.notes[head.id];
-      const next = prev && prev.updatedAt > head.updatedAt ? { ...head, updatedAt: prev.updatedAt } : head;
-      return { notes: { ...t.notes, [head.id]: next } };
-    });
+  /**
+   * Stores a note head. A head older than the stored one is a late response: it is dropped whole
+   * (never merged), and the result is false so the caller skips its body too.
+   */
+  private putHead(vaultId: string, head: NoteView): boolean {
+    const prev = this.state.trees[vaultId]?.notes[head.id];
+    if (prev && prev.updatedAt > head.updatedAt) return false;
+    this.patchTree(vaultId, (t) => ({ notes: { ...t.notes, [head.id]: head } }));
+    return true;
   }
 
   private markOwn(noteId: string, updatedAt: string) {
@@ -1063,8 +1065,8 @@ export class AppStore {
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
     };
-    this.putHead(vaultId, head);
-    this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
+    // An older read than what this tab already has (e.g. it left before a save landed): keep the newer body.
+    if (this.putHead(vaultId, head)) this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
     return { head, body };
   }
 
@@ -1088,8 +1090,8 @@ export class AppStore {
     // Locked while saving: the save landed, but this session's state is gone.
     if (ep !== this.epoch) return head;
     this.markOwn(noteId, note.updatedAt);
-    this.putHead(vaultId, head);
-    this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
+    // A later save already landed: its body is the current one.
+    if (this.putHead(vaultId, head)) this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
     return head;
   }
 
@@ -1285,12 +1287,9 @@ export class AppStore {
       const meta = await decryptNoteMeta(key, vaultId, noteId, note.encMeta);
       const body = noteId in this.state.bodies ? await decryptNoteBody(key, vaultId, noteId, note.encBody) : undefined;
       if (ep !== this.epoch) return;
-      const prev = this.state.trees[vaultId]?.notes[noteId];
-      // Something newer already arrived here; this read is stale.
-      if (prev && prev.updatedAt > note.updatedAt) return;
       // Not marked as own: an editor opened before this save never saw the queued text, so adopting
       // this stamp would let its next autosave replace that text silently. It must hit the conflict path.
-      this.putHead(vaultId, {
+      const stored = this.putHead(vaultId, {
         id: noteId,
         vaultId,
         folderId: note.folderId,
@@ -1299,7 +1298,8 @@ export class AppStore {
         createdAt: note.createdAt,
         updatedAt: note.updatedAt,
       });
-      if (body !== undefined) this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
+      // Not stored: something newer already arrived here, so this read is stale.
+      if (stored && body !== undefined) this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
     } catch {
       // The tree catches up on the next load.
     }

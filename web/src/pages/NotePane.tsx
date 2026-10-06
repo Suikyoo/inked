@@ -17,6 +17,26 @@ const SAVE_LABEL: Record<SaveStatus, string> = {
   conflict: 'Not saved',
 };
 
+/** The parts of a click on rendered Markdown that decide where it goes. */
+export type LinkClick = Pick<
+  MouseEvent<HTMLElement>,
+  'button' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey' | 'preventDefault'
+> & { target: EventTarget | null };
+
+/**
+ * A plain left click on an internal or wiki link goes through the router. Any other button or a
+ * modifier (new tab, new window, download) is left to the browser.
+ */
+export function followNoteLink(e: LinkClick, navigate: (to: string) => void): void {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const a = e.target instanceof Element ? e.target.closest('a') : null;
+  if (a?.hasAttribute('data-wikilink') || a?.getAttribute('data-internal') === '1') {
+    e.preventDefault();
+    const href = a.getAttribute('href');
+    if (href) navigate(href);
+  }
+}
+
 export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }) {
   const state = useAppState();
   const store = useStore();
@@ -121,12 +141,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
       else e.preventDefault();
       return;
     }
-    const a = t.closest('a');
-    if (a?.hasAttribute('data-wikilink') || a?.getAttribute('data-internal') === '1') {
-      e.preventDefault();
-      const href = a.getAttribute('href');
-      if (href) navigate(href);
-    }
+    followNoteLink(e, navigate);
   };
 
   if (editor.status === 'error') {

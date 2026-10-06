@@ -2,7 +2,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import { LockedError, NoteTooLargeError, type NoteView } from '../state/store';
-import { FINAL_WAIT_MS, leaveNote, LEAVE_WAIT_MS, newSaveState, settle, type SaveState, type SettleStore } from './useNoteEditor';
+import {
+  adoptOwnHead,
+  FINAL_WAIT_MS,
+  leaveNote,
+  LEAVE_WAIT_MS,
+  newSaveState,
+  settle,
+  type SaveState,
+  type SettleStore,
+} from './useNoteEditor';
 
 const head = (updatedAt: string) => ({ updatedAt }) as NoteView;
 
@@ -160,6 +169,32 @@ describe('settle (I4)', () => {
     await settle(store, s, false);
     expect(store.saveNoteBody).not.toHaveBeenCalled();
     expect(store.stashUnsaved).not.toHaveBeenCalled();
+  });
+});
+
+describe('adoptOwnHead (B6)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const noteHead = (updatedAt: string) => ({ id: 'n1', updatedAt }) as NoteView;
+
+  it('a head with a foreign stamp leaves the base alone: the next save still carries the old base', async () => {
+    const store = { ...fakeStore(), isOwnStamp: vi.fn(() => false) };
+    store.saveNoteBody.mockResolvedValue(head('t3'));
+    const s = editing('a', 'ab');
+    adoptOwnHead(store, s, noteHead('t2'));
+    expect(store.isOwnStamp).toHaveBeenCalledWith('n1', 't2');
+    await settle(store, s, false);
+    expect(store.saveNoteBody).toHaveBeenCalledWith('v1', 'n1', 'ab', 't1');
+  });
+
+  it('a head with this tab’s own newer stamp moves the base', async () => {
+    const store = { ...fakeStore(), isOwnStamp: vi.fn(() => true) };
+    store.saveNoteBody.mockResolvedValue(head('t3'));
+    const s = editing('a', 'ab');
+    adoptOwnHead(store, s, noteHead('t2'));
+    await settle(store, s, false);
+    expect(store.saveNoteBody).toHaveBeenCalledWith('v1', 'n1', 'ab', 't2');
   });
 });
 

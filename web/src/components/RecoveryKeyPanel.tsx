@@ -1,25 +1,23 @@
 import { useState } from 'react';
 import { copyText } from '../lib/util';
-import { FormError, Spinner } from './Fields';
+import { Spinner } from './Fields';
 import { CheckIcon, CopyIcon } from './Icons';
 
 /**
  * Shows a freshly made recovery key once, with copy and an "I saved it" check that gates the
- * done button. The key lives only in the caller's state. `busy` and `error` report the caller's
- * work on done (e.g. telling the server about the new key).
+ * done button. The key lives only in the caller's state. `busy` reports the caller's work on done
+ * (e.g. telling the server about the new key); the caller shows its own errors.
  */
 export function RecoveryKeyPanel({
   recoveryKey,
   onDone,
   doneLabel,
   busy = false,
-  error = null,
 }: {
   recoveryKey: string;
   onDone: () => void;
   doneLabel: string;
   busy?: boolean;
-  error?: string | null;
 }) {
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -60,7 +58,6 @@ export function RecoveryKeyPanel({
           {busy && <Spinner />}
           {doneLabel}
         </button>
-        <FormError>{error}</FormError>
       </div>
     </>
   );
