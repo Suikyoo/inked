@@ -17,6 +17,8 @@ const app = await buildApp({
   },
 });
 
+app.log.info({ trustProxy: config.trustProxy }, 'proxy trust');
+
 if (!config.cookieSecure) {
   app.log.warn('COOKIE_SECURE is false; set COOKIE_SECURE=true when serving over HTTPS');
 }

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { call, makeApp, registerBody, setupAdmin, type TestApp } from './helpers.js';
+import { call, key32, makeApp, registerBody, setupAdmin, type TestApp } from './helpers.js';
 
 let t: TestApp | undefined;
 let webDist: string | undefined;
@@ -154,5 +154,24 @@ describe('SPA hosting', () => {
     const res = await t.app.inject({ method: 'GET', url: '/' });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toEqual({ error: 'not_found' });
+  });
+});
+
+describe('trusted proxy', () => {
+  it('with one trusted hop, a client-forged X-Forwarded-For cannot dodge the lockout (I2)', async () => {
+    t = await makeApp({ trustProxy: 1 });
+    const acct = await setupAdmin(t.app);
+    const codes: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      // The proxy appends the real client (here always 203.0.113.9) after the forged value.
+      const r = await t.app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: { 'x-inked': '1', 'x-forwarded-for': `198.51.100.${i}, 203.0.113.9` },
+        payload: { username: acct.username, authKey: key32() },
+      });
+      codes.push(r.statusCode);
+    }
+    expect(codes.slice(5)).toEqual([429, 429, 429]);
   });
 });

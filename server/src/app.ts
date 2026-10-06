@@ -19,7 +19,7 @@ export interface AppOptions {
   dataDir: string;
   webDist: string;
   cookieSecure: boolean;
-  trustProxy?: boolean;
+  trustProxy?: false | number | string;
   logger?: FastifyServerOptions['logger'];
 }
 
@@ -58,7 +58,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   const app = Fastify({
     bodyLimit: BODY_LIMIT,
-    trustProxy: opts.trustProxy ?? false,
+    // Fastify supports a hop count at runtime, but its typings omit `number`.
+    trustProxy: (opts.trustProxy ?? false) as string | boolean,
     ajv: { customOptions: { coerceTypes: false } },
     logger: opts.logger ?? false,
   });

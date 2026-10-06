@@ -11,12 +11,13 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-export async function makeApp(opts: { webDist?: string } = {}): Promise<TestApp> {
+export async function makeApp(opts: { webDist?: string; trustProxy?: false | number | string } = {}): Promise<TestApp> {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'inked-test-'));
   const app = await buildApp({
     dataDir,
     webDist: opts.webDist ?? path.join(dataDir, 'no-web'),
     cookieSecure: false,
+    trustProxy: opts.trustProxy ?? false,
   });
   return {
     app,
