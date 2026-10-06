@@ -1,3 +1,6 @@
+# First run: open http://localhost:${INKED_PORT:-8088}, then copy the setup token from `docker compose logs inked`.
+# Browsers only allow encryption over HTTPS or localhost; to use Inked from other devices put it behind an
+# HTTPS reverse proxy and set COOKIE_SECURE and TRUST_PROXY.
 services:
   inked:
     build: .
