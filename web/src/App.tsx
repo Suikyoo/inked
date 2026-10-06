@@ -98,14 +98,8 @@ export function App({ store }: { store: AppStore }) {
                 </PublicOnly>
               }
             />
-            <Route
-              path="/recover"
-              element={
-                <PublicOnly>
-                  <RecoverPage />
-                </PublicOnly>
-              }
-            />
+            {/* Guards itself: it stays mounted after unlocking to show the replacement recovery key. */}
+            <Route path="/recover" element={<RecoverPage />} />
             <Route
               element={
                 <RequireUnlocked>

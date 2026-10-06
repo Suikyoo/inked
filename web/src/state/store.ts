@@ -28,7 +28,7 @@ import {
   type KdfParams,
 } from '../crypto';
 import { argon2InWorker } from '../lib/argon2Worker';
-import { uuid } from '../lib/util';
+import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
 
 export type Phase = 'booting' | 'offline' | 'setup' | 'signedOut' | 'locked' | 'unlocked';
 
@@ -113,6 +113,39 @@ export class LockedError extends Error {
   }
 }
 
+/** Maximum length of an encrypted note body (`encBody` characters); the server refuses anything bigger. */
+export const NOTE_BODY_LIMIT = 2_000_000;
+
+export class NoteTooLargeError extends Error {
+  constructor() {
+    super(NOTE_TOO_LARGE_MESSAGE);
+    this.name = 'NoteTooLargeError';
+  }
+}
+
+const LAST_USER_KEY = 'inked.lastUsername';
+function rememberUsername(name: string) {
+  try {
+    localStorage.setItem(LAST_USER_KEY, name);
+  } catch {
+    /* ignore */
+  }
+}
+function recallUsername(): string {
+  try {
+    return localStorage.getItem(LAST_USER_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+function forgetRememberedUsername() {
+  try {
+    localStorage.removeItem(LAST_USER_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Holds the session, the unwrapped keys (private fields, never in React state or storage)
  * and all decrypted data. Locking drops every key and every decrypted value.
@@ -125,6 +158,8 @@ export class AppStore {
   /** Bumped on every lock/unlock so late async results from an old session are dropped. */
   private epoch = 0;
   private flushers = new Set<() => Promise<void>>();
+  /** `updatedAt` values returned to this tab's own writes, per note. Lets the editor tell its saves from others'. */
+  private ownStamps = new Map<string, Set<string>>();
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
@@ -165,8 +200,9 @@ export class AppStore {
         const { user } = await api.me();
         this.set({ phase: 'locked', user, lastUsername: user.username });
       } catch (e) {
-        if (e instanceof ApiError && e.status === 401) this.set({ phase: 'signedOut', user: null });
-        else throw e;
+        if (e instanceof ApiError && e.status === 401) {
+          this.set({ phase: 'signedOut', user: null, lastUsername: recallUsername() });
+        } else throw e;
       }
     } catch {
       this.set({ phase: 'offline' });
@@ -188,6 +224,8 @@ export class AppStore {
     this.epoch++;
     this.userKey = userKey;
     this.vaultKeys.clear();
+    this.ownStamps.clear();
+    rememberUsername(user.username);
     this.set({ phase: 'unlocked', user, lastUsername: user.username, notice: null, ...EMPTY_DATA });
   }
 
@@ -195,6 +233,7 @@ export class AppStore {
     this.epoch++;
     this.userKey = null;
     this.vaultKeys.clear();
+    this.ownStamps.clear();
   }
 
   registerFlusher(fn: () => Promise<void>): () => void {
@@ -208,18 +247,32 @@ export class AppStore {
     await Promise.race([all, new Promise((r) => setTimeout(r, 4000))]);
   }
 
-  /** Drops keys and decrypted data; the session cookie stays so only the password is needed. */
+  /** Drops keys + decrypted data and ends the server session; only the username is remembered. */
   async lock(notice: string | null = null): Promise<void> {
     if (this.state.phase !== 'unlocked') return;
     await this.flushAll();
+    const lastUsername = this.state.user?.username ?? this.state.lastUsername;
     this.dropKeys();
-    this.set({ phase: 'locked', notice, ...EMPTY_DATA });
+    rememberUsername(lastUsername);
+    this.set({ phase: 'signedOut', user: null, lastUsername, notice, ...EMPTY_DATA });
+    try {
+      await api.logout();
+    } catch {
+      // Keys are gone either way.
+    }
+  }
+
+  /** "Not you?" on the unlock screen when there is no session: forget the remembered username. */
+  forgetUsername() {
+    forgetRememberedUsername();
+    this.set({ lastUsername: '' });
   }
 
   async signOut(): Promise<void> {
     await this.flushAll();
     this.dropKeys();
-    this.set({ phase: 'signedOut', user: null, notice: null, ...EMPTY_DATA });
+    forgetRememberedUsername();
+    this.set({ phase: 'signedOut', user: null, lastUsername: '', notice: null, ...EMPTY_DATA });
     try {
       await api.logout();
     } catch {
@@ -236,7 +289,12 @@ export class AppStore {
   // ---- Registration, recovery, password ---------------------------------------------------
 
   /** Creates an account (first admin via /api/setup, or via invite). Returns the formatted recovery key. */
-  async register(opts: { username: string; password: string; inviteToken?: string }): Promise<string> {
+  async register(opts: {
+    username: string;
+    password: string;
+    inviteToken?: string;
+    setupToken?: string;
+  }): Promise<string> {
     const userId = uuid();
     const kdfSalt = generateKdfSalt();
     const kdfParams: KdfParams = { ...DEFAULT_KDF_PARAMS };
@@ -258,7 +316,7 @@ export class AppStore {
     };
     const { user } = opts.inviteToken
       ? await api.register({ ...body, inviteToken: opts.inviteToken })
-      : await api.setup(body);
+      : await api.setup({ ...body, setupToken: opts.setupToken ?? '' });
     if (user.id !== userId) throw new Error('Server returned an unexpected user id');
     this.enterUnlocked(user, uk.userKey);
     this.set({ vaultsStatus: 'ready' });
@@ -293,8 +351,32 @@ export class AppStore {
     });
     const userKey = await unwrapUserKey(res.wrappedUserKey, pw.passwordKEK, res.user.id);
     this.enterUnlocked(res.user, userKey);
-    this.set({ notice: 'Password reset. Your recovery key still works; keep it safe.' });
     void this.loadAll();
+  }
+
+  /**
+   * Replaces the recovery key: the same userKey is re-wrapped under a fresh recovery key and the
+   * server swaps the recovery proof, so the old key stops working. Returns the new key (shown once).
+   * Throws CryptoError('unwrap') for a wrong password.
+   */
+  async rotateRecoveryKey(password: string): Promise<string> {
+    const user = this.state.user;
+    if (!user || !this.userKey) throw new LockedError();
+    const { kdfSalt, kdfParams } = await api.params(user.username);
+    const pw = await derive(password, kdfSalt, assertKdfParams(kdfParams));
+    const { wrappedUserKey } = await api.me();
+    const rkBytes = generateRecoveryKey();
+    const text = formatRecoveryKey(rkBytes);
+    const rk = await deriveRecoveryKeys(rkBytes);
+    wipe(rkBytes);
+    // Re-wrap the same userKey under the new recovery KEK (throws CryptoError('unwrap') on a wrong password).
+    const wrappedUserKeyRecovery = await rewrapUserKey(
+      wrappedUserKey,
+      { kek: pw.passwordKEK, aad: aad.userKey(user.id) },
+      { kek: rk.recoveryKEK, aad: aad.userKeyRecovery(user.id) },
+    );
+    await api.rotateRecoveryKey({ currentAuthKey: pw.authKey, recoveryAuth: rk.recoveryAuth, wrappedUserKeyRecovery });
+    return text;
   }
 
   /** Re-wraps only the userKey. Throws CryptoError('unwrap') for a wrong current password. */
@@ -575,8 +657,24 @@ export class AppStore {
 
   // ---- Note mutations ----------------------------------------------------------------------
 
+  /** Stores a note head; a late response never moves `updatedAt` backwards. */
   private putHead(vaultId: string, head: NoteView) {
-    this.patchTree(vaultId, (t) => ({ notes: { ...t.notes, [head.id]: head } }));
+    this.patchTree(vaultId, (t) => {
+      const prev = t.notes[head.id];
+      const next = prev && prev.updatedAt > head.updatedAt ? { ...head, updatedAt: prev.updatedAt } : head;
+      return { notes: { ...t.notes, [head.id]: next } };
+    });
+  }
+
+  private markOwn(noteId: string, updatedAt: string) {
+    let set = this.ownStamps.get(noteId);
+    if (!set) this.ownStamps.set(noteId, (set = new Set()));
+    set.add(updatedAt);
+  }
+
+  /** True only for `updatedAt` values returned by this tab's own create/save/rename/move calls. */
+  isOwnStamp(noteId: string, updatedAt: string): boolean {
+    return this.ownStamps.get(noteId)?.has(updatedAt) ?? false;
   }
 
   async createNote(vaultId: string, folderId: string | null, title: string, body = ''): Promise<NoteView> {
@@ -584,7 +682,10 @@ export class AppStore {
     const id = uuid();
     const encMeta = await encryptNoteMeta(key, vaultId, id, { title });
     const encBody = await encryptNoteBody(key, vaultId, id, body);
+    const ep = this.epoch;
     const { note } = await api.createNote(vaultId, { id, folderId, encMeta, encBody });
+    if (ep !== this.epoch) throw new LockedError();
+    this.markOwn(id, note.updatedAt);
     const head: NoteView = {
       id,
       vaultId,
@@ -601,10 +702,13 @@ export class AppStore {
 
   /** Fetches and decrypts a note. The vault id comes from the URL and is bound by the AAD. */
   async loadNote(vaultId: string, noteId: string): Promise<{ head: NoteView; body: string }> {
+    const ep = this.epoch;
     const key = this.vaultKey(vaultId);
     const { note } = await api.getNote(noteId);
+    if (ep !== this.epoch) throw new LockedError();
     const meta = await decryptNoteMeta(key, vaultId, noteId, note.encMeta);
     const body = await decryptNoteBody(key, vaultId, noteId, note.encBody);
+    if (ep !== this.epoch) throw new LockedError();
     const head: NoteView = {
       id: noteId,
       vaultId,
@@ -621,7 +725,9 @@ export class AppStore {
 
   /** Saves a body. With `baseUpdatedAt` the server answers 409 if someone saved in between. */
   async saveNoteBody(vaultId: string, noteId: string, body: string, baseUpdatedAt?: string): Promise<NoteView> {
+    const ep = this.epoch;
     const encBody = await encryptNoteBody(this.vaultKey(vaultId), vaultId, noteId, body);
+    if (encBody.length > NOTE_BODY_LIMIT) throw new NoteTooLargeError();
     const { note } = await api.updateNote(noteId, { encBody, baseUpdatedAt });
     const prev = this.state.trees[vaultId]?.notes[noteId];
     const head: NoteView = {
@@ -634,6 +740,9 @@ export class AppStore {
       updatedAt: note.updatedAt,
       broken: prev?.broken,
     };
+    // Locked while saving: the save landed, but this session's state is gone.
+    if (ep !== this.epoch) return head;
+    this.markOwn(noteId, note.updatedAt);
     this.putHead(vaultId, head);
     this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
     return head;
@@ -641,7 +750,10 @@ export class AppStore {
 
   async renameNote(vaultId: string, noteId: string, title: string): Promise<NoteView> {
     const encMeta = await encryptNoteMeta(this.vaultKey(vaultId), vaultId, noteId, { title });
+    const ep = this.epoch;
     const { note } = await api.updateNote(noteId, { encMeta });
+    if (ep !== this.epoch) throw new LockedError();
+    this.markOwn(noteId, note.updatedAt);
     const prev = this.state.trees[vaultId]?.notes[noteId];
     const head: NoteView = { ...(prev as NoteView), id: noteId, vaultId, title, broken: false, updatedAt: note.updatedAt, size: note.size, folderId: note.folderId };
     this.putHead(vaultId, head);
@@ -649,7 +761,10 @@ export class AppStore {
   }
 
   async moveNote(vaultId: string, noteId: string, folderId: string | null): Promise<NoteView> {
+    const ep = this.epoch;
     const { note } = await api.updateNote(noteId, { folderId });
+    if (ep !== this.epoch) throw new LockedError();
+    this.markOwn(noteId, note.updatedAt);
     const prev = this.state.trees[vaultId]?.notes[noteId];
     const head: NoteView = { ...(prev as NoteView), folderId: note.folderId, updatedAt: note.updatedAt };
     this.putHead(vaultId, head);

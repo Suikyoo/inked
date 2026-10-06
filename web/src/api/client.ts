@@ -1,5 +1,5 @@
 import type { KdfParams } from '../crypto';
-import type { FolderDTO, InviteDTO, NoteDTO, NoteHeadDTO, RegisterBody, User, VaultDTO } from './types';
+import type { FolderDTO, InviteDTO, NoteDTO, NoteHeadDTO, RegisterBody, SetupBody, User, VaultDTO } from './types';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -65,7 +65,7 @@ const enc = encodeURIComponent;
 
 export const api = {
   status: () => request<{ needsSetup: boolean }>('GET', '/api/status', undefined, { authed: false }),
-  setup: (body: Omit<RegisterBody, 'inviteToken'>) => request<{ user: User }>('POST', '/api/setup', body, { authed: false }),
+  setup: (body: SetupBody) => request<{ user: User }>('POST', '/api/setup', body, { authed: false }),
   params: (username: string) =>
     request<{ kdfSalt: string; kdfParams: KdfParams }>('GET', `/api/auth/params?username=${enc(username)}`, undefined, {
       authed: false,
@@ -82,6 +82,8 @@ export const api = {
     authKey: string;
     wrappedUserKey: string;
   }) => request<{ ok: true }>('POST', '/api/auth/password', body),
+  rotateRecoveryKey: (body: { currentAuthKey: string; recoveryAuth: string; wrappedUserKeyRecovery: string }) =>
+    request<{ ok: true }>('POST', '/api/auth/recovery-key', body),
   recoverStart: (username: string, recoveryAuth: string) =>
     request<{ userId: string; wrappedUserKeyRecovery: string }>(
       'POST',

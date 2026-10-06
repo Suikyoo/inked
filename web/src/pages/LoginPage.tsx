@@ -13,7 +13,8 @@ const MAX_TRIES = 5;
 export function LoginPage() {
   const store = useStore();
   const state = useAppState();
-  const known = state.phase === 'locked' && state.user ? state.user.username : null;
+  // Locking ends the session but remembers the username, so the unlock screen still knows who it is for.
+  const known = state.lastUsername || (state.phase === 'locked' ? state.user?.username : null) || null;
   const [username, setUsername] = useState(known ?? state.lastUsername);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -89,7 +90,9 @@ export function LoginPage() {
   };
 
   const signOutOther = async () => {
-    await store.signOut();
+    // With a live session, end it; otherwise just forget the remembered name.
+    if (state.phase === 'locked') await store.signOut();
+    else store.forgetUsername();
     setUsername('');
     setPassword('');
     userRef.current?.focus();

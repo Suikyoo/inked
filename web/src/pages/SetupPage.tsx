@@ -15,6 +15,7 @@ export function SetupPage() {
     <RegisterFlow
       title="Set up Inked"
       lead="Create the first account. It becomes the admin and can invite others."
+      askSetupToken
       step={step}
       setStep={setStep}
     />

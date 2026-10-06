@@ -49,6 +49,9 @@ export interface RegisterBody {
   wrappedUserKeyRecovery: string;
 }
 
+/** First-admin setup: the token is printed in the server log on first start. */
+export type SetupBody = Omit<RegisterBody, 'inviteToken'> & { setupToken: string };
+
 export interface InviteDTO {
   id: string;
   createdAt: string;

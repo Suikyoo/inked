@@ -66,8 +66,11 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
+export const NOTE_TOO_LARGE_MESSAGE = 'This note is too large to save (about 1.5 MB of text is the limit).';
+
 /** Plain-language message for anything thrown by the API client or crypto code. */
 export function describeError(e: unknown, fallback = 'Something went wrong. Try again.'): string {
+  if (e instanceof Error && e.name === 'NoteTooLargeError') return e.message;
   if (isApiError(e)) {
     switch (e.code) {
       case 'network':
@@ -82,10 +85,12 @@ export function describeError(e: unknown, fallback = 'Something went wrong. Try 
         return 'That username is taken. Pick another.';
       case 'invalid_invite':
         return 'This invite link is no longer valid. Ask for a new one.';
+      case 'invalid_setup_token':
+        return 'That setup token doesn’t match. Copy it again from the server log.';
       case 'already_setup':
         return 'Inked is already set up. Sign in instead.';
       case 'too_large':
-        return 'This is too large to save (notes can be up to about 1.5 MB).';
+        return NOTE_TOO_LARGE_MESSAGE;
       case 'conflict':
         return 'This note changed somewhere else.';
       case 'cycle':

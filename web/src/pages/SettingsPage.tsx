@@ -6,6 +6,7 @@ import { VaultIcon } from '../brand/VaultIcon';
 import { ConfirmDialog } from '../components/Dialog';
 import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
 import { CheckIcon, CopyIcon } from '../components/Icons';
+import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
 import { isCryptoError } from '../crypto';
 import { prefs } from '../lib/prefs';
 import { copyText, describeError, formatDateTime, MIN_PASSWORD, nextVaultColor, VAULT_COLORS } from '../lib/util';
@@ -45,6 +46,7 @@ export function SettingsPage() {
 
       <Editing />
       <ChangePassword />
+      <RecoveryKey />
       <Vaults />
       {state.user?.isAdmin && <Invites />}
     </div>
@@ -143,6 +145,69 @@ function ChangePassword() {
         </div>
         <FormError>{error}</FormError>
       </form>
+    </section>
+  );
+}
+
+function RecoveryKey() {
+  const username = useAppState().user?.username ?? '';
+  const store = useStore();
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!password) return setError('Enter your password.');
+    setBusy(true);
+    setError(null);
+    try {
+      const key = await store.rotateRecoveryKey(password);
+      setPassword('');
+      setRecoveryKey(key);
+    } catch (err) {
+      if (isCryptoError(err, 'unwrap') || isApiError(err, 403)) setError('That password isn’t right.');
+      else setError(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="card" id="recovery-key" aria-labelledby="rk-h">
+      <h2 id="rk-h" className="card-title">
+        Recovery key
+      </h2>
+      {recoveryKey ? (
+        <>
+          <p className="card-text">This is your new recovery key. It is shown once; the old key no longer works.</p>
+          <div className="rk-settings">
+            <RecoveryKeyPanel recoveryKey={recoveryKey} doneLabel="Done" onDone={() => setRecoveryKey(null)} />
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="card-text">Lost it, or used it to reset your password? Make a new one. The old key stops working immediately.</p>
+          <form className="form-narrow" onSubmit={submit} noValidate>
+            <input type="text" name="username" autoComplete="username" value={username} hidden readOnly />
+            <PasswordField
+              label="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={busy}
+            />
+            <div className="row-actions">
+              <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+                {busy && <Spinner />}
+                {busy ? 'Making a new key…' : 'Make a new recovery key'}
+              </button>
+            </div>
+            <FormError>{error}</FormError>
+          </form>
+        </>
+      )}
     </section>
   );
 }

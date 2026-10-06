@@ -212,3 +212,11 @@
     padding: 14px;
   }
 }
+
+/* New recovery key shown in place, same width as on the auth screens. */
+.rk-settings {
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

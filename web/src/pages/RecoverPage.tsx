@@ -1,21 +1,30 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { isApiError } from '../api/client';
 import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
+import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
 import { isCryptoError } from '../crypto';
 import { describeError, MIN_PASSWORD } from '../lib/util';
 import { useAppState, useStore } from '../state/StoreContext';
 import { AuthLayout } from './AuthLayout';
 
+type Step = 'form' | 'working' | 'rotating' | 'replaced' | 'rotateFailed';
+
+/**
+ * Resets the password with the recovery key, then immediately replaces that recovery key: once
+ * used it may have been exposed, so the user leaves with a fresh one shown once.
+ */
 export function RecoverPage() {
   const store = useStore();
   const state = useAppState();
+  const navigate = useNavigate();
   const keyId = useId();
+  const [step, setStep] = useState<Step>('form');
   const [username, setUsername] = useState(state.lastUsername);
   const [recoveryKey, setRecoveryKey] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [newKey, setNewKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [waitUntil, setWaitUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -26,6 +35,10 @@ export function RecoverPage() {
     return () => clearInterval(t);
   }, [waitUntil]);
   const waitLeft = Math.max(0, Math.ceil((waitUntil - now) / 1000));
+
+  // Once the reset has started we stay here until the new recovery key is acknowledged.
+  if (step === 'form' && state.phase === 'setup') return <Navigate to="/setup" replace />;
+  if (step === 'form' && state.phase === 'unlocked') return <Navigate to="/" replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -42,13 +55,12 @@ export function RecoverPage() {
       setError('The two passwords don’t match.');
       return;
     }
-    setBusy(true);
+    setStep('working');
     setError(null);
     try {
       await store.recover(u, recoveryKey, password);
-      // Route guard takes over once unlocked.
     } catch (err) {
-      setBusy(false);
+      setStep('form');
       if (isCryptoError(err, 'format')) setError(err.message);
       else if (isCryptoError(err, 'unwrap')) setError('That recovery key doesn’t open this account.');
       else if (isApiError(err, 401)) setError('That username and recovery key don’t match.');
@@ -56,8 +68,62 @@ export function RecoverPage() {
         setWaitUntil(Date.now() + (err.retryAfter ?? 60) * 1000);
         setNow(Date.now());
       } else setError(describeError(err));
+      return;
+    }
+    setRecoveryKey('');
+    setStep('rotating');
+    try {
+      setNewKey(await store.rotateRecoveryKey(password));
+      setStep('replaced');
+    } catch (err) {
+      setError(describeError(err));
+      setStep('rotateFailed');
+    } finally {
+      setPassword('');
+      setConfirm('');
     }
   };
+
+  if (step === 'replaced' && newKey) {
+    return (
+      <AuthLayout
+        wide
+        title="Your old recovery key has been replaced"
+        lead="Your password is reset. The key you just used no longer works, so save this new one. It is shown once."
+      >
+        <RecoveryKeyPanel
+          recoveryKey={newKey}
+          doneLabel="Continue to Inked"
+          onDone={() => {
+            setNewKey(null);
+            navigate('/', { replace: true });
+          }}
+        />
+      </AuthLayout>
+    );
+  }
+
+  if (step === 'rotateFailed') {
+    return (
+      <AuthLayout
+        title="Password reset"
+        lead="Your new password works, but your old recovery key couldn’t be replaced, so it still opens your account. Make a new one in Settings."
+      >
+        <div className="auth-form">
+          <FormError>{error}</FormError>
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            onClick={() => navigate('/settings#recovery-key', { replace: true })}
+          >
+            Make a new recovery key
+          </button>
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  const busy = step !== 'form';
 
   return (
     <AuthLayout
@@ -111,7 +177,7 @@ export function RecoverPage() {
         />
         <button type="submit" className="btn btn-primary btn-block" disabled={busy || waitLeft > 0}>
           {busy && <Spinner />}
-          {busy ? 'Recovering…' : 'Set new password'}
+          {step === 'rotating' ? 'Making a new recovery key…' : busy ? 'Recovering…' : 'Set new password'}
         </button>
         {waitLeft > 0 ? (
           <p className="form-error" role="status">
