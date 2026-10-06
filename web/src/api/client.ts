@@ -25,11 +25,20 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-async function request<T>(method: Method, path: string, body?: unknown, opts: { authed?: boolean } = {}): Promise<T> {
+interface RequestOptions {
+  authed?: boolean;
+  /** Aborting it fails the request with the same network error as a dropped connection (status 0). */
+  signal?: AbortSignal;
+}
+
+const networkError = () => new ApiError(0, 'network', 'Can’t reach the server. Check your connection and try again.');
+
+async function request<T>(method: Method, path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (method !== 'GET') headers['X-Inked'] = '1';
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res: Response;
+  let text: string;
   try {
     res = await fetch(path, {
       method,
@@ -37,12 +46,14 @@ async function request<T>(method: Method, path: string, body?: unknown, opts: { 
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: 'same-origin',
       cache: 'no-store',
+      signal: opts.signal,
     });
+    // An abort (or a dropped connection) can also land while the body is read.
+    text = await res.text();
   } catch {
-    throw new ApiError(0, 'network', 'Can’t reach the server. Check your connection and try again.');
+    throw networkError();
   }
   let data: unknown = null;
-  const text = await res.text();
   if (text) {
     try {
       data = JSON.parse(text);
@@ -72,7 +83,7 @@ export const api = {
     }),
   login: (username: string, authKey: string) =>
     request<{ user: User; wrappedUserKey: string }>('POST', '/api/auth/login', { username, authKey }, { authed: false }),
-  logout: () => request<{ ok: true }>('POST', '/api/auth/logout', {}, { authed: false }),
+  logout: (signal?: AbortSignal) => request<{ ok: true }>('POST', '/api/auth/logout', {}, { authed: false, signal }),
   me: () => request<{ user: User; wrappedUserKey: string }>('GET', '/api/me', undefined, { authed: false }),
   register: (body: RegisterBody) => request<{ user: User }>('POST', '/api/auth/register', body, { authed: false }),
   changePassword: (body: {

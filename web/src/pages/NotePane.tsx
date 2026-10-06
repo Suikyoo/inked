@@ -177,6 +177,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
                 }
               }}
               disabled={!head || head.broken}
+              readOnly={state.locking}
             />
           </nav>
           <span className={`save-status is-${editor.save}`} role="status" aria-live="polite">

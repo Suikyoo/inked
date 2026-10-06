@@ -11,11 +11,14 @@ const PEER_LOCK_MAX_MS = 10_000;
 type TabMessage =
   | { type: 'hello' | 'here' | 'bye' | 'activity'; tab: string }
   | { type: 'lock'; tab: string; id: string; notice: string | null }
+  | { type: 'signout'; tab: string; id: string }
   | { type: 'lock-done' | 'lock-end'; tab: string; id: string };
 
 export interface TabHooks {
   /** Another tab is locking: lock this one too, flushing its edits first. Resolves when flushed. */
   onPeerLock: (notice: string | null) => Promise<void>;
+  /** Another tab is signing out: sign this one out too, flushing its edits first. Resolves when flushed. */
+  onPeerSignOut(): Promise<void>;
 }
 
 /**
@@ -32,7 +35,7 @@ export class TabLink {
   private trailingPing: ReturnType<typeof setTimeout> | null = null;
   /** Our lock broadcasts: id -> peers still flushing. */
   private waits = new Map<string, { left: Set<string>; done: () => void }>();
-  /** Peer locks whose session end has not been confirmed yet. */
+  /** Peer locks and sign-outs whose session end has not been confirmed yet. */
   private peerLocks = new Map<string, ReturnType<typeof setTimeout>>();
   private quietWaiters: (() => void)[] = [];
 
@@ -71,10 +74,11 @@ export class TabLink {
         break;
       case 'lock':
         this.trackPeerLock(m.id);
-        void this.hooks
-          .onPeerLock(m.notice)
-          .catch(() => undefined)
-          .finally(() => this.post({ type: 'lock-done', tab: this.tab, id: m.id }));
+        this.answerWhenDone(m.id, this.hooks.onPeerLock(m.notice));
+        break;
+      case 'signout':
+        this.trackPeerLock(m.id);
+        this.answerWhenDone(m.id, this.hooks.onPeerSignOut());
         break;
       case 'lock-done': {
         const w = this.waits.get(m.id);
@@ -119,6 +123,24 @@ export class TabLink {
    * LOCK_WAIT_MS; call `end` once the session is over, so they may sign in again.
    */
   announceLock(notice: string | null): { peersDone: Promise<void>; end: () => void } {
+    const { id, peersDone } = this.awaitPeers();
+    this.post({ type: 'lock', tab: this.tab, id, notice });
+    return { peersDone, end: () => this.post({ type: 'lock-end', tab: this.tab, id }) };
+  }
+
+  /**
+   * Tells the other tabs to sign out (flush, drop keys, forget the username). Same waits as a lock:
+   * `peersDone` resolves once every known tab has answered, or after LOCK_WAIT_MS; call `end` once
+   * the session is over, so they may sign in again.
+   */
+  announceSignOut(): { peersDone: Promise<void>; end: () => void } {
+    const { id, peersDone } = this.awaitPeers();
+    this.post({ type: 'signout', tab: this.tab, id });
+    return { peersDone, end: () => this.post({ type: 'lock-end', tab: this.tab, id }) };
+  }
+
+  /** A fresh broadcast id and a promise for every currently known tab's `lock-done`, capped at LOCK_WAIT_MS. */
+  private awaitPeers(): { id: string; peersDone: Promise<void> } {
     const id = uuid();
     const left = new Set(this.peers);
     const peersDone = new Promise<void>((resolve) => {
@@ -131,8 +153,12 @@ export class TabLink {
       };
       this.waits.set(id, { left, done: finish });
     });
-    this.post({ type: 'lock', tab: this.tab, id, notice });
-    return { peersDone, end: () => this.post({ type: 'lock-end', tab: this.tab, id }) };
+    return { id, peersDone };
+  }
+
+  /** Answers a peer's lock or sign-out once this tab has handled it (even if handling failed). */
+  private answerWhenDone(id: string, handled: Promise<void>) {
+    void handled.catch(() => undefined).finally(() => this.post({ type: 'lock-done', tab: this.tab, id }));
   }
 
   private answered(w: { left: Set<string>; done: () => void }, tab: string) {
@@ -159,7 +185,7 @@ export class TabLink {
     for (const w of waiters) w();
   }
 
-  /** Resolves once no lock started in another tab is still about to end the shared session. */
+  /** Resolves once no lock or sign-out started in another tab is still about to end the shared session. */
   peerLocksSettled(): Promise<void> {
     if (!this.peerLocks.size) return Promise.resolve();
     return new Promise((resolve) => this.quietWaiters.push(resolve));

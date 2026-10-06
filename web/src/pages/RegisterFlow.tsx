@@ -43,6 +43,10 @@ export function RegisterFlow({
       setError('Enter the setup token from the server log.');
       return;
     }
+    if (askSetupToken && token.length < 8) {
+      setError('That setup token is too short — copy the whole token from the server log.');
+      return;
+    }
     const u = username.trim().toLowerCase();
     if (!USERNAME_RE.test(u)) {
       setError('Usernames are 3–32 characters: lowercase letters, digits, dot, dash or underscore.');

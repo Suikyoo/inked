@@ -133,6 +133,9 @@ export class NoteTooLargeError extends Error {
 
 const PENDING_RETRY_MS = 30_000;
 
+/** Every logout call is aborted after this long: the keys are already gone, and a new sign-in waits for it. */
+export const LOGOUT_TIMEOUT_MS = 5000;
+
 /** A new recovery key, shown to the user before the server is told about it. */
 export interface PreparedRecoveryKey {
   /** The formatted key, for display. */
@@ -200,10 +203,19 @@ export class AppStore {
   private retryTimer: ReturnType<typeof setInterval> | null = null;
   /** Editor flushes in progress (see trackSettle). */
   private settling = 0;
-  /** Other tabs of this browser share the session: lock together, idle together. */
-  private tabs = new TabLink({ onPeerLock: (notice) => this.lock(notice, { fromPeer: true }) });
+  /** Other tabs of this browser share the session: lock together, sign out together, idle together. */
+  private tabs = new TabLink({
+    onPeerLock: (notice) => this.afterSignIn(() => this.lock(notice, { fromPeer: true })),
+    onPeerSignOut: () => this.afterSignIn(() => this.endFromPeer({ remember: false })),
+  });
   /** The logout of the last lock or sign-out; a new sign-in waits for it so it cannot end the new session. */
   private sessionEnd: Promise<void> = Promise.resolve();
+  /**
+   * A sign-in whose session-starting request may be on the wire (from after previousSessionGone until
+   * its keys are in place). A lock or sign-out from another tab meanwhile waits for it, then applies.
+   * Never rejects.
+   */
+  private unlocking: Promise<void> | null = null;
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
@@ -267,10 +279,37 @@ export class AppStore {
     const params = assertKdfParams(kdfParams);
     const { authKey, passwordKEK } = await derive(password, kdfSalt, params);
     await this.previousSessionGone();
-    const { user, wrappedUserKey } = await api.login(username, authKey);
-    const userKey = await unwrapUserKey(wrappedUserKey, passwordKEK, user.id);
-    this.enterUnlocked(user, userKey);
-    void this.loadAll();
+    await this.signingIn(async () => {
+      const { user, wrappedUserKey } = await api.login(username, authKey);
+      const userKey = await unwrapUserKey(wrappedUserKey, passwordKEK, user.id);
+      this.enterUnlocked(user, userKey);
+      void this.loadAll();
+    });
+  }
+
+  /**
+   * Runs the part of a sign-in that starts a server session and unwraps the keys. A lock or sign-out
+   * broadcast by another tab meanwhile would end that new session under us, so the peer hooks wait
+   * for it and then lock or sign out through their normal path (see afterSignIn).
+   */
+  private async signingIn(fn: () => Promise<void>): Promise<void> {
+    const run = fn();
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.unlocking = settled;
+    try {
+      await run;
+    } finally {
+      if (this.unlocking === settled) this.unlocking = null;
+    }
+  }
+
+  /** Applies another tab's lock or sign-out once a sign-in in progress here has landed (or failed). */
+  private async afterSignIn(apply: () => Promise<void>): Promise<void> {
+    if (this.unlocking) await this.unlocking;
+    await apply();
   }
 
   private enterUnlocked(user: User, userKey: CryptoKey) {
@@ -317,10 +356,36 @@ export class AppStore {
     await Promise.all([this.sessionEnd, this.tabs.peerLocksSettled()]);
   }
 
+  /** Ends the server session, giving up after LOGOUT_TIMEOUT_MS. Never throws. */
+  private async logoutBounded(): Promise<void> {
+    const ac = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        ac.abort();
+        resolve();
+      }, LOGOUT_TIMEOUT_MS);
+    });
+    try {
+      // Raced as well as aborted, so even a request that ignores the abort cannot hold up a sign-in.
+      await Promise.race([
+        api.logout(ac.signal).then(
+          () => undefined,
+          // Keys are gone either way; a stale cookie only lets someone see the locked screen.
+          () => undefined,
+        ),
+        timedOut,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /**
    * Drops keys + decrypted data and ends the server session; only the username is remembered.
    * The other tabs lock too (each flushes its own edits first). The tab that started the lock ends
    * the session once they are done, or after LOCK_WAIT_MS; a tab locked by a peer leaves that to it.
+   * The logout itself is bounded by LOGOUT_TIMEOUT_MS.
    * A call while a lock, sign-out or session end is in progress does nothing.
    */
   async lock(notice: string | null = null, opts: { fromPeer?: boolean } = {}): Promise<void> {
@@ -336,11 +401,7 @@ export class AppStore {
       if (!peers) return;
       this.sessionEnd = (async () => {
         await peers.peersDone;
-        try {
-          await api.logout();
-        } catch {
-          // Keys are gone either way.
-        }
+        await this.logoutBounded();
         peers.end();
       })();
       await this.sessionEnd;
@@ -355,21 +416,55 @@ export class AppStore {
     this.set({ lastUsername: '' });
   }
 
-  /** Other tabs are not told: their next request gets 401 and stashes their edits (see sessionEnded). */
+  /**
+   * Like lock, but the username is forgotten, here and in every other tab. The other tabs sign out
+   * too (each flushes its own edits first); this tab ends the session once they are done, or after
+   * LOCK_WAIT_MS, and that logout is bounded by LOGOUT_TIMEOUT_MS.
+   */
   async signOut(): Promise<void> {
     if (this.state.locking) return;
     this.set({ locking: true });
     try {
+      const peers = this.tabs.announceSignOut();
       await this.flushAll(true);
       this.dropKeys();
       forgetRememberedUsername();
       this.set({ phase: 'signedOut', user: null, lastUsername: '', notice: null, locking: false, ...EMPTY_DATA });
-      this.sessionEnd = api.logout().then(
-        () => undefined,
-        // Keys are gone either way; a stale cookie only lets someone see the locked screen.
-        () => undefined,
-      );
+      this.sessionEnd = (async () => {
+        await peers.peersDone;
+        await this.logoutBounded();
+        peers.end();
+      })();
       await this.sessionEnd;
+    } finally {
+      if (this.state.locking) this.set({ locking: false });
+    }
+  }
+
+  /**
+   * Another tab signed out (`remember: false`): flush this tab's edits while the keys are still
+   * here, then drop them and forget the username. The tab that signed out ends the session; this
+   * one never calls logout. Skipped while a lock, sign-out or session end is already running here.
+   */
+  private async endFromPeer(opts: { remember: boolean }): Promise<void> {
+    const { phase } = this.state;
+    if (phase === 'signedOut' || phase === 'setup') {
+      // No keys here; still stop showing the name the user chose to forget.
+      if (!opts.remember && this.state.lastUsername) {
+        forgetRememberedUsername();
+        this.set({ lastUsername: '' });
+      }
+      return;
+    }
+    if (this.state.locking) return;
+    this.set({ locking: true });
+    try {
+      await this.flushAll(true);
+      const lastUsername = opts.remember ? (this.state.user?.username ?? this.state.lastUsername) : '';
+      this.dropKeys();
+      if (opts.remember) rememberUsername(lastUsername);
+      else forgetRememberedUsername();
+      this.set({ phase: 'signedOut', user: null, lastUsername, notice: null, locking: false, ...EMPTY_DATA });
     } finally {
       if (this.state.locking) this.set({ locking: false });
     }
@@ -402,6 +497,7 @@ export class AppStore {
     inviteToken?: string;
     setupToken?: string;
   }): Promise<string> {
+    await this.previousSessionGone();
     const userId = uuid();
     const kdfSalt = generateKdfSalt();
     const kdfParams: KdfParams = { ...DEFAULT_KDF_PARAMS };
@@ -421,12 +517,14 @@ export class AppStore {
       recoveryAuth: rk.recoveryAuth,
       wrappedUserKeyRecovery: uk.wrappedUserKeyRecovery,
     };
-    const { user } = opts.inviteToken
-      ? await api.register({ ...body, inviteToken: opts.inviteToken })
-      : await api.setup({ ...body, setupToken: opts.setupToken ?? '' });
-    if (user.id !== userId) throw new Error('Server returned an unexpected user id');
-    this.enterUnlocked(user, uk.userKey);
-    this.set({ vaultsStatus: 'ready' });
+    await this.signingIn(async () => {
+      const { user } = opts.inviteToken
+        ? await api.register({ ...body, inviteToken: opts.inviteToken })
+        : await api.setup({ ...body, setupToken: opts.setupToken ?? '' });
+      if (user.id !== userId) throw new Error('Server returned an unexpected user id');
+      this.enterUnlocked(user, uk.userKey);
+      this.set({ vaultsStatus: 'ready' });
+    });
     try {
       await this.createVault('Personal', '#45A89E');
     } catch {
@@ -437,6 +535,7 @@ export class AppStore {
 
   async recover(username: string, recoveryKeyText: string, newPassword: string): Promise<void> {
     const rkBytes = parseRecoveryKey(recoveryKeyText);
+    await this.previousSessionGone();
     const rk = await deriveRecoveryKeys(rkBytes);
     wipe(rkBytes);
     const { userId, wrappedUserKeyRecovery } = await api.recoverStart(username, rk.recoveryAuth);
@@ -448,17 +547,19 @@ export class AppStore {
       { kek: rk.recoveryKEK, aad: aad.userKeyRecovery(userId) },
       { kek: pw.passwordKEK, aad: aad.userKey(userId) },
     );
-    const res = await api.recoverFinish({
-      username,
-      recoveryAuth: rk.recoveryAuth,
-      kdfSalt,
-      kdfParams,
-      authKey: pw.authKey,
-      wrappedUserKey,
+    await this.signingIn(async () => {
+      const res = await api.recoverFinish({
+        username,
+        recoveryAuth: rk.recoveryAuth,
+        kdfSalt,
+        kdfParams,
+        authKey: pw.authKey,
+        wrappedUserKey,
+      });
+      const userKey = await unwrapUserKey(res.wrappedUserKey, pw.passwordKEK, res.user.id);
+      this.enterUnlocked(res.user, userKey);
+      void this.loadAll();
     });
-    const userKey = await unwrapUserKey(res.wrappedUserKey, pw.passwordKEK, res.user.id);
-    this.enterUnlocked(res.user, userKey);
-    void this.loadAll();
   }
 
   /**
@@ -685,7 +786,7 @@ export class AppStore {
     const encMeta = await encryptVaultMeta(this.vaultKey(id), id, meta);
     const { vault } = await api.updateVault(id, encMeta);
     // Locked meanwhile: the rename landed, but the plaintext name must not reach the new state.
-    if (ep !== this.epoch) return;
+    if (ep !== this.epoch) throw new LockedError();
     this.set((s) => ({
       vaults: { ...s.vaults, [id]: { ...s.vaults[id], ...meta, updatedAt: vault.updatedAt } },
     }));

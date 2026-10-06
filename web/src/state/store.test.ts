@@ -5,6 +5,7 @@ const api = vi.hoisted(() => ({
   status: vi.fn(), me: vi.fn(), params: vi.fn(), login: vi.fn(), logout: vi.fn(), setup: vi.fn(),
   listVaults: vi.fn(), createVault: vi.fn(), createNote: vi.fn(), getNote: vi.fn(), updateNote: vi.fn(),
   rotateRecoveryKey: vi.fn(), tree: vi.fn(), bodies: vi.fn(), createFolder: vi.fn(), updateVault: vi.fn(),
+  recoverStart: vi.fn(), recoverFinish: vi.fn(),
 }));
 /** The store's 401 handler, as the real client would call it. */
 const unauthorized = vi.hoisted(() => ({ handler: null as null | (() => unknown) }));
@@ -27,7 +28,11 @@ vi.mock('../lib/argon2Worker', async () => {
 import { ApiError } from '../api/client';
 import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
 import { newSaveState, settle } from '../pages/useNoteEditor';
-import { AppStore, LockedError } from './store';
+import { AppStore, LockedError, LOGOUT_TIMEOUT_MS } from './store';
+
+/** Captured before any test fakes timers: lets real async work (WebCrypto, argon2) run while fake time stands still. */
+const realSetTimeout = globalThis.setTimeout;
+const realWait = (ms: number) => new Promise((r) => realSetTimeout(r, ms));
 
 /** In-memory BroadcastChannel: instances created in the same test share one bus; delivery is async. */
 class FakeChannel {
@@ -582,6 +587,170 @@ describe('AppStore', () => {
     expect(s.getState().phase).toBe('unlocked');
   });
 
+  it('sign-out reaches every tab: they flush with their keys, then drop them; logout waits for them (A2)', async () => {
+    const a = await registeredStore();
+    const b = await registeredStore();
+    // a has seen b's hello, so it waits for b's answer.
+    await vi.waitFor(() => expect(FakeChannel.bus[0].received).toContainEqual({ type: 'hello', tab: expect.any(String) }));
+    const vaultId = Object.keys(b.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, n: NoteBody) => headFor(n, 't1'));
+    const created = await b.createNote(vaultId, null, 'Plan', '');
+    const ed = newSaveState(vaultId, created.id);
+    ed.base = 't1';
+    ed.body = 'typed in tab b';
+    b.registerFlusher((final) => settle(b, ed, final));
+    const order: string[] = [];
+    api.updateNote.mockImplementation(async (_id: string, body: { encBody: string }) => {
+      order.push(body.encBody.startsWith('v1.') ? 'b-save' : 'b-save-plaintext?');
+      return headFor({ ...api.createNote.mock.calls[0][1], encBody: body.encBody }, 't2');
+    });
+    b.subscribe(() => {
+      if (b.getState().phase === 'signedOut' && !order.includes('b-signedOut')) order.push('b-signedOut');
+    });
+    api.logout.mockImplementation(async () => {
+      order.push('logout');
+      return { ok: true };
+    });
+    expect(localStorage.getItem('inked.lastUsername')).not.toBeNull();
+    await a.signOut();
+    expect(order).toEqual(['b-save', 'b-signedOut', 'logout']);
+    expect(api.updateNote.mock.calls[0][0]).toBe(created.id);
+    expect(b.getState().phase).toBe('signedOut');
+    expect(b.getState().notice).toBeNull();
+    expect(b.getState().lastUsername).toBe('');
+    expect(b.getState().bodies).toEqual({});
+    await expect(b.createVault('x', '#45A89E')).rejects.toBeInstanceOf(LockedError);
+    expect(localStorage.getItem('inked.lastUsername')).toBeNull();
+    expect(api.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it('a sign-out from another tab during sign-in signs out once the sign-in lands (A2)', async () => {
+    const s = await registeredStore();
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    mockUnlock();
+    let release!: (v: unknown) => void;
+    api.login.mockReturnValue(new Promise((r) => (release = r)));
+    const unlocking = s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(api.login).toHaveBeenCalled());
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'signout', tab: 'peer', id: 'S1' });
+    await vi.waitFor(() => expect(FakeChannel.bus[0].received).toContainEqual({ type: 'signout', tab: 'peer', id: 'S1' }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect((peer.received as Msg[]).some((m) => m.type === 'lock-done')).toBe(false);
+    const setupBody = api.setup.mock.calls[0][0];
+    release({ user: { id: setupBody.userId, username: 'ann', isAdmin: true }, wrappedUserKey: setupBody.wrappedUserKey });
+    await unlocking;
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'S1' }));
+    expect(s.getState().phase).toBe('signedOut');
+    expect(s.getState().lastUsername).toBe('');
+    expect(localStorage.getItem('inked.lastUsername')).toBeNull();
+    await expect(s.createVault('x', '#45A89E')).rejects.toBeInstanceOf(LockedError);
+    // The tab that signed out ends the session.
+    expect(api.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it('a hanging logout is aborted after LOGOUT_TIMEOUT_MS; lock completes and sign-in proceeds (A3)', async () => {
+    const s = await registeredStore();
+    mockUnlock();
+    const signals: AbortSignal[] = [];
+    api.logout.mockImplementation((signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise(() => undefined); // never settles, even when aborted
+    });
+    vi.useFakeTimers();
+    try {
+      let locked = false;
+      const locking = s.lock().then(() => (locked = true));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(s.getState().phase).toBe('signedOut');
+      expect(api.logout).toHaveBeenCalledTimes(1);
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      expect(signals[0].aborted).toBe(false);
+      const unlocking = s.unlock('ann', 'pw-ann-123456');
+      await realWait(150); // the KDF runs on real crypto, then waits for the session end
+      expect(api.login).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(LOGOUT_TIMEOUT_MS - 1);
+      expect(locked).toBe(false);
+      expect(api.login).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(signals[0].aborted).toBe(true);
+      await locking;
+      await unlocking;
+      expect(api.login).toHaveBeenCalledTimes(1);
+      expect(s.getState().phase).toBe('unlocked');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('register waits for a pending session end (A3)', async () => {
+    const s = await registeredStore();
+    let release!: (v: unknown) => void;
+    api.logout.mockReturnValue(new Promise((r) => (release = r)));
+    const locking = s.lock();
+    await vi.waitFor(() => expect(api.logout).toHaveBeenCalled());
+    const registering = s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(api.setup).toHaveBeenCalledTimes(1); // only ann's
+    release({ ok: true });
+    await Promise.all([locking, registering]);
+    expect(api.setup).toHaveBeenCalledTimes(2);
+    expect(s.getState().user?.username).toBe('bob');
+  });
+
+  it('recover waits for a pending session end (A3)', async () => {
+    api.setup.mockImplementation(async (body: { userId: string; username: string }) => ({ user: { id: body.userId, username: body.username, isAdmin: true } }));
+    api.createVault.mockImplementation(async (b: { id: string; encMeta: string; wrappedKey: string }) => ({ vault: { ...b, createdAt: 'x', updatedAt: 'x', noteCount: 0, activeNoteCount7d: 0 } }));
+    const s = new AppStore();
+    const rk = await s.register({ username: 'ann', password: 'pw-ann-123456', setupToken: 'tok-12345678' });
+    const setupBody = api.setup.mock.calls[0][0];
+    const ann = { id: setupBody.userId, username: 'ann', isAdmin: true };
+    api.recoverStart.mockResolvedValue({ userId: setupBody.userId, wrappedUserKeyRecovery: setupBody.wrappedUserKeyRecovery });
+    api.recoverFinish.mockImplementation(async (b: { wrappedUserKey: string }) => ({ user: ann, wrappedUserKey: b.wrappedUserKey }));
+    api.listVaults.mockResolvedValue({ vaults: [] });
+    let release!: (v: unknown) => void;
+    api.logout.mockReturnValue(new Promise((r) => (release = r)));
+    const locking = s.lock();
+    await vi.waitFor(() => expect(api.logout).toHaveBeenCalled());
+    const recovering = s.recover('ann', rk, 'pw-ann-new-123456');
+    await new Promise((r) => setTimeout(r, 150));
+    expect(api.recoverFinish).not.toHaveBeenCalled();
+    release({ ok: true });
+    await Promise.all([locking, recovering]);
+    expect(api.recoverFinish).toHaveBeenCalledTimes(1);
+    expect(s.getState().phase).toBe('unlocked');
+  });
+
+  it('a lock from another tab during sign-in locks once the sign-in lands (A3)', async () => {
+    const s = await registeredStore();
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    mockUnlock();
+    let release!: (v: unknown) => void;
+    api.login.mockReturnValue(new Promise((r) => (release = r)));
+    const unlocking = s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(api.login).toHaveBeenCalled());
+    const peer = new FakeChannel('inked');
+    const notice = 'Locked after 15 minutes without activity.';
+    peer.postMessage({ type: 'lock', tab: 'peer', id: 'L2', notice });
+    await vi.waitFor(() => expect(FakeChannel.bus[0].received).toContainEqual({ type: 'lock', tab: 'peer', id: 'L2', notice }));
+    await new Promise((r) => setTimeout(r, 20));
+    // Not answered yet: the initiator's logout must wait for this sign-in to be locked.
+    expect((peer.received as Msg[]).some((m) => m.type === 'lock-done')).toBe(false);
+    const setupBody = api.setup.mock.calls[0][0];
+    release({ user: { id: setupBody.userId, username: 'ann', isAdmin: true }, wrappedUserKey: setupBody.wrappedUserKey });
+    await unlocking;
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'L2' }));
+    expect(s.getState().phase).toBe('signedOut');
+    expect(s.getState().notice).toBe(notice);
+    expect(s.getState().lastUsername).toBe('ann');
+    expect(s.getState().vaults).toEqual({});
+    await expect(s.createVault('x', '#45A89E')).rejects.toBeInstanceOf(LockedError);
+    // Only this tab's own earlier lock logged out; the tab that started this lock ends the session.
+    expect(api.logout).toHaveBeenCalledTimes(1);
+  });
+
   it('shares activity across tabs, at most one ping per 15 s (C1)', async () => {
     vi.useFakeTimers({ now: 1_000_000 });
     try {
@@ -617,7 +786,8 @@ describe('AppStore', () => {
     api.logout.mockResolvedValue({ ok: true });
     await s.lock();
     release({ vault: { updatedAt: 't9' } });
-    await p;
+    // B6: the caller hears that the session locked, like every other mutation.
+    expect(await p).toBeInstanceOf(LockedError);
     expect(s.getState().vaults).toEqual({});
   });
 
