@@ -75,7 +75,7 @@ Internet ──HTTPS──▶ Cloudflare edge ══tunnel══▶ cloudflared 
 - `nginx.ports: ["127.0.0.1:${INKED_PORT:-8088}:80"]`
 - `inked.environment.COOKIE_SECURE: "false"`
 - Used as `docker compose -f compose.yaml -f compose.local.yaml up -d --build`.
-- Requires the network to exist once: `docker network create cloudflared-net`.
+- `nginx.networks: !override { inked-internal: {}, inked-local: {} }` plus a top-level `inked-local: {}` network (not internal, so the port can be published). The local stack never joins `cloudflared-net` or takes the `inked-nginx` alias, so it cannot be reached through the tunnel, and it runs on a machine without that network.
 
 ### `deploy/nginx/templates/inked.conf.template`
 

@@ -1,9 +1,16 @@
 # Local testing override: publishes nginx on localhost and allows non-HTTPS cookies.
-# Needs the network once: docker network create cloudflared-net
+# Never joins cloudflared-net (the production tunnel network), so a test stack can't be reached through the tunnel.
 services:
   inked:
     environment:
       COOKIE_SECURE: "false"
   nginx:
+    networks: !override
+      inked-internal: {}
+      # Not internal: Docker can't publish ports for a container that is only on an internal network.
+      inked-local: {}
     ports:
       - "127.0.0.1:${INKED_PORT:-8088}:80"
+
+networks:
+  inked-local: {}

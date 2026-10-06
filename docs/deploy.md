@@ -108,7 +108,6 @@ Inked does not need them, and its CSP (`script-src 'self'` and `style-src 'self'
 ## Local test
 
 ```bash
-docker network create cloudflared-net   # once
 d=$(mktemp -d); sudo chown 1000:1000 "$d"; INKED_DATA_DIR=$d docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
 bash deploy/smoke-test.sh
 ```
@@ -118,5 +117,7 @@ The `chown` is needed on Linux only. Lockout counters live in the server's memor
 The test stack uses the same fixed `inked-internal` subnet (172.31.250.0/28) as production, so it cannot run alongside the production stack on the same host. Stop one before starting the other.
 
 The override publishes nginx on `127.0.0.1:${INKED_PORT:-8088}` and turns off `Secure` cookies so plain HTTP works.
+
+The override never joins `cloudflared-net`: it replaces nginx's networks with `inked-internal` and its own `inked-local` network, so it never takes the `inked-nginx` alias. A test stack therefore can't be reached through the tunnel, even on the production host, and `cloudflared-net` doesn't need to exist. The smoke test's `CF-Connecting-IP` checks still work because the host's requests arrive from `inked-local`'s gateway, which Docker normally allocates inside the default `CLOUDFLARED_NET_CIDR` (172.16.0.0/12). If your Docker allocates networks elsewhere (for example 192.168.x), set `CLOUDFLARED_NET_CIDR` to cover that gateway for the test run.
 
 The smoke test also requests `/join/SMOKE-SECRET-TOKEN-123` and then fails if that token shows up in `docker compose logs nginx` or `docker compose logs inked`. It reads the logs of the stack named by `COMPOSE_ARGS` (default `-p inked-test -f compose.yaml -f compose.local.yaml`); set it if you started the stack differently.
