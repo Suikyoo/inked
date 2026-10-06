@@ -91,6 +91,15 @@ const passwordSchema = {
   },
 } as const;
 
+const recoveryKeySchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['currentAuthKey', 'recoveryAuth', 'wrappedUserKeyRecovery'],
+    properties: { currentAuthKey: key32, recoveryAuth: key32, wrappedUserKeyRecovery: wrappedKey },
+  },
+} as const;
+
 const recoverStartSchema = {
   body: {
     type: 'object',
@@ -287,6 +296,27 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
       await replaceCredentials(db, user.id, request.body);
       // Sign out every other session.
       db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?').run(user.id, request.sessionHash);
+      return { ok: true };
+    },
+  );
+
+  app.post<{ Body: { currentAuthKey: string; recoveryAuth: string; wrappedUserKeyRecovery: string } }>(
+    '/api/auth/recovery-key',
+    { schema: recoveryKeySchema, onRequest: requireUser(ctx) },
+    async (request) => {
+      const user = currentUser(request);
+      const key = `recoverykey|${request.ip}|${user.id}`;
+      const wait = ctx.limiter.attempt(key);
+      if (wait > 0) throw lockedError(wait);
+      if (!(await verifySecret(request.body.currentAuthKey, authOf(user)))) throw new ApiError(403, 'invalid_credentials');
+      ctx.limiter.reset(key);
+      const rec = await hashSecret(request.body.recoveryAuth);
+      db.prepare('UPDATE users SET recovery_salt = ?, recovery_hash = ?, wrapped_user_key_recovery = ? WHERE id = ?').run(
+        rec.salt,
+        rec.hash,
+        request.body.wrappedUserKeyRecovery,
+        user.id,
+      );
       return { ok: true };
     },
   );

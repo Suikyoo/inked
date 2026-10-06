@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as cryptoMod from '../src/crypto.js';
-import { type Account, call, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
+import { type Account, call, fakeCipher, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
 
 let t: TestApp;
 beforeEach(async () => {
@@ -276,6 +276,39 @@ describe('password change', () => {
   it('requires a session', async () => {
     await setupAdmin(t.app);
     const res = await call(t.app, 'POST', '/api/auth/password', { body: {} });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('recovery key rotation', () => {
+  it('rotates the recovery key; the old one stops working', async () => {
+    const admin = await setupAdmin(t.app);
+    const newAuth = key32();
+    const newWrapped = fakeCipher();
+
+    const bad = await call(t.app, 'POST', '/api/auth/recovery-key', {
+      cookie: admin.cookie,
+      body: { currentAuthKey: key32(), recoveryAuth: newAuth, wrappedUserKeyRecovery: newWrapped },
+    });
+    expect(bad.statusCode).toBe(403);
+
+    const ok = await call(t.app, 'POST', '/api/auth/recovery-key', {
+      cookie: admin.cookie,
+      body: { currentAuthKey: admin.authKey, recoveryAuth: newAuth, wrappedUserKeyRecovery: newWrapped },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true });
+
+    const old = await call(t.app, 'POST', '/api/auth/recover/start', { body: { username: admin.username, recoveryAuth: admin.recoveryAuth } });
+    expect(old.statusCode).toBe(401);
+    const fresh = await call(t.app, 'POST', '/api/auth/recover/start', { body: { username: admin.username, recoveryAuth: newAuth } });
+    expect(fresh.statusCode).toBe(200);
+    expect(fresh.json().wrappedUserKeyRecovery).toBe(newWrapped);
+  });
+
+  it('requires a session', async () => {
+    await setupAdmin(t.app);
+    const res = await call(t.app, 'POST', '/api/auth/recovery-key', { body: {} });
     expect(res.statusCode).toBe(401);
   });
 });
