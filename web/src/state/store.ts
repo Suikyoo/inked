@@ -373,8 +373,15 @@ export class AppStore {
    * Runs the part of a sign-in that starts a server session and unwraps the keys. A lock or sign-out
    * broadcast by another tab meanwhile would end that new session under us, so the peer hooks wait
    * for it and then lock or sign out through their normal path (see afterSignIn).
+   * `fn` must start with the session-starting request. Callers wait for previousSessionGone first,
+   * outside this: inside it a peer lock arriving meanwhile would wait for this sign-in while the
+   * sign-in waited for that lock's end (a mutual wait until the peer's 4 s cap).
    */
   private async signingIn(fn: () => Promise<void>): Promise<void> {
+    // A peer lock or sign-out that arrived since the caller's wait is waited out here, while `unlocking`
+    // is still unset, so its hook applies at once. The last check, `fn()` (and so its request) and
+    // setting `unlocking` run in one synchronous step; tab messages arrive as tasks, so none slips in.
+    while (this.tabs.peerLocksPending()) await this.previousSessionGone();
     const run = fn();
     const settled = run.then(
       () => undefined,
@@ -651,9 +658,9 @@ export class AppStore {
       recoveryAuth: rk.recoveryAuth,
       wrappedUserKeyRecovery: uk.wrappedUserKeyRecovery,
     };
+    // After the slow derivation, so a lock elsewhere meanwhile is waited out too (outside signingIn; see there).
+    await this.previousSessionGone();
     await this.signingIn(async () => {
-      // Right before the session starts, so a lock elsewhere during the slow derivation is waited out too.
-      await this.previousSessionGone();
       const { user } = opts.inviteToken
         ? await api.register({ ...body, inviteToken: opts.inviteToken })
         : await api.setup({ ...body, setupToken: opts.setupToken ?? '' });
@@ -686,9 +693,9 @@ export class AppStore {
       { kek: rk.recoveryKEK, aad: aad.userKeyRecovery(userId) },
       { kek: pw.passwordKEK, aad: aad.userKey(userId) },
     );
+    // After the slow derivation, so a lock elsewhere meanwhile is waited out too (outside signingIn; see there).
+    await this.previousSessionGone();
     await this.signingIn(async () => {
-      // Right before the session starts, so a lock elsewhere during the slow derivation is waited out too.
-      await this.previousSessionGone();
       const res = await api.recoverFinish({
         username,
         recoveryAuth: rk.recoveryAuth,

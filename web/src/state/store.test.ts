@@ -1197,6 +1197,98 @@ describe('AppStore', () => {
     expect(s.getState().user?.username).toBe('bob');
   });
 
+  /**
+   * Starts a sign-in while a peer lock (L1) is pending, so it waits for L1's end after its KDF.
+   * Meanwhile the peer locks again (L2) and acts like a real initiator: it ends L2 once this tab
+   * answers, or after the 4 s cap if it never does. Resolves with the session requests made by then,
+   * measured 3999 ms after L1's end.
+   */
+  async function signInDuringPeerLocks(signIn: () => Promise<unknown>, sessionRequests: () => number) {
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'lock', tab: 'peer', id: 'L1', notice: null });
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'L1' }));
+    const before = sessionRequests();
+    const signingIn = signIn();
+    await realWait(150); // the KDF runs on real crypto, then waits for L1's end
+    expect(sessionRequests()).toBe(before);
+    vi.useFakeTimers();
+    let made: number;
+    try {
+      const end = (id: string) => peer.postMessage({ type: 'lock-end', tab: 'peer', id });
+      peer.onmessage = (e) => {
+        if ((e.data as Msg).type === 'lock-done' && (e.data as Msg).id === 'L2') end('L2');
+      };
+      peer.postMessage({ type: 'lock', tab: 'peer', id: 'L2', notice: null });
+      const cap = setTimeout(() => end('L2'), 4000);
+      await vi.advanceTimersByTimeAsync(0);
+      end('L1');
+      await vi.advanceTimersByTimeAsync(3_999);
+      made = sessionRequests() - before;
+      clearTimeout(cap);
+      end('L2'); // lets a stalled sign-in finish, so a failure reports instead of hanging
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+    await signingIn;
+    return made;
+  }
+
+  it('a peer lock during register’s wait for an earlier one does not stall it until the 4 s cap (M3)', async () => {
+    const s = await registeredStore();
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    const made = await signInDuringPeerLocks(
+      () => s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' }),
+      () => api.setup.mock.calls.length,
+    );
+    expect(made).toBe(1);
+    expect(s.getState().phase).toBe('unlocked');
+    expect(s.getState().user?.username).toBe('bob');
+  });
+
+  it('a peer lock during recover’s wait for an earlier one does not stall it until the 4 s cap (M3)', async () => {
+    api.setup.mockImplementation(async (body: { userId: string; username: string }) => ({ user: { id: body.userId, username: body.username, isAdmin: true } }));
+    api.createVault.mockImplementation(async (b: { id: string; encMeta: string; wrappedKey: string }) => ({ vault: { ...b, createdAt: 'x', updatedAt: 'x', noteCount: 0, activeNoteCount7d: 0 } }));
+    const s = new AppStore();
+    const rk = await s.register({ username: 'ann', password: 'pw-ann-123456', setupToken: 'tok-12345678' });
+    const setupBody = api.setup.mock.calls[0][0];
+    const ann = { id: setupBody.userId, username: 'ann', isAdmin: true };
+    api.recoverStart.mockResolvedValue({ userId: setupBody.userId, wrappedUserKeyRecovery: setupBody.wrappedUserKeyRecovery });
+    api.recoverFinish.mockImplementation(async (b: { wrappedUserKey: string }) => ({ user: ann, wrappedUserKey: b.wrappedUserKey }));
+    api.listVaults.mockResolvedValue({ vaults: [] });
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    const made = await signInDuringPeerLocks(
+      () => s.recover('ann', rk, 'pw-ann-new-123456'),
+      () => api.recoverFinish.mock.calls.length,
+    );
+    expect(made).toBe(1);
+    expect(s.getState().phase).toBe('unlocked');
+  });
+
+  it('a peer lock arriving while register waits for its own logout is waited out too, without a mutual wait (M3)', async () => {
+    const s = await registeredStore();
+    let release!: (v: unknown) => void;
+    api.logout.mockReturnValue(new Promise((r) => (release = r)));
+    const locking = s.lock();
+    await vi.waitFor(() => expect(api.logout).toHaveBeenCalled());
+    const registering = s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' });
+    await realWait(150); // the KDF runs on real crypto, then waits for the logout
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'lock', tab: 'peer', id: 'L3', notice: null });
+    // Answered at once: the hook does not wait for this sign-in.
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'L3' }));
+    release({ ok: true });
+    await locking;
+    await realWait(20);
+    expect(api.setup).toHaveBeenCalledTimes(1); // only ann's: L3 may still end the session
+    peer.postMessage({ type: 'lock-end', tab: 'peer', id: 'L3' });
+    await registering;
+    expect(api.setup).toHaveBeenCalledTimes(2);
+    expect(s.getState().phase).toBe('unlocked');
+  });
+
   it('a sign-out from another tab during this tab’s own lock forgets the username (A2)', async () => {
     const s = await registeredStore();
     let release!: () => void;

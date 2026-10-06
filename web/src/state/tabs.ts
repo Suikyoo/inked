@@ -185,6 +185,11 @@ export class TabLink {
     for (const w of waiters) w();
   }
 
+  /** True while a lock or sign-out started in another tab may still end the shared session. Never waits. */
+  peerLocksPending(): boolean {
+    return this.peerLocks.size > 0;
+  }
+
   /** Resolves once no lock or sign-out started in another tab is still about to end the shared session. */
   peerLocksSettled(): Promise<void> {
     if (!this.peerLocks.size) return Promise.resolve();
