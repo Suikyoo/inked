@@ -29,6 +29,7 @@ import {
 } from '../crypto';
 import { argon2InWorker } from '../lib/argon2Worker';
 import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
+import { sendPending, type PendingSave } from './pending';
 
 export type Phase = 'booting' | 'offline' | 'setup' | 'signedOut' | 'locked' | 'unlocked';
 
@@ -85,6 +86,8 @@ export interface AppState {
   /** Decrypted note bodies, for full-text search and backlinks. Memory only. */
   bodies: Record<string, string>;
   bodiesReady: Record<string, boolean>;
+  /** Saves waiting in the ciphertext queue. Survives lock (not part of EMPTY_DATA). */
+  pendingCount: number;
 }
 
 const EMPTY_DATA = {
@@ -101,6 +104,7 @@ const initialState: AppState = {
   user: null,
   lastUsername: '',
   notice: null,
+  pendingCount: 0,
   ...EMPTY_DATA,
 };
 
@@ -121,6 +125,24 @@ export class NoteTooLargeError extends Error {
     super(NOTE_TOO_LARGE_MESSAGE);
     this.name = 'NoteTooLargeError';
   }
+}
+
+const PENDING_RETRY_MS = 30_000;
+
+/** A save of the same note still on the wire when its text was queued, and whether it carries that same text. */
+export interface RacingSave {
+  save: Promise<{ updatedAt: string }>;
+  sameText: boolean;
+}
+
+interface QueueEntry {
+  item: PendingSave;
+  /** The account whose session may send it. */
+  owner: string | null;
+  /** Waiting for a racing save to settle; not sent meanwhile. */
+  held: boolean;
+  /** Plaintext title of the copy, for the notice only; dropped with the keys. */
+  copyTitle: string | null;
 }
 
 const LAST_USER_KEY = 'inked.lastUsername';
@@ -157,12 +179,25 @@ export class AppStore {
   private vaultKeys = new Map<string, CryptoKey>();
   /** Bumped on every lock/unlock so late async results from an old session are dropped. */
   private epoch = 0;
-  private flushers = new Set<() => Promise<void>>();
+  private flushers = new Set<(final: boolean) => Promise<void>>();
   /** `updatedAt` values returned to this tab's own writes, per note. Lets the editor tell its saves from others'. */
   private ownStamps = new Map<string, Set<string>>();
+  /** Edits that could not be saved yet, as ciphertext. Memory only: a reload loses them (beforeunload warns). */
+  private pending: QueueEntry[] = [];
+  private retryRun: Promise<void> | null = null;
+  private retryAgain = false;
+  private retryTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        if (this.state.phase === 'unlocked') void this.retryPending();
+      });
+      window.addEventListener('beforeunload', (e) => {
+        if (this.pending.length) e.preventDefault();
+      });
+    }
   }
 
   getState = (): AppState => this.state;
@@ -227,6 +262,7 @@ export class AppStore {
     this.ownStamps.clear();
     rememberUsername(user.username);
     this.set({ phase: 'unlocked', user, lastUsername: user.username, notice: null, ...EMPTY_DATA });
+    void this.retryPending();
   }
 
   private dropKeys() {
@@ -234,23 +270,24 @@ export class AppStore {
     this.userKey = null;
     this.vaultKeys.clear();
     this.ownStamps.clear();
+    for (const e of this.pending) e.copyTitle = null;
   }
 
-  registerFlusher(fn: () => Promise<void>): () => void {
+  /** `final` is true when the keys are about to be dropped (lock, sign out); each flusher bounds its own wait. */
+  registerFlusher(fn: (final: boolean) => Promise<void>): () => void {
     this.flushers.add(fn);
     return () => this.flushers.delete(fn);
   }
 
-  private async flushAll(): Promise<void> {
+  private async flushAll(final = false): Promise<void> {
     if (!this.flushers.size) return;
-    const all = Promise.allSettled([...this.flushers].map((f) => f()));
-    await Promise.race([all, new Promise((r) => setTimeout(r, 4000))]);
+    await Promise.allSettled([...this.flushers].map((f) => f(final)));
   }
 
   /** Drops keys + decrypted data and ends the server session; only the username is remembered. */
   async lock(notice: string | null = null): Promise<void> {
     if (this.state.phase !== 'unlocked') return;
-    await this.flushAll();
+    await this.flushAll(true);
     const lastUsername = this.state.user?.username ?? this.state.lastUsername;
     this.dropKeys();
     rememberUsername(lastUsername);
@@ -269,7 +306,7 @@ export class AppStore {
   }
 
   async signOut(): Promise<void> {
-    await this.flushAll();
+    await this.flushAll(true);
     this.dropKeys();
     forgetRememberedUsername();
     this.set({ phase: 'signedOut', user: null, lastUsername: '', notice: null, ...EMPTY_DATA });
@@ -678,11 +715,11 @@ export class AppStore {
   }
 
   async createNote(vaultId: string, folderId: string | null, title: string, body = ''): Promise<NoteView> {
+    const ep = this.epoch;
     const key = this.vaultKey(vaultId);
     const id = uuid();
     const encMeta = await encryptNoteMeta(key, vaultId, id, { title });
     const encBody = await encryptNoteBody(key, vaultId, id, body);
-    const ep = this.epoch;
     const { note } = await api.createNote(vaultId, { id, folderId, encMeta, encBody });
     if (ep !== this.epoch) throw new LockedError();
     this.markOwn(id, note.updatedAt);
@@ -749,8 +786,8 @@ export class AppStore {
   }
 
   async renameNote(vaultId: string, noteId: string, title: string): Promise<NoteView> {
-    const encMeta = await encryptNoteMeta(this.vaultKey(vaultId), vaultId, noteId, { title });
     const ep = this.epoch;
+    const encMeta = await encryptNoteMeta(this.vaultKey(vaultId), vaultId, noteId, { title });
     const { note } = await api.updateNote(noteId, { encMeta });
     if (ep !== this.epoch) throw new LockedError();
     this.markOwn(noteId, note.updatedAt);
@@ -782,6 +819,135 @@ export class AppStore {
       delete notes[noteId];
       return { trees: { ...s.trees, [vaultId]: { ...t, notes } }, bodies };
     });
+  }
+
+  // ---- Pending-save queue --------------------------------------------------------------------
+
+  /**
+   * Queues text that could not be saved. While the keys are here it is encrypted for the note and
+   * for a fresh "(unsaved copy)" note in the same folder, so the queue never needs keys again.
+   * `racing`: a save of this note still on the wire. The item waits for it, then is dropped (that
+   * save carried the same text) or rebased onto it. `until` bounds the wait for the first send.
+   */
+  async stashUnsaved(
+    vaultId: string,
+    noteId: string,
+    body: string,
+    baseUpdatedAt?: string,
+    opts: { racing?: RacingSave; until?: Promise<unknown> } = {},
+  ): Promise<void> {
+    const ep = this.epoch;
+    const key = this.vaultKey(vaultId);
+    const owner = this.state.user?.id ?? null;
+    const head = this.state.trees[vaultId]?.notes[noteId];
+    const copyId = uuid();
+    const copyTitle = `${head?.title || 'Untitled'} (unsaved copy)`;
+    const encBody = await encryptNoteBody(key, vaultId, noteId, body);
+    if (encBody.length > NOTE_BODY_LIMIT) throw new NoteTooLargeError();
+    const item: PendingSave = {
+      noteId,
+      vaultId,
+      encBody,
+      baseUpdatedAt,
+      attempts: 0,
+      copy: {
+        id: copyId,
+        folderId: head?.folderId ?? null,
+        encMeta: await encryptNoteMeta(key, vaultId, copyId, { title: copyTitle }),
+        encBody: await encryptNoteBody(key, vaultId, copyId, body),
+      },
+    };
+    const entry: QueueEntry = { item, owner, held: !!opts.racing, copyTitle: ep === this.epoch ? copyTitle : null };
+    this.pending.push(entry);
+    this.set({ pendingCount: this.pending.length });
+    if (opts.racing) {
+      const { save, sameText } = opts.racing;
+      save
+        .then(
+          (h) => {
+            if (sameText) this.removeEntry(entry);
+            else item.baseUpdatedAt = h.updatedAt;
+          },
+          () => undefined,
+        )
+        .finally(() => {
+          entry.held = false;
+          if (this.pending.includes(entry)) void this.retryPending();
+        });
+    }
+    this.ensureRetryLoop();
+    const sent = this.retryPending();
+    await (opts.until ? Promise.race([sent, opts.until]) : sent);
+  }
+
+  /** Sends every queued save (ciphertext, no keys needed). A call during a run waits for a fresh pass. */
+  retryPending(): Promise<void> {
+    if (this.retryRun) {
+      this.retryAgain = true;
+      return this.retryRun;
+    }
+    const run = (async () => {
+      try {
+        do {
+          this.retryAgain = false;
+          await this.sendQueued();
+        } while (this.retryAgain);
+      } finally {
+        this.retryRun = null;
+      }
+    })();
+    this.retryRun = run;
+    return run;
+  }
+
+  private async sendQueued(): Promise<void> {
+    if (!this.pending.length) return;
+    const userId = this.state.user?.id ?? null;
+    const copied: QueueEntry[] = [];
+    for (const entry of [...this.pending]) {
+      if (entry.held || !this.pending.includes(entry)) continue;
+      // Never send one account's edits with another account's session.
+      if (entry.owner && userId && entry.owner !== userId) continue;
+      const out = await sendPending(entry.item, { updateNote: api.updateNote, createNote: api.createNote });
+      if (out === 'retry') {
+        entry.item.attempts++;
+        continue;
+      }
+      // Remove by identity: entries stashed during this pass stay queued.
+      this.pending = this.pending.filter((e) => e !== entry);
+      if (out === 'copied') copied.push(entry);
+    }
+    this.syncPendingCount();
+    if (!copied.length) return;
+    const title = copied.length === 1 ? copied[0].copyTitle : null;
+    this.set({
+      notice: title
+        ? `Saved your changes as “${title}” because the note changed elsewhere.`
+        : copied.length === 1
+          ? 'A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.'
+          : `${copied.length} notes changed elsewhere; your versions were saved as “(unsaved copy)” notes.`,
+    });
+    if (this.state.phase === 'unlocked') void this.loadAll().catch(() => undefined);
+  }
+
+  private removeEntry(entry: QueueEntry) {
+    this.pending = this.pending.filter((e) => e !== entry);
+    this.syncPendingCount();
+  }
+
+  private syncPendingCount() {
+    if (this.state.pendingCount !== this.pending.length) this.set({ pendingCount: this.pending.length });
+    if (!this.pending.length && this.retryTimer) {
+      clearInterval(this.retryTimer);
+      this.retryTimer = null;
+    }
+  }
+
+  private ensureRetryLoop() {
+    if (this.retryTimer) return;
+    this.retryTimer = setInterval(() => {
+      if (this.state.phase === 'unlocked') void this.retryPending();
+    }, PENDING_RETRY_MS);
   }
 }
 

@@ -38,6 +38,41 @@
   color: var(--text-2);
 }
 
+/* Edits waiting in the pending-save queue. */
+.sync-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 32px;
+  padding: 0 12px 0 24px;
+  background: #2b2029;
+  color: #e9c9cf;
+  font-size: 12.5px;
+}
+.sync-bar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-bar-btn {
+  flex: none;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.sync-bar-btn:hover {
+  background: rgba(233, 201, 207, 0.08);
+}
+
 /* ---- Sidebar ----------------------------------------------------------------------------- */
 .sidebar {
   position: sticky;
@@ -327,6 +362,9 @@
   }
   .banner {
     margin: 10px 16px 0;
+  }
+  .sync-bar {
+    padding: 0 8px 0 16px;
   }
   /* Touch: always show row actions. */
   .tree-actions {

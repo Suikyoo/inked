@@ -1,12 +1,149 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isApiError } from '../api/client';
 import { describeError } from '../lib/util';
-import { LockedError, type NoteView } from '../state/store';
+import { LockedError, NoteTooLargeError, type AppStore, type NoteView } from '../state/store';
 import { useStore } from '../state/StoreContext';
 
 export type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'conflict';
 
 const AUTOSAVE_MS = 800;
+/** Once the keys are about to go (lock, sign out), how long a flush waits for the network before queueing. */
+export const FINAL_WAIT_MS = 4000;
+
+/** Never resolves until `arm()`; then resolves FINAL_WAIT_MS later. Bounds every wait in `settle`. */
+interface Cutoff {
+  promise: Promise<void>;
+  arm: () => void;
+}
+
+function cutoff(): Cutoff {
+  let arm!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    let armed = false;
+    arm = () => {
+      if (armed) return;
+      armed = true;
+      window.setTimeout(resolve, FINAL_WAIT_MS);
+    };
+  });
+  return { promise, arm };
+}
+
+/** Mutable save machinery for one open note. */
+export interface SaveState {
+  vaultId: string;
+  noteId: string;
+  body: string;
+  savedBody: string;
+  base: string | undefined;
+  timer: number | undefined;
+  inFlight: Promise<void> | null;
+  /** The save on the wire and the text it carries. */
+  flight: { body: string; save: Promise<NoteView> } | null;
+  conflict: boolean;
+  force: boolean;
+  alive: boolean;
+  /** "Reload theirs": the local edits are discarded on purpose. */
+  discard: boolean;
+  settling: Promise<void> | null;
+  cutoff: Cutoff;
+}
+
+export function newSaveState(vaultId: string, noteId: string): SaveState {
+  return {
+    vaultId,
+    noteId,
+    body: '',
+    savedBody: '',
+    base: undefined,
+    timer: undefined,
+    inFlight: null,
+    flight: null,
+    conflict: false,
+    force: false,
+    alive: true,
+    discard: false,
+    settling: null,
+    cutoff: cutoff(),
+  };
+}
+
+export type SettleStore = Pick<AppStore, 'saveNoteBody' | 'stashUnsaved'>;
+
+/**
+ * Saves the note's edits if possible; anything that can't be saved now goes to the store's
+ * ciphertext queue, so no text is dropped. `final` (lock / sign out) caps every wait at
+ * FINAL_WAIT_MS, including one already running. Concurrent calls share one pass.
+ */
+export function settle(store: SettleStore, s: SaveState, final: boolean): Promise<void> {
+  if (final) s.cutoff.arm();
+  if (!s.settling) {
+    s.settling = settleOnce(store, s).finally(() => {
+      s.settling = null;
+    });
+  }
+  return s.settling;
+}
+
+async function settleOnce(store: SettleStore, s: SaveState): Promise<void> {
+  window.clearTimeout(s.timer);
+  s.timer = undefined;
+  if (s.discard) return;
+  // A save already on the wire: let it land so its updatedAt becomes the base (never race it).
+  if (s.inFlight) await Promise.race([s.inFlight, s.cutoff.promise]);
+  if (s.body === s.savedBody) return;
+  // Still set only if the wait was cut off.
+  let racing = s.flight;
+  if (!racing && !s.conflict) {
+    const save = track(store, s, s.body, s.base);
+    const result = await Promise.race([
+      save.then(
+        () => 'saved' as const,
+        (e: unknown) => e,
+      ),
+      s.cutoff.promise.then(() => 'late' as const),
+    ]);
+    if (result === 'late') racing = s.flight;
+    // Keys already gone: nothing to encrypt with. Too large: the queue could never send it either.
+    else if (result instanceof LockedError || result instanceof NoteTooLargeError) return;
+    if (s.body === s.savedBody) return;
+  }
+  // Conflicts, failed saves and saves still on the wire: the queue owns the text from here.
+  const body = s.body;
+  const prev = s.savedBody;
+  s.savedBody = body;
+  try {
+    await store.stashUnsaved(s.vaultId, s.noteId, body, s.base, {
+      racing: racing ? { save: racing.save, sameText: racing.body === body } : undefined,
+      until: s.cutoff.promise,
+    });
+  } catch {
+    // Keys already gone (or too large): nothing more can be done with this text.
+    if (s.savedBody === body) s.savedBody = prev;
+  }
+}
+
+/** Starts a save and records it as the one in flight; on success its text becomes the saved base. */
+function track(store: SettleStore, s: SaveState, snapshot: string, base: string | undefined): Promise<NoteView> {
+  const save = store.saveNoteBody(s.vaultId, s.noteId, snapshot, base);
+  const flight = { body: snapshot, save };
+  s.flight = flight;
+  s.inFlight = save
+    .then(
+      (head) => {
+        s.base = head.updatedAt;
+        s.savedBody = snapshot;
+      },
+      () => undefined,
+    )
+    .finally(() => {
+      if (s.flight === flight) {
+        s.inFlight = null;
+        s.flight = null;
+      }
+    });
+  return save;
+}
 
 export interface NoteEditor {
   status: 'loading' | 'ready' | 'error';
@@ -36,18 +173,7 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
   const [reloadTick, setReloadTick] = useState(0);
 
   // Mutable save machinery, scoped to the current note.
-  const r = useRef({
-    vaultId,
-    noteId,
-    body: '',
-    savedBody: '',
-    base: undefined as string | undefined,
-    timer: 0 as number | undefined,
-    inFlight: null as Promise<void> | null,
-    conflict: false,
-    force: false,
-    alive: true,
-  });
+  const r = useRef(newSaveState(vaultId, noteId));
 
   const doSave = useCallback(async (): Promise<void> => {
     const s = r.current;
@@ -65,9 +191,11 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
     const snapshot = s.body;
     const target = { vaultId: s.vaultId, noteId: s.noteId };
     if (s.alive) setSave('saving');
+    const save = store.saveNoteBody(target.vaultId, target.noteId, snapshot, s.force ? undefined : s.base);
+    s.flight = { body: snapshot, save };
     s.inFlight = (async () => {
       try {
-        const head = await store.saveNoteBody(target.vaultId, target.noteId, snapshot, s.force ? undefined : s.base);
+        const head = await save;
         s.base = head.updatedAt;
         s.savedBody = snapshot;
         s.force = false;
@@ -88,6 +216,7 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
         }
       } finally {
         s.inFlight = null;
+        s.flight = null;
       }
     })();
     await s.inFlight;
@@ -104,18 +233,7 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
 
   // Load (and reload) the note.
   useEffect(() => {
-    const s = {
-      vaultId,
-      noteId,
-      body: '',
-      savedBody: '',
-      base: undefined as string | undefined,
-      timer: undefined as number | undefined,
-      inFlight: null as Promise<void> | null,
-      conflict: false,
-      force: false,
-      alive: true,
-    };
+    const s = newSaveState(vaultId, noteId);
     r.current = s;
     setStatus('loading');
     setLoadError(null);
@@ -141,28 +259,15 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
         setStatus('error');
       },
     );
-    const unregister = store.registerFlusher(() => doSave());
+    const unregister = store.registerFlusher((final) => settle(store, s, final));
     return () => {
       cancelled = true;
-      unregister();
-      // Flush pending edits of the note we are leaving.
-      window.clearTimeout(s.timer);
-      if (s.body !== s.savedBody && !s.conflict) void doSaveFor(s);
       s.alive = false;
+      // Flush the note we are leaving. Stay registered until its edits are saved or queued,
+      // so a lock in the meantime still waits for them (and caps the wait).
+      void settle(store, s, false).finally(unregister);
     };
-
-    function doSaveFor(state: typeof s) {
-      window.clearTimeout(state.timer);
-      // Wait for a save already in flight so its new updatedAt becomes the base.
-      return (state.inFlight ?? Promise.resolve())
-        .then(() =>
-          state.body !== state.savedBody
-            ? store.saveNoteBody(state.vaultId, state.noteId, state.body, state.base)
-            : undefined,
-        )
-        .catch(() => undefined);
-    }
-  }, [vaultId, noteId, reloadTick, store, doSave]);
+  }, [vaultId, noteId, reloadTick, store]);
 
   // Warn before closing the tab with unsaved edits.
   useEffect(() => {
@@ -189,7 +294,10 @@ export function useNoteEditor(vaultId: string, noteId: string): NoteEditor {
     [schedule],
   );
 
-  const reload = useCallback(() => setReloadTick((t) => t + 1), []);
+  const reload = useCallback(() => {
+    r.current.discard = true;
+    setReloadTick((t) => t + 1);
+  }, []);
 
   const overwrite = useCallback(() => {
     const s = r.current;

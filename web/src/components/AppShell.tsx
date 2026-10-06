@@ -97,6 +97,17 @@ export function AppShell() {
       <div className="scrim" aria-hidden="true" onClick={() => setDrawer(false)} />
       <Sidebar id="sidebar" onLock={lock} />
       <div className="main" id="main" tabIndex={-1}>
+        {state.pendingCount > 0 && (
+          <div className="sync-bar" role="status">
+            <span>
+              {state.pendingCount} {state.pendingCount === 1 ? 'change' : 'changes'} waiting to sync. Inked will keep
+              trying.
+            </span>
+            <button type="button" className="sync-bar-btn" onClick={() => void store.retryPending()}>
+              Try now
+            </button>
+          </div>
+        )}
         {state.notice && (
           <div className="banner" role="status">
             <span>{state.notice}</span>
