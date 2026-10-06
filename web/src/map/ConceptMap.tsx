@@ -171,16 +171,19 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
   );
   const rovingId = (focusId && dotById.has(focusId) ? focusId : null) ?? sel ?? firstHit ?? recentId;
 
+  /** Pans a dot that lies outside the view to the centre. Asking twice for the same dot is harmless. */
+  const revealDot = (id: string) => {
+    const d = dotById.get(id);
+    if (!d) return;
+    const s = toScreen(view, d);
+    if (s.x < EDGE || s.y < EDGE || s.x > size.w - EDGE || s.y > size.h - EDGE) {
+      touched.current = true;
+      animateTo(panBy(view, size.w / 2 - s.x, size.h / 2 - s.y));
+    }
+  };
   const focusDot = (id: string) => {
     setFocusId(id);
-    const d = dotById.get(id);
-    if (d) {
-      const s = toScreen(view, d);
-      if (s.x < EDGE || s.y < EDGE || s.x > size.w - EDGE || s.y > size.h - EDGE) {
-        touched.current = true;
-        animateTo(panBy(view, size.w / 2 - s.x, size.h / 2 - s.y));
-      }
-    }
+    revealDot(id);
     dotRefs.current.get(id)?.focus();
   };
 
@@ -334,7 +337,14 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
                 aria-label={`${dot.title}, ${dot.folderPath || 'vault root'}, edited ${when}`}
                 onClick={(e) => onDotClick(e, dot.id)}
                 onKeyDown={(e) => onDotKey(e, dot.vaultId, dot.id)}
-                onFocus={() => setFocusId(dot.id)}
+                onFocus={() => {
+                  setFocusId(dot.id);
+                  revealDot(dot.id);
+                }}
+                onBlur={(e) => {
+                  const next = e.relatedTarget;
+                  if (!(next instanceof Element && next.closest('g.cmap-node') && svgRef.current?.contains(next))) setFocusId(null);
+                }}
                 onPointerEnter={() => setHover(dot.id)}
                 onPointerLeave={() => setHover((h) => (h === dot.id ? null : h))}
               >

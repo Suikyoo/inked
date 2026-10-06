@@ -150,4 +150,30 @@ describe('ConceptMap', () => {
     expect(host!.textContent).toContain('Vault v1');
     expect(host!.querySelector('.cmap-hub-note')?.textContent).toBe('Couldn’t load');
   });
+  it('focus state clears on blur, and the roving dot falls back to the most recent note', () => {
+    const t = base();
+    t.notes.n3 = { ...t.notes.n3, updatedAt: '2026-10-07T11:00:00.000Z' };
+    render({ entries: [entry(t)] });
+    click(node('n1'));
+    fire(node('n1'), new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+    click(svg());
+    expect(node('n1').querySelector('.cmap-label')).toBeNull();
+    expect(node('n1').querySelector('.cmap-dot')?.getAttribute('r')).toBe('4');
+    expect(nodes().filter((n) => n.getAttribute('tabindex') === '0').map((n) => n.dataset.note)).toEqual(['n3']);
+  });
+
+  it('focusing a dot that is off screen pans it into view', () => {
+    render({ entries: [entry(base())] });
+    pointer('pointerdown', 100, 100);
+    pointer('pointermove', 2100, 100);
+    pointer('pointerup', 2100, 100);
+    const roving = nodes().find((n) => n.getAttribute('tabindex') === '0')!;
+    expect(translate(roving)!.x).toBeGreaterThan(800);
+    fire(roving, new FocusEvent('focusin', { bubbles: true }));
+    const p = translate(node(roving.dataset.note!))!;
+    expect(p.x).toBeGreaterThanOrEqual(0);
+    expect(p.x).toBeLessThanOrEqual(800);
+    expect(p.y).toBeGreaterThanOrEqual(0);
+    expect(p.y).toBeLessThanOrEqual(480);
+  });
 });
