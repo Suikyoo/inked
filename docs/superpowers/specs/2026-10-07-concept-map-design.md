@@ -102,6 +102,7 @@ export function inkTier(updatedAt: string, now: number): InkTier;
 | under 30 d | drying | `#6B5A9E` | none |
 | 30 d or more | dry | `#524B6E` | none |
 
+- This is an ordinal ramp: one hue with lightness falling step by step. It was checked with the dataviz validator (`--ordinal --mode dark --surface #1A1920`), and every check passed. The dry end, `#524B6E`, has 2.15:1 contrast against the canvas. The earlier `#3F3A52` had 1.61:1, below the 2:1 floor.
 - Boundaries are exclusive at the upper end: exactly 24 h is `fresh`.
 - A timestamp that won't parse, or lies in the future, counts as `wet`.
 - In SVG the glow is drawn as an SVG `filter` (blur), with the same visual intent. CSS `box-shadow` does not apply to SVG.
@@ -143,6 +144,7 @@ export function inkTier(updatedAt: string, now: number): InkTier;
   5. Folder labels: Public Sans 10.5 px on a canvas-coloured pill.
   6. Hubs: the `VaultIcon` plus the vault name in Spectral italic.
 - **Note labels** show when `scale ≥ 1.6`, or when the note is hovered, focused, selected, hot or a hit.
+- **Hover and focus label.** A hovered or focused dot shows `{title} · {relativeTime}` as its label, so hover and keyboard focus show the same details. Labels use text tokens, never the tier colour.
 - **Search fading.** When `hits` is non-empty, notes that are not hits drop to 30 % opacity.
 - **Ink** is drawn for every hit, which search already caps at 30 title hits plus 15 body hits, plus the selected note and the `hot` note.
 
@@ -215,7 +217,7 @@ export function localGraph(graph: VaultGraph, noteId: string): LocalGraph | null
   - the parent (folder label, or the vault drop icon plus the vault name) sits at the top centre;
   - the centre note sits below it, with a 1.5 px ring in `--map-ink`;
   - underneath are three captioned columns: "links in" on the left, "same folder" in the middle and "links out" on the right;
-  - each column is a vertical list of dots with their labels to the right;
+  - each column is a vertical list of dots with their labels to the right. Each row's hit area is a transparent rectangle covering the dot and its label;
   - pencil lines join the parent to the centre and to each sibling, and dashed lines join the centre to each linked note;
   - a "+N more" label ends any column that was capped.
 - Labels are always visible, cut to 14 characters with "…". The full title is in the `aria-label` and the SVG `<title>`.
