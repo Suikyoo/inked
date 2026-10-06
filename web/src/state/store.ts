@@ -283,8 +283,8 @@ export class AppStore {
   private unlocking: Promise<void> | null = null;
   /** The account last signed in in this tab, so a locked tab still counts its queued edits. Memory only. */
   private lastUserId: string | null = null;
-  /** A queue notice produced while the keys were going (or gone); shown when its account signs in again. */
-  private deferredNotice: { owner: string; text: string } | null = null;
+  /** Queue notices produced while the keys were going (or gone), per account; shown when it signs in again. Memory only. */
+  private deferredNotices = new Map<string, string>();
   /** Another tab signed out while this tab's own lock was running: that lock forgets the username too. */
   private forgetOnEnd = false;
 
@@ -392,8 +392,8 @@ export class AppStore {
     this.vaultKeys.clear();
     this.ownStamps.clear();
     this.lastUserId = user.id;
-    const deferred = this.deferredNotice?.owner === user.id ? this.deferredNotice.text : null;
-    if (deferred) this.deferredNotice = null;
+    const deferred = this.deferredNotices.get(user.id) ?? null;
+    this.deferredNotices.delete(user.id);
     rememberUsername(user.username);
     this.set({ phase: 'unlocked', user, lastUsername: user.username, notice: deferred, ...EMPTY_DATA });
     this.syncPendingCount();
@@ -1213,14 +1213,25 @@ export class AppStore {
     if (!this.pending.length) return;
     const userId = this.state.user?.id ?? null;
     if (!userId) return;
+    // A pass can outlive its session (a hung request, then a lock and another sign-in). Every request
+    // checks the session first: under another account's cookie the server would answer 404 and the
+    // text would be dropped. Refused here, it is a network error, so the item stays queued.
+    const sameSession = () => this.state.phase === 'unlocked' && this.state.user?.id === userId;
+    const guard = <T>(send: () => Promise<T>): Promise<T> =>
+      sameSession() ? send() : Promise.reject(new ApiError(0, 'network'));
+    const io = {
+      updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) => guard(() => QUEUE_IO.updateNote(id, b)),
+      createNote: (vaultId: string, b: PendingSave['copy']) => guard(() => QUEUE_IO.createNote(vaultId, b)),
+    };
     const copied: QueueEntry[] = [];
     let atRoot = 0;
     const dropped: Record<DropReason, number> = { deleted: 0, rejected: 0, too_large: 0 };
     for (const entry of [...this.pending]) {
+      if (!sameSession()) break; // the account changed: the next pass belongs to the new one
       if (entry.held || !this.pending.includes(entry)) continue;
       // Only ever send with the owning account's session (never another's, never none).
       if (entry.owner !== userId) continue;
-      const { outcome, reason } = await sendPending(entry.item, QUEUE_IO);
+      const { outcome, reason } = await sendPending(entry.item, io);
       if (outcome === 'retry') {
         entry.item.attempts++;
         continue;
@@ -1244,16 +1255,21 @@ export class AppStore {
       dropped,
     );
     if (notice) {
-      if (live) this.set({ notice });
+      if (live) this.addNotice(notice);
       else this.deferNotice(userId, notice);
     }
     if ((copied.length || atRoot) && live) void this.loadAll().catch(() => undefined);
   }
 
-  /** Keeps a queue notice for the next time `owner` signs in (title-free text only). */
+  /** Shows a queue notice after any notice already showing, so neither is lost. */
+  private addNotice(text: string) {
+    this.set((s) => ({ notice: s.notice ? `${s.notice} ${text}` : text }));
+  }
+
+  /** Keeps a queue notice for the next time `owner` signs in (title-free text only), per account. */
   private deferNotice(owner: string, text: string) {
-    const prev = this.deferredNotice;
-    this.deferredNotice = { owner, text: prev?.owner === owner ? `${prev.text} ${text}` : text };
+    const prev = this.deferredNotices.get(owner);
+    this.deferredNotices.set(owner, prev ? `${prev} ${text}` : text);
   }
 
   /**

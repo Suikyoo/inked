@@ -1004,6 +1004,88 @@ describe('AppStore', () => {
     expect(api.createNote.mock.calls[1][1].id).not.toBe(created.id);
     expect(s.getState().pendingCount).toBe(0);
   });
+
+  it('a queue pass stops at an account switch: the old account’s items are neither sent nor dropped (B2)', async () => {
+    const s = await registeredStore(); // ann
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    const [one, two] = [crypto.randomUUID(), crypto.randomUUID()];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, one, 'ann one', 't0');
+    await s.stashUnsaved(vaultId, two, 'ann two', 't0');
+    expect(s.getState().pendingCount).toBe(2);
+    // The server sees whoever's session cookie is current: under bob's, ann's notes do not exist.
+    const notAnns = () => {
+      if (s.getState().user?.username === 'bob') throw new ApiError(404, 'not_found');
+    };
+    api.updateNote.mockReset();
+    api.updateNote.mockImplementationOnce(() => new Promise(() => undefined)); // ann's first send hangs
+    api.updateNote.mockImplementation(async () => {
+      notAnns();
+      return { note: { updatedAt: 't1' } };
+    });
+    api.createNote.mockImplementation(async () => {
+      notAnns();
+      return { note: { updatedAt: 't1' } };
+    });
+    vi.useFakeTimers();
+    try {
+      const creates = api.createNote.mock.calls.length;
+      const pass = s.retryPending();
+      while (!api.updateNote.mock.calls.length) await realWait(5);
+      api.logout.mockResolvedValue({ ok: true });
+      await s.lock();
+      await s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' });
+      expect(s.getState().user?.username).toBe('bob');
+      await vi.advanceTimersByTimeAsync(QUEUE_REQUEST_TIMEOUT_MS);
+      await pass;
+      expect(api.updateNote).toHaveBeenCalledTimes(1); // only the hung one, sent with ann's session
+      expect(api.createNote.mock.calls.length).toBe(creates); // no copy attempted either
+      expect(s.getState().pendingCount).toBe(0); // bob has none
+      expect(s.hasUnsavedWork()).toBe(true); // ann's two are still queued
+      expect(s.getState().notice).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+    // Ann signs in again: both are sent with her session.
+    await s.lock();
+    mockUnlock();
+    await s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
+    expect(s.hasUnsavedWork()).toBe(false);
+    const sentIds = api.updateNote.mock.calls.slice(1).map(([id]) => id);
+    expect(sentIds.sort()).toEqual([one, two].sort());
+  });
+
+  it('a deferred notice survives the notice of the retry after unlock: both are shown (B1)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const conflicting = await s.createNote(vaultId, null, 'Plan', '');
+    const refused = await s.createNote(vaultId, null, 'Other', '');
+    let afterUnlock = false;
+    api.updateNote.mockImplementation(async (id: string) => {
+      if (id === refused.id) throw new ApiError(400, 'invalid_request');
+      if (!afterUnlock) throw new ApiError(0, 'network');
+      throw new ApiError(409, 'conflict');
+    });
+    await s.stashUnsaved(vaultId, conflicting.id, 'my plan text', 't1');
+    expect(s.getState().pendingCount).toBe(1);
+    // The lock's flush queues text the server refuses: that notice is deferred.
+    s.registerFlusher(() => s.stashUnsaved(vaultId, refused.id, 'refused text', 't1'));
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    expect(s.getState().notice).toBeNull();
+    expect(s.getState().pendingCount).toBe(1);
+    // After unlock the retry turns the other item into a copy, with its own notice.
+    afterUnlock = true;
+    mockUnlock();
+    await s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
+    expect(s.getState().notice).toBe(
+      'An unsaved change was rejected by the server and couldn’t be saved. ' +
+        'A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.',
+    );
+  });
   it('a queued send that never answers times out after 30 s and is retried (B2)', async () => {
     const s = await registeredStore();
     const vaultId = Object.keys(s.getState().vaults)[0];
