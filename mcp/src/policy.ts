@@ -54,7 +54,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
   const actions = new Set<Action>();
   for (const a of raw.actions) {
     if (typeof a !== 'string') throw new ConfigError('Config "actions" must contain strings');
-    if (a in GROUPS) GROUPS[a].forEach((x) => actions.add(x));
+    if (Object.hasOwn(GROUPS, a)) GROUPS[a].forEach((x) => actions.add(x));
     else if (isAction(a)) actions.add(a);
     else throw new ConfigError(`Unknown action "${a}"`);
   }

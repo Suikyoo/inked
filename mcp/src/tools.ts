@@ -129,8 +129,18 @@ export function createInkedServer(deps: { ops: Ops; policy: Policy; audit: Audit
     server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: t.shape }, async (args: Record<string, any>) => {
       try {
         const result = await t.run(deps.ops, args);
-        deps.audit.write({ tool: t.name, ok: true, ...t.touched(args, result) });
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        // A batch that stopped early is not a clean success: audit it as a failure, still listing what was created.
+        const r = result as { created?: unknown[]; failed?: unknown } | null;
+        const failed = r?.failed != null;
+        const none = failed && Array.isArray(r?.created) && r.created.length === 0;
+        deps.audit.write({
+          tool: t.name,
+          ok: !failed,
+          ...(failed ? { error: none ? 'batch_failed' : 'batch_partial' } : {}),
+          ...t.touched(args, result),
+        });
+        // Keep the {created, failed} shape; flag an error only when nothing was created.
+        return { ...(none ? { isError: true } : {}), content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
       } catch (e) {
         deps.audit.write({ tool: t.name, ok: false, error: auditCode(e) });
         return { isError: true, content: [{ type: 'text' as const, text: toToolMessage(e) }] };

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { decryptNoteBody, INDEX_TITLE } from 'inked-core';
+import { ApiError } from '../src/errors';
 import { appendJoin, Ops } from '../src/ops';
 import { parseConfig, resolvePolicy } from '../src/policy';
 import { WriteLimiter } from '../src/ratelimit';
@@ -72,6 +73,57 @@ describe('Ops (write)', () => {
     expect(updated.title).toBe('Final');
     expect((await o.readNote(n.id)).body).toBe('done');
     await expect(o.updateNote(n.id, updated.updatedAt, {})).rejects.toMatchObject({ kind: 'invalid' });
+  });
+
+  it('append retries exactly once on a conflict and keeps both edits', async () => {
+    const o = await ops();
+    await o.createFolder('Work', null, 'Retry');
+    const n = await o.createNote('Work', 'Retry', 'Race', 'one');
+    const orig = session.api.updateNote;
+    let puts = 0;
+    let bypass = false;
+    session.api.updateNote = async (...args: Parameters<typeof orig>) => {
+      if (!bypass) {
+        puts++;
+        if (puts === 1) {
+          // Someone else edits the note after our read but before our write.
+          bypass = true;
+          try {
+            const cur = await o.readNote(n.id);
+            await o.updateNote(n.id, cur.updatedAt, { body: 'one\nconcurrent' });
+          } finally {
+            bypass = false;
+          }
+        }
+      }
+      return orig(...args);
+    };
+    try {
+      await o.appendToNote(n.id, 'mine');
+    } finally {
+      session.api.updateNote = orig;
+    }
+    expect(puts).toBe(2);
+    expect((await o.readNote(n.id)).body).toBe('one\nconcurrent\nmine');
+  });
+
+  it('append gives up with a conflict after exactly two attempts', async () => {
+    const o = await ops();
+    await o.createFolder('Work', null, 'Retry2');
+    const n = await o.createNote('Work', 'Retry2', 'Race', 'one');
+    const orig = session.api.updateNote;
+    let puts = 0;
+    session.api.updateNote = async () => {
+      puts++;
+      throw new ApiError(409, 'conflict');
+    };
+    try {
+      await expect(o.appendToNote(n.id, 'mine')).rejects.toMatchObject({ kind: 'conflict' });
+    } finally {
+      session.api.updateNote = orig;
+    }
+    expect(puts).toBe(2);
+    expect((await o.readNote(n.id)).body).toBe('one');
   });
 
   it('create_notes validates first, writes in order, and stops at the first failure', async () => {

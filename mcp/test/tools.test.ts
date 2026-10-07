@@ -1,10 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Audit } from '../src/audit';
+import { ApiError } from '../src/errors';
 import { Ops } from '../src/ops';
 import { parseConfig, resolvePolicy } from '../src/policy';
 import { createCredential, Session } from '../src/session';
@@ -30,10 +31,13 @@ describe('MCP tools', () => {
     await srv.close();
   });
 
+  let auditFile = '';
+
   async function connect(actions: string[]) {
     const policy = resolvePolicy(parseConfig({ version: 1, vaults: '*', actions }), await listAllVaults(session));
     const ops = new Ops(session, new VaultModel(session, policy), policy);
-    const audit = new Audit(path.join(mkdtempSync(path.join(tmpdir(), 'inked-tools-')), 'audit.log'));
+    auditFile = path.join(mkdtempSync(path.join(tmpdir(), 'inked-tools-')), 'audit.log');
+    const audit = new Audit(auditFile);
     const { server } = createInkedServer({ ops, policy, audit, version: 'test' });
     const [a, b] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'test', version: '0' });
@@ -79,5 +83,44 @@ describe('MCP tools', () => {
     expect((bad.content as { text: string }[])[0].text).toBe('Folder names must not contain "/".');
     const tree = await c.callTool({ name: 'get_tree', arguments: { vault: 'Work' } });
     expect(JSON.parse((tree.content as { text: string }[])[0].text).folders[0].name).toBe('Topic');
+  });
+
+  describe('create_notes with a failed write', () => {
+    async function run(failOn: number) {
+      const c = await connect(['@read', '@write']);
+      await c.callTool({ name: 'create_folder', arguments: { vault: 'Work', parent: null, name: `Batch${failOn}` } });
+      const orig = session.api.createNote;
+      let calls = 0;
+      session.api.createNote = async (...args: Parameters<typeof orig>) => {
+        calls++;
+        if (calls === failOn) throw new ApiError(400, 'invalid');
+        return orig(...args);
+      };
+      try {
+        const notes = ['a', 'b', 'c'].map((title) => ({ folder: `Batch${failOn}`, title, body: '' }));
+        const res = await c.callTool({ name: 'create_notes', arguments: { vault: 'Work', notes } });
+        const result = JSON.parse((res.content as { text: string }[])[0].text);
+        const lines = readFileSync(auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+        return { res, result, entry: lines[lines.length - 1] };
+      } finally {
+        session.api.createNote = orig;
+      }
+    }
+
+    it('some created: result stays {created, failed}, not isError, audited as a partial failure', async () => {
+      const { res, result, entry } = await run(2);
+      expect(res.isError).toBeFalsy();
+      expect(result.created).toHaveLength(1);
+      expect(result.failed.index).toBe(1);
+      expect(entry).toMatchObject({ tool: 'create_notes', ok: false, error: 'batch_partial', ids: [result.created[0].id] });
+    });
+
+    it('none created: isError with the JSON result, audited as batch_failed', async () => {
+      const { res, result, entry } = await run(1);
+      expect(res.isError).toBe(true);
+      expect(result.created).toHaveLength(0);
+      expect(result.failed.index).toBe(0);
+      expect(entry).toMatchObject({ tool: 'create_notes', ok: false, error: 'batch_failed' });
+    });
   });
 });

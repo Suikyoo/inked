@@ -30,6 +30,7 @@ describe('parseConfig', () => {
     [{ version: 2, vaults: '*', actions: ['@read'] }, /version/],
     [{ version: 1, vaults: '*', actions: ['note.delete'] }, /Unknown action "note.delete"/],
     [{ version: 1, vaults: '*', actions: ['@everything'] }, /Unknown action "@everything"/],
+    [{ version: 1, vaults: '*', actions: ['toString'] }, /Unknown action "toString"/],
     [{ version: 1, vaults: '*', actions: [] }, /actions/],
     [{ version: 1, vaults: [], actions: ['@read'] }, /vaults/],
     [{ version: 1, vaults: '*', actions: ['@read'], extra: true }, /Unknown config key "extra"/],
