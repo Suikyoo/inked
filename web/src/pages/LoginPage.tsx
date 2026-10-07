@@ -32,17 +32,32 @@ export function LoginPage() {
   const pwRef = useRef<HTMLInputElement>(null);
   const userRef = useRef<HTMLInputElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  /** The swap waiting for the drop to fill. Cancelled by a new submit, a recovery or unmount. */
+  const swapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSwap = () => {
+    if (swapTimer.current === null) return;
+    clearTimeout(swapTimer.current);
+    swapTimer.current = null;
+  };
 
   // The store is already unlocked when it notifies; only the screen swap is animated, as an ink wipe.
   useEffect(() => {
     // If the session ended before the swap landed, the unlock is moot: make the form usable again.
     const recover = () => {
+      cancelSwap();
       if (store.getState().phase === 'unlocked') return;
       setBusy(false);
       setUnlocked(false);
     };
     const hook = (notify: () => void) => {
       const swap = () => {
+        swapTimer.current = null;
+        // The hold was already released (the session ended mid-drop): nothing to wipe to.
+        if (store.getState().phase !== 'unlocked') {
+          notify();
+          recover();
+          return;
+        }
         const root = document.documentElement;
         root.classList.add('is-unlocking');
         const t = withViewTransition(() => {
@@ -54,13 +69,17 @@ export function LoginPage() {
         else clear();
       };
       setUnlocked(true);
+      cancelSwap();
       if (prefersReducedMotion()) swap();
-      else setTimeout(swap, DROP_DONE_MS);
+      else swapTimer.current = setTimeout(swap, DROP_DONE_MS);
     };
     store.unlockTransition = hook;
     return () => {
+      cancelSwap();
       if (store.unlockTransition === hook) store.unlockTransition = null;
     };
+    // cancelSwap only touches a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store]);
 
   useEffect(() => {
@@ -94,6 +113,9 @@ export function LoginPage() {
     }
     const r = btnRef.current?.getBoundingClientRect();
     if (r) setWipeOrigin(r.left + r.width / 2, r.top + r.height / 2);
+    // A swap left over from an unlock whose session ended must not touch this attempt.
+    cancelSwap();
+    setUnlocked(false);
     setBusy(true);
     setNudge(false);
     setError(null);

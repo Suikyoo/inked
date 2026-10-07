@@ -100,6 +100,9 @@ describe('LoginPage motion', () => {
     expect(document.documentElement.style.getPropertyValue('--wipe-x')).not.toBe('');
     const notify = vi.fn();
     vi.useFakeTimers();
+    // The store is already unlocked when it hands over the notification.
+    const unlocked = { phase: 'unlocked', lastUsername: 'ada', notice: null } as unknown as AppState;
+    store.getState = () => unlocked;
     act(() => store.unlockTransition!(notify));
     // The drop completes first, then the swap runs inside the transition.
     expect(el.querySelector('svg.ink-fill')!.classList.contains('is-done')).toBe(true);
@@ -141,6 +144,88 @@ describe('LoginPage motion', () => {
     await submitWith(el, 'right-pass');
     expect(el.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
     expect(el.querySelector<HTMLInputElement>('input[name="password"]')!.disabled).toBe(false);
+  });
+
+  describe('the delayed swap', () => {
+    const states = {
+      signedOut: { phase: 'signedOut', lastUsername: 'ada', notice: null } as unknown as AppState,
+      unlocked: { phase: 'unlocked', lastUsername: 'ada', notice: null } as unknown as AppState,
+      locked: { phase: 'locked', lastUsername: 'ada', notice: null } as unknown as AppState,
+    };
+    let start: ReturnType<typeof vi.fn>;
+    beforeEach(() => {
+      start = vi.fn((cb: () => void) => {
+        cb();
+        return { finished: new Promise<void>(() => undefined) };
+      });
+      (document as unknown as { startViewTransition: unknown }).startViewTransition = start;
+    });
+    afterEach(() => vi.useRealTimers());
+    const submitBtn = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+
+    it('skips the view transition when the hold was released mid-drop, and re-enables the form', async () => {
+      let current = states.signedOut;
+      const store = fakeStore(vi.fn(() => new Promise<void>(() => undefined)));
+      store.getState = () => current;
+      const el = render(store);
+      await submitWith(el, 'right-pass');
+      vi.useFakeTimers();
+      const notify = vi.fn();
+      current = states.unlocked;
+      act(() => store.unlockTransition!(notify));
+      // The session ends during the drop; the store has already delivered the held notification.
+      current = states.locked;
+      act(() => {
+        vi.advanceTimersByTime(140);
+      });
+      expect(start).not.toHaveBeenCalled();
+      expect(document.documentElement.classList.contains('is-unlocking')).toBe(false);
+      expect(submitBtn(el).disabled).toBe(false);
+      expect(submitBtn(el).textContent).toBe('Unlock');
+    });
+
+    it('a new submit cancels a stale swap, so it cannot re-enable the form mid-unlock', async () => {
+      let current = states.signedOut;
+      const store = fakeStore(vi.fn());
+      store.getState = () => current;
+      // First try: unlocks, then the session ends mid-hold before unlock() returns.
+      store.unlock.mockImplementationOnce(async () => {
+        current = states.unlocked;
+        store.unlockTransition!(() => undefined);
+        current = states.locked;
+      });
+      // Second try: still running.
+      store.unlock.mockImplementationOnce(() => new Promise<void>(() => undefined));
+      const el = render(store);
+      vi.useFakeTimers();
+      await submitWith(el, 'right-pass');
+      expect(submitBtn(el).disabled).toBe(false);
+      await submitWith(el, 'right-pass');
+      expect(submitBtn(el).disabled).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(140);
+      });
+      expect(start).not.toHaveBeenCalled();
+      expect(submitBtn(el).disabled).toBe(true);
+      expect(submitBtn(el).textContent).toBe('Unlocking…');
+    });
+
+    it('unmounting cancels a pending swap', async () => {
+      let current = states.signedOut;
+      const store = fakeStore(vi.fn(() => new Promise<void>(() => undefined)));
+      store.getState = () => current;
+      const el = render(store);
+      await submitWith(el, 'right-pass');
+      vi.useFakeTimers();
+      const notify = vi.fn();
+      current = states.unlocked;
+      act(() => store.unlockTransition!(notify));
+      act(() => root!.unmount());
+      root = null;
+      vi.advanceTimersByTime(140);
+      expect(notify).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+    });
   });
 
   it('removes its transition hook on unmount', () => {
