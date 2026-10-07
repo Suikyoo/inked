@@ -16,18 +16,21 @@ function getPurifier(): DOMPurify {
   const p = createDOMPurify(window);
   p.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName === 'A') {
-      const href = node.getAttribute('href') ?? '';
+      // Browsers drop TAB/LF/CR inside a URL, so classify what they will actually read.
+      const href = (node.getAttribute('href') ?? '').replace(/[\t\n\r]/g, '');
       // Only a path on this origin is internal: one leading slash, not `//` or `/\` (browsers read both as another host).
       if (/^(https?:|mailto:)/i.test(href) || href.startsWith('//')) {
         node.setAttribute('target', '_blank');
         node.setAttribute('rel', 'noopener noreferrer');
         node.removeAttribute('data-internal');
+        node.removeAttribute('data-wikilink');
       } else if (/^\/(?![/\\])/.test(href)) {
         node.setAttribute('data-internal', '1');
         node.removeAttribute('target');
       } else {
         node.removeAttribute('target');
         node.removeAttribute('data-internal');
+        node.removeAttribute('data-wikilink');
       }
     } else if (node.tagName === 'INPUT') {
       node.setAttribute('type', 'checkbox');

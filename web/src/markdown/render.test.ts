@@ -146,4 +146,31 @@ describe('internal links', () => {
     expect(dom(html).querySelectorAll('a[data-internal]')).toHaveLength(0);
     expect(dom(html).querySelectorAll('a')).toHaveLength(5);
   });
+
+  it('classifies the href with TAB/LF/CR removed, as browsers read it (D5e)', () => {
+    const html = sanitizeHtml(
+      '<a href="/&#9;/evil.example" data-internal="1">a</a>' +
+        '<a href="/&#10;/evil" data-internal="1">b</a>' +
+        '<a href="/&#13;/evil" data-internal="1">c</a>',
+    );
+    const links = [...dom(html).querySelectorAll('a')];
+    expect(links).toHaveLength(3);
+    for (const a of links) {
+      expect(a.hasAttribute('data-internal')).toBe(false);
+      expect(a.getAttribute('target')).toBe('_blank');
+    }
+  });
+
+  it('strips data-wikilink from non-internal links but keeps it on resolved wiki-links (D5e)', () => {
+    const html = sanitizeHtml(
+      '<a href="//evil.example" data-wikilink="">a</a>' +
+        '<a href="https://x.example" data-wikilink="">b</a>' +
+        '<a href="relative" data-wikilink="">c</a>' +
+        '<a href="/&#9;/evil" data-wikilink="">d</a>',
+    );
+    expect(dom(html).querySelectorAll('a[data-wikilink]')).toHaveLength(0);
+    expect(dom(html).querySelectorAll('a')).toHaveLength(4);
+    const ok = renderMarkdown('[[Note]]', { resolveWikiLink: () => '/v/1' });
+    expect(dom(ok).querySelector('a[data-wikilink][data-internal]')).not.toBeNull();
+  });
 });
