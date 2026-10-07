@@ -12,6 +12,9 @@ RUN npm ci
 COPY core core
 COPY server server
 COPY web web
+COPY scripts scripts
+ARG INKED_SEMANTIC=1
+RUN if [ "$INKED_SEMANTIC" = "1" ]; then node scripts/fetch-model.mjs web/public/models; fi
 RUN npm run build -w web && npm run build -w server
 
 # ---- deps: server production dependencies only -----------------------------

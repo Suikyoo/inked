@@ -100,6 +100,12 @@ docker compose start inked
 
 To move Inked to another host, copy the tarball there, run `docker compose up -d --build` once (it creates the volume), then restore as above. The tarball is ciphertext, but `server-secret` signs device cookies, so keep backups private.
 
+## Semantic search model
+
+The semantic search model (bge-small-en-v1.5, q8 ONNX) and the ONNX Runtime WASM are downloaded at image build time from Hugging Face. The revision is pinned and every file is sha256-checked by `scripts/fetch-model.mjs`; a mismatch fails the build. They are served from Inked's own origin under `/models/`, and nothing is fetched at runtime.
+
+`INKED_SEMANTIC=0 docker compose build` leaves the model out (about 45 MB smaller). The semantic search toggle is then hidden in the app. The default is `INKED_SEMANTIC=1`.
+
 ## 7. Accepted risk
 
 Any container placed on `cloudflared-net` can reach nginx and could forge `CF-Connecting-IP`, which would let it choose the IP that login lockouts are keyed on. Only trusted containers belong on that network. The Docker host itself can do the same: its bridge gateway address sits inside the trusted range, so a process on the host can also set `CF-Connecting-IP`. The per-account lockout cap still applies.

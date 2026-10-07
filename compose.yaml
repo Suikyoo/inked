@@ -5,7 +5,10 @@
 name: inked
 services:
   inked:
-    build: .
+    build:
+      context: .
+      args:
+        INKED_SEMANTIC: ${INKED_SEMANTIC:-1}
     restart: unless-stopped
     volumes:
       # Named volume: Docker seeds it with the image's /data ownership (uid 1000, "node"), so no chown is needed.

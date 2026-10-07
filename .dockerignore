@@ -8,3 +8,4 @@ server/data
 *.log
 .env
 deploy
+web/public/models
