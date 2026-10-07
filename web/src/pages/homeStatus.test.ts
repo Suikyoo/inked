@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { homePending } from './homeStatus';
+import { homeError, homePending } from './homeStatus';
 
 type S = Parameters<typeof homePending>[0];
 const state = (vaultsStatus: S['vaultsStatus'], trees: S['trees'] = {}, vaultOrder: string[] = Object.keys(trees)): S => ({ vaultsStatus, trees, vaultOrder });
@@ -19,5 +19,18 @@ describe('homePending', () => {
   it('is not pending when ready and every tree has settled', () => {
     expect(homePending(state('ready', { a: t('ready'), b: t('error') }))).toBe(false);
     expect(homePending(state('ready'))).toBe(false);
+  });
+});
+
+describe('homeError', () => {
+  it('is true when the vault load failed and nothing is loaded', () => {
+    expect(homeError(state('error'))).toBe(true);
+  });
+  it('is false when a refresh failed but vaults are still loaded', () => {
+    expect(homeError(state('error', { a: t('ready') }))).toBe(false);
+  });
+  it('is false when ready', () => {
+    expect(homeError(state('ready'))).toBe(false);
+    expect(homeError(state('ready', { a: t('ready') }))).toBe(false);
   });
 });

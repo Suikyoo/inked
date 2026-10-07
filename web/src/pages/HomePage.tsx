@@ -9,7 +9,7 @@ import { useVaultGraphs } from '../map/useVaultGraphs';
 import { highlightSegments } from '../search/fuzzy';
 import { searchBodies, searchTitles, type SearchEntry } from '../search/search';
 import { describeError, relativeTime } from '../lib/util';
-import { homePending } from './homeStatus';
+import { homeError, homePending } from './homeStatus';
 import { useAppState, useSearchEntries, useStore, vaultStats } from '../state/StoreContext';
 import type { AppState } from '../state/store';
 
@@ -184,9 +184,14 @@ export function HomePage() {
           onFocus={(e) => setHot(hotFrom(e.target))}
           onBlur={() => setHot(null)}
         >
-          {state.vaultsStatus === 'error' ? (
+          {homeError(state) ? (
             <div className="empty">
-              <p>Couldn’t load your vaults. Use Try again in the sidebar.</p>
+              <p>
+                Couldn’t load your vaults.{' '}
+                <button type="button" className="linkish" onClick={() => void store.loadAll().catch(() => undefined)}>
+                  Try again
+                </button>
+              </p>
             </div>
           ) : state.vaultsStatus === 'ready' && vaults.length === 0 ? (
             <div className="empty">
