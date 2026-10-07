@@ -219,7 +219,7 @@ A restrained violet-tinted dark palette with one ink accent and quiet, desaturat
 - **Error** (#f2a7b4 text; #241d2a surface; #e9c9cf body text) is a soft rose, never saturated red, except the destructive button fill (#8f3348). **OK** (#8fd1b5) and **Warn** (#d19c3c) are used sparingly.
 
 ### Concept map ramp
-An ordinal one-hue ramp from wet to dry ink, by age of last edit: **Wet** (`ink-wet`, #b69cff, under 1 day), **Fresh** (`ink-fresh`, #9d7cf2, under 7 days), **Drying** (`ink-drying`, #6b5a9e, under 30 days), **Dry** (`ink-dry`, #524b6e, older). Wet and Fresh add a soft glow (38% and 22% opacity). **Pencil** (`map-pencil`, #4a4659) draws folder structure; explicit links are the same pencil, dotted 2-4 with round caps; **Map Ink** (#9d7cf2) draws tapered ink strokes; selection is `text-strong` (#ede9ff) at 1.5px. Vault colors are user-chosen data (swatches in settings), not palette tokens.
+An ordinal one-hue ramp from wet to dry ink, by age of last edit: **Wet** (`ink-wet`, #b69cff, under 1 day), **Fresh** (`ink-fresh`, #9d7cf2, under 7 days), **Drying** (`ink-drying`, #6b5a9e, under 30 days), **Dry** (`ink-dry`, #524b6e, older). Wet and Fresh add a soft glow (38% and 22% opacity). **Pencil** (`map-pencil`, #4a4659) draws folder structure; explicit links are the same pencil, dotted 2-4 with round caps; **Map Ink** (#9d7cf2) draws 3px round-capped quill-curve ink strokes; selection is `text-strong` (#ede9ff) at 1.5px. Vault colors are user-chosen data (swatches in settings), not palette tokens.
 
 ### Named Rules
 **The One Ink Rule.** Purple is the only chromatic voice. Status colors are muted and appear only when something is wrong or done; do not introduce a second accent hue.
@@ -313,7 +313,7 @@ A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px
 Motion is quiet and tied to the ink metaphor: it confirms a change of state and never blocks a click or shifts layout.
 
 ### Tokens
-- **Durations:** `--dur-1` 90ms (hover, press), `--dur-2` 140ms (route, toggle, tree, banners), `--dur-3` 200ms (drawer, menus), `--dur-4` 320ms, `--dur-ink` 520ms (ink drawn along a path on the map).
+- **Durations:** `--dur-1` 90ms (hover, press), `--dur-2` 140ms (route, toggle, tree, banners, menus), `--dur-3` 200ms (dialogs opening, the mobile drawer, panels, the auth fade, the write-on node fade), `--dur-4` 320ms, `--dur-ink` 520ms (ink drawn along a path on the map).
 - **Easing:** `--ease-out` cubic-bezier(0.16, 1, 0.3, 1) for things arriving, `--ease-in` cubic-bezier(0.4, 0, 1, 1) for things leaving, `--ease-std` cubic-bezier(0.2, 0, 0, 1) for things that move between two places.
 
 ### Rules
