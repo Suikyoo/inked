@@ -6,7 +6,11 @@ import { PlusIcon, SearchIcon } from '../components/Icons';
 import { uniqueTitle } from '../components/VaultTree';
 import { ConceptMap, type MapSelection } from '../map/ConceptMap';
 import { useVaultGraphs } from '../map/useVaultGraphs';
-import { highlightSegments, searchBodies, searchTitles, type SearchEntry } from 'inked-core';
+import { highlightSegments, searchBodies, searchTitles, type SearchEntry, type SemanticInput } from 'inked-core';
+import { ProgressBar } from '../components/ProgressBar';
+import { usePresence } from '../motion';
+import { useSemantic, useSemanticStore } from '../semantic/SemanticContext';
+import { buildRows, type SearchRow } from './searchRows';
 import { describeError, relativeTime } from '../lib/util';
 import { NodePreview } from './NodePreview';
 import { homeColumn, homeError, homePending } from './homeStatus';
@@ -20,6 +24,9 @@ interface RowFlags {
 
 /** The first reveal staggers at most this many rows. */
 const STAGGER_ROWS = 8;
+/** Wait this long after the last keystroke before asking for meaning matches. */
+const SEMANTIC_DEBOUNCE_MS = 250;
+const toMB = (bytes: number) => Math.round(bytes / 1e6);
 
 function Highlighted({ text, indices, offset }: { text: string; indices: number[]; offset: number }) {
   return (
@@ -46,6 +53,8 @@ export function HomePage() {
   const store = useStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const semanticStore = useSemanticStore();
+  const sem = useSemantic();
   const entries = useSearchEntries(state);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -72,8 +81,40 @@ export function HomePage() {
     const exclude = new Set(titleHits.map((h) => h.entry.noteId));
     return searchBodies(q, entries, state.bodies, exclude, 15);
   }, [q, entries, state.bodies, titleHits]);
+  const [semantic, setSemantic] = useState<SemanticInput[]>([]);
+  const semReady = sem.phase === 'ready';
+  useEffect(() => {
+    if (q.length < 3 || !semReady) {
+      setSemantic((prev) => (prev.length ? [] : prev));
+      return;
+    }
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      semanticStore
+        .search(q, abort.signal)
+        .then((r) => {
+          if (!abort.signal.aborted) setSemantic(r);
+        })
+        .catch(() => {
+          if (!abort.signal.aborted) setSemantic([]);
+        });
+    }, SEMANTIC_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [q, semReady, semanticStore]);
+  const liveRows = useMemo(() => buildRows(titleHits, bodyHits, semantic, entries, q), [titleHits, bodyHits, semantic, entries, q]);
+  // While focus is inside the list the rows hold still, so a late meaning result cannot move what the reader is
+  // about to open. The new rows wait in liveRows and apply when focus leaves the list or the query changes.
+  const browsing = useRef(false);
+  const shown = useRef<{ q: string; rows: SearchRow[] } | null>(null);
+  const [, setTick] = useState(0);
+  const held = browsing.current && shown.current?.q === q ? shown.current.rows : null;
+  const rows = held ?? liveRows;
+  shown.current = { q, rows };
   const mapEntries = useVaultGraphs(state);
-  const hitIds = useMemo(() => new Set([...titleHits, ...bodyHits].map((h) => h.entry.noteId)), [titleHits, bodyHits]);
+  const hitIds = useMemo(() => new Set(rows.map((r) => r.entry.noteId)), [rows]);
   const [hot, setHot] = useState<string | null>(null);
   // The map rings and inks the selected node; the right column previews it.
   const [selected, setSelected] = useState<MapSelection | null>(null);
@@ -99,7 +140,7 @@ export function HomePage() {
       results()[0]?.focus();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const first = titleHits[0]?.entry ?? bodyHits[0]?.entry;
+      const first = rows[0]?.entry;
       if (first) navigate(hrefFor(first));
     }
   };
@@ -134,12 +175,23 @@ export function HomePage() {
     }
   };
 
-  const total = titleHits.length + bodyHits.length;
+  const total = rows.length;
+  const cov = Object.values(sem.coverage).reduce((a, c) => ({ done: a.done + c.done, total: a.total + c.total }), { done: 0, total: 0 });
+  const incomplete = cov.done < cov.total;
+  const indexing = sem.enabled && semReady && incomplete;
+  const downloading = sem.phase === 'downloading' && sem.download !== null;
+  const barNow = downloading
+    ? { label: `Downloading model · ${toMB(sem.download!.loaded)} / ${toMB(sem.download!.total)} MB`, value: sem.download!.loaded, max: sem.download!.total }
+    : { label: `Indexing by meaning · ${cov.done} / ${cov.total}`, value: cov.done, max: cov.total };
+  const bar = usePresence(indexing || downloading, 200);
+  // The label outlives the state that earned it while the bar fades out.
+  const lastBar = useRef(barNow);
+  if (indexing || downloading) lastBar.current = barNow;
 
   // A row that newly enters the result set eases in; the first reveal (the previous render had no query)
   // staggers the rows. The flags are frozen when a row enters and kept while its id stays in the set, so
   // typing, hover and store updates do not cut the animation short or replay it.
-  const shownIds = column === 'search' ? [...titleHits, ...bodyHits].map((h) => h.entry.noteId) : [];
+  const shownIds = column === 'search' ? rows.map((r) => r.entry.noteId) : [];
   const rowFlags = useRef(new Map<string, RowFlags>());
   const wasIdle = useRef(true);
   const flags = new Map<string, RowFlags>();
@@ -184,7 +236,7 @@ export function HomePage() {
           />
           <kbd aria-hidden="true">/</kbd>
           <span id="search-help" className="sr-only">
-            Matches note titles and folder paths as you type. Press Enter to open the top result, or arrow down to move through results.
+            Matches note titles and folder paths as you type. Press Enter to open the top result, or arrow down to move through results. With search by meaning on, results also include notes about the same topic.
           </span>
         </form>
         <div className="home-head-side is-end">
@@ -194,6 +246,11 @@ export function HomePage() {
           </button>
         </div>
       </header>
+      {bar.mounted && (
+        <div className="home-index" ref={bar.ref} data-state={bar.state}>
+          <ProgressBar value={lastBar.current.value} max={lastBar.current.max} label={lastBar.current.label} />
+        </div>
+      )}
       {error && (
         <p className="form-error home-error" role="alert">
           {error}
@@ -215,8 +272,18 @@ export function HomePage() {
           onKeyDown={onListKey}
           onMouseOver={(e) => setHot(hotFrom(e.target))}
           onMouseLeave={() => setHot(null)}
-          onFocus={(e) => setHot(hotFrom(e.target))}
-          onBlur={() => setHot(null)}
+          onFocus={(e) => {
+            setHot(hotFrom(e.target));
+            browsing.current = true;
+          }}
+          onBlur={(e) => {
+            setHot(null);
+            const next = e.relatedTarget;
+            if (browsing.current && !(next instanceof Node && e.currentTarget.contains(next))) {
+              browsing.current = false;
+              setTick((n) => n + 1);
+            }
+          }}
         >
           {homeError(state) ? (
             <div className="empty">
@@ -235,40 +302,38 @@ export function HomePage() {
           ) : column === 'search' ? (
             <>
               <h2 className="results-title" aria-live="polite">
-                {treesPending ? 'Searching…' : `${total} ${total === 1 ? 'match' : 'matches'}`}
+                {treesPending ? 'Searching…' : `${total} ${total === 1 ? 'match' : 'matches'}${semReady && incomplete ? ` · meaning covers ${cov.done} of ${cov.total} notes` : ''}`}
               </h2>
               <ul className="res-list">
-                {titleHits.map(({ entry, match }) => (
-                  <li key={entry.noteId} {...rowMotion(entry.noteId)}>
-                    <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
-                      <span className="res-title">
-                        <Highlighted text={entry.text.slice(entry.pathStart)} indices={match.indices} offset={entry.pathStart} />
-                      </span>
-                      <ResultMeta state={state} entry={entry} />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              {bodyHits.length > 0 && (
-                <>
-                  <h3 className="results-sub">In note text</h3>
-                  <ul className="res-list">
-                    {bodyHits.map(({ entry, snippet }) => (
-                      <li key={entry.noteId} {...rowMotion(entry.noteId)}>
-                        <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
-                          <span className="res-title">{entry.text.slice(entry.pathStart)}</span>
+                {rows.map(({ entry, why, titleMatch, snippet, chunk }) => {
+                  const line = why === 'meaning' && chunk !== null ? semanticStore.chunkText(entry.noteId, chunk)?.split('\n')[0] : null;
+                  return (
+                    <li key={entry.noteId} {...rowMotion(entry.noteId)}>
+                      <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
+                        <span className="res-title">
+                          {titleMatch ? (
+                            <Highlighted text={entry.text.slice(entry.pathStart)} indices={titleMatch.indices} offset={entry.pathStart} />
+                          ) : (
+                            entry.text.slice(entry.pathStart)
+                          )}
+                        </span>
+                        {snippet && why === 'text' && (
                           <span className="res-snippet">
                             {snippet.before}
                             <mark>{snippet.hit}</mark>
                             {snippet.after}
                           </span>
-                          <ResultMeta state={state} entry={entry} />
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
+                        )}
+                        {line && <span className="res-snippet">{line}</span>}
+                        <span className="res-why" data-why={why}>
+                          {why === 'meaning' ? '◇ meaning' : why}
+                        </span>
+                        <ResultMeta state={state} entry={entry} />
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
               {total === 0 && !treesPending && (
                 <p className="empty">No notes match “{q}”. Try fewer letters.</p>
               )}

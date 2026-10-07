@@ -295,6 +295,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 
 ### Search
 - 36px, 8px radius, `panel` fill, a leading icon, and a trailing `kbd` hint hidden on focus. Results are 6px 8px rows with title (13px), meta (11.5px `muted-2`) and a 2-line snippet (12px `muted`), with matches highlighted by `mark`.
+- **Search by meaning.** Opt-in (Settings). Home shows one merged list of title, note-text and meaning matches. Each row ends in a muted 11px `res-why` tag (`title`, `text`, or `◇ meaning` in `ink-light`); meaning rows show the best chunk's first line as their snippet. While focus is inside the list the order holds still, and new results apply when focus leaves or the query changes. When meaning indexing is incomplete the header adds "· meaning covers 3 of 40 notes", and a 2px progress bar under the search bar reads "Indexing by meaning · 3 / 40" (or "Downloading model · 12 / 90 MB"), fading out over `--dur-3` once done. Off by default, none of this shows.
 
 ### Segmented control
 - 2px inset on `panel` with a 1px `line` border; 24px options; the pressed option has white text over an ink thumb that slides between the options over `--dur-2` (the control carries `data-mode`). Used for edit / view; the article or textarea fades in over 120ms.

@@ -250,3 +250,28 @@
     order: 2;
   }
 }
+
+/* Search by meaning: the indexing / download bar sits under the search bar, and fades out when done. */
+.home-index {
+  width: 100%;
+  max-width: 560px;
+  margin: -10px auto 0;
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+.home-index[data-state='enter'],
+.home-index[data-state='exit'] {
+  opacity: 0;
+}
+.home-index .progress {
+  margin-top: 0;
+}
+
+/* Why a row matched: a muted tag after the title, lilac for meaning-only rows. */
+.res-why {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted-3);
+}
+.res-why[data-why='meaning'] {
+  color: var(--ink-light);
+}
