@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Logo, Wordmark } from '../brand/Logo';
 import { useAppState, useStore } from '../state/StoreContext';
 import type { AppStore } from '../state/store';
+import { usePresence } from '../motion';
 import { CloseIcon, LockIcon, MenuIcon } from './Icons';
 import { Sidebar } from './Sidebar';
 
@@ -39,6 +40,19 @@ function useIdleLock(store: AppStore, onIdle: () => void) {
       document.removeEventListener('visibilitychange', check);
     };
   }, [store]);
+}
+
+/** Animates a banner in and out, holding its last content while it collapses. */
+function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  const { mounted, state, ref } = usePresence(open, 140);
+  const last = useRef(children);
+  if (open) last.current = children;
+  if (!mounted) return null;
+  return (
+    <div ref={ref} className="collapse" data-state={state}>
+      <div className="collapse-inner">{last.current}</div>
+    </div>
+  );
 }
 
 export function AppShell() {
@@ -99,7 +113,7 @@ export function AppShell() {
       <div className="scrim" aria-hidden="true" onClick={() => setDrawer(false)} />
       <Sidebar id="sidebar" onLock={lock} />
       <div className="main" id="main" tabIndex={-1}>
-        {state.pendingCount > 0 && (
+        <Collapse open={state.pendingCount > 0}>
           <div className="sync-bar" role="status">
             <span>
               {state.pendingCount} {state.pendingCount === 1 ? 'change' : 'changes'} waiting to sync. Inked will keep
@@ -109,15 +123,15 @@ export function AppShell() {
               Try now
             </button>
           </div>
-        )}
-        {state.notice && (
+        </Collapse>
+        <Collapse open={!!state.notice}>
           <div className="banner" role="status">
             <span>{state.notice}</span>
             <button type="button" className="ibtn ibtn-sm" aria-label="Dismiss" onClick={() => store.clearNotice()}>
               <CloseIcon size={12} />
             </button>
           </div>
-        )}
+        </Collapse>
         <Outlet />
       </div>
     </div>

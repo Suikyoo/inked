@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { usePresence } from '../motion';
 
 export interface MenuItem {
   label: string;
@@ -28,9 +29,18 @@ export function Menu({
   openSignal?: number;
 }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; origin: string } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLUListElement>(null);
+  const menu = useRef<HTMLUListElement | null>(null);
+  const presence = usePresence(open, 90);
+  const presenceRef = presence.ref;
+  const setMenuEl = useCallback(
+    (el: HTMLUListElement | null) => {
+      menu.current = el;
+      presenceRef(el);
+    },
+    [presenceRef],
+  );
   const id = useId();
   const lastSignal = useRef(openSignal);
 
@@ -49,7 +59,8 @@ export function Menu({
     const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
     const below = r.bottom + 4;
     const top = below + height > window.innerHeight - 8 ? Math.max(8, r.top - height - 4) : below;
-    setPos({ top, left });
+    const originX = Math.max(0, Math.min(width, r.left + r.width / 2 - left));
+    setPos({ top, left, origin: `${originX}px ${top < r.top ? 'bottom' : 'top'}` });
   }, [open, items.length]);
 
   useEffect(() => {
@@ -115,15 +126,16 @@ export function Menu({
       >
         {children}
       </button>
-      {open &&
+      {presence.mounted &&
         createPortal(
           <ul
-            ref={menu}
+            ref={setMenuEl}
             id={id}
             role="menu"
             aria-label={label}
             className="menu"
-            style={pos ? { top: pos.top, left: pos.left } : { visibility: 'hidden' }}
+            data-state={presence.state}
+            style={pos ? { top: pos.top, left: pos.left, transformOrigin: pos.origin } : { visibility: 'hidden' }}
             onKeyDown={onKey}
           >
             {items.map((it) => (

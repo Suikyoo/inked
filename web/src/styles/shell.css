@@ -24,6 +24,32 @@
   text-decoration: none;
 }
 
+/* Banner and sync bar wrapper: fades in, then collapses its height away on exit. */
+.collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--dur-2) var(--ease-in),
+    opacity var(--dur-2) var(--ease-in);
+  animation: collapse-in var(--dur-3) var(--ease-out);
+}
+.collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.collapse[data-state='exit'] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  animation: none;
+  pointer-events: none;
+}
+@keyframes collapse-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
 .banner {
   display: flex;
   align-items: center;
