@@ -53,6 +53,56 @@ describe('Session', () => {
     await s.close();
   });
 
+  it('a 401 that arrives after the re-login neither starts a second login nor breaks the retry', async () => {
+    const cred = await createCredential({ baseUrl: srv.baseUrl, username: 'jude', password: PW });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let vaultCalls = 0;
+    const slowStale: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (!url.endsWith('/api/vaults')) return fetch(input, init);
+      const n = ++vaultCalls;
+      if (n > 2) return fetch(input, init);
+      // The first two data calls carry a dead session: the server answers 401 and clears the cookie.
+      const headers = { ...(init?.headers as Record<string, string>), Cookie: 'inked_session=dead' };
+      const res = await fetch(input, { ...init, headers });
+      if (n === 2) await gate; // the second rejection lands only after the re-login finished
+      return res;
+    };
+    const s = new Session(cred, { fetch: slowStale });
+    await s.start();
+    let logins = 0;
+    const realLogin = s.api.login.bind(s.api);
+    s.api.login = async (u, k) => {
+      logins++;
+      const out = await realLogin(u, k);
+      release();
+      return out;
+    };
+    const results = await Promise.all([1, 2].map(() => s.call(() => s.api.listVaults())));
+    expect(results).toHaveLength(2);
+    expect(logins).toBe(1);
+    await s.close();
+  });
+
+  it('latches a stale credential: later calls fail at once without another login', async () => {
+    const cred = await createCredential({ baseUrl: srv.baseUrl, username: 'jude', password: PW });
+    const s = new Session(cred);
+    await s.start();
+    await s.api.logout();
+    await changePassword(srv.baseUrl, 'jude', PW, 'a brand new password');
+    let logins = 0;
+    const realLogin = s.api.login.bind(s.api);
+    s.api.login = async (u, k) => {
+      logins++;
+      return realLogin(u, k);
+    };
+    await expect(s.call(() => s.api.listVaults())).rejects.toBeInstanceOf(CredentialStale);
+    await expect(s.call(() => s.api.listVaults())).rejects.toBeInstanceOf(CredentialStale);
+    expect(logins).toBe(1);
+    await changePassword(srv.baseUrl, 'jude', 'a brand new password', PW);
+  });
+
   it('reports a stale credential after a password change', async () => {
     const cred = await createCredential({ baseUrl: srv.baseUrl, username: 'jude', password: PW });
     await changePassword(srv.baseUrl, 'jude', PW, 'a brand new password');

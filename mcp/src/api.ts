@@ -43,14 +43,18 @@ export class InkedApi {
     return this.device;
   }
 
-  private takeCookies(res: Response): void {
+  private takeCookies(res: Response, sent: string | null): void {
     for (const line of res.headers.getSetCookie?.() ?? []) {
       const [pair, ...attrs] = line.split(';');
       const eq = pair.indexOf('=');
       const name = pair.slice(0, eq).trim();
       const value = pair.slice(eq + 1).trim();
       const expired = !value || attrs.some((a) => /^\s*max-age\s*=\s*0\s*$/i.test(a));
-      if (name === 'inked_session') this.session = expired ? null : value;
+      if (name === 'inked_session') {
+        // A late rejection of an old session must not wipe a newer one made by a re-login meanwhile.
+        if (!expired) this.session = value;
+        else if (this.session === sent) this.session = null;
+      }
       if (name === 'inked_device' && !expired) this.device = value;
     }
   }
@@ -60,6 +64,7 @@ export class InkedApi {
     if (method !== 'GET') headers['X-Inked'] = '1';
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (bound && this.userId) headers['X-Inked-User'] = this.userId;
+    const sent = this.session;
     const cookies: string[] = [];
     if (this.session) cookies.push(`inked_session=${this.session}`);
     if (this.device && path.startsWith('/api/auth')) cookies.push(`inked_device=${this.device}`);
@@ -79,7 +84,7 @@ export class InkedApi {
       throw new ApiError(0, 'network', 'Can’t reach the Inked server.');
     }
     if (res.status >= 300 && res.status < 400) throw new NonApiResponse(res.status);
-    this.takeCookies(res);
+    this.takeCookies(res, sent);
 
     let data: unknown = null;
     if (text) {

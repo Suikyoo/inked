@@ -52,6 +52,8 @@ export class Session {
   private userKey: CryptoKey | null = null;
   private readonly vaultKeys = new Map<string, CryptoKey>();
   private relogin: Promise<void> | null = null;
+  private generation = 0;
+  private stale: CredentialStale | null = null;
 
   constructor(
     private readonly cred: Credential,
@@ -69,6 +71,7 @@ export class Session {
   }
 
   async start(): Promise<void> {
+    if (this.stale) throw this.stale;
     const master = fromBase64Url(this.cred.masterSecret);
     try {
       this.keys = await deriveFromMasterSecret(master);
@@ -85,23 +88,37 @@ export class Session {
       if (user.id !== this.cred.userId) throw new CredentialStale();
       this.userKey = await unwrapUserKey(wrappedUserKey, this.keys.passwordKEK, user.id);
       this.vaultKeys.clear();
+      this.generation++;
     } catch (e) {
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) throw new CredentialStale();
-      if (isCryptoError(e)) throw new CredentialStale();
+      if (e instanceof CredentialStale) throw this.latch(e);
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) throw this.latch(new CredentialStale());
+      if (isCryptoError(e)) throw this.latch(new CredentialStale());
       throw e;
     }
   }
 
+  /** Remembered so later calls fail at once instead of repeating a login the server keeps refusing (lockouts). */
+  private latch(e: CredentialStale): CredentialStale {
+    this.stale = e;
+    return e;
+  }
+
   /** Runs `fn`; after a 401 (session expired or revoked) signs in again once and retries once. */
   async call<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.stale) throw this.stale;
+    const seen = this.generation;
     try {
       return await fn();
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 401)) throw e;
-      this.relogin ??= this.login().finally(() => {
-        this.relogin = null;
-      });
-      await this.relogin;
+      if (this.stale) throw this.stale;
+      // A re-login that finished after this call started already replaced the session: just retry.
+      if (this.generation === seen) {
+        this.relogin ??= this.login().finally(() => {
+          this.relogin = null;
+        });
+        await this.relogin;
+      }
       return fn();
     }
   }
