@@ -66,6 +66,7 @@ describe('AppShell banner and sync bar', () => {
     ctl.set({ notice: null });
     expect(wrap('.banner')?.getAttribute('data-state')).toBe('exit');
     expect(wrap('.banner')?.textContent).toContain('Locked after a while.');
+    expect(wrap('.banner')?.hasAttribute('inert')).toBe(true);
     tick(300);
     expect(host.querySelector('.banner')).toBeNull();
   });

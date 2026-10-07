@@ -64,7 +64,7 @@ export function Menu({
   }, [open, items.length]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !presence.mounted) return;
     const first = menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
     first?.focus();
     const onDown = (e: MouseEvent) => {
@@ -77,7 +77,7 @@ export function Menu({
       document.removeEventListener('mousedown', onDown);
       window.removeEventListener('resize', onScroll);
     };
-  }, [open, pos]);
+  }, [open, pos, presence.mounted]);
 
   const close = (refocus = true) => {
     setOpen(false);
@@ -135,6 +135,7 @@ export function Menu({
             aria-label={label}
             className="menu"
             data-state={presence.state}
+            {...(presence.state === 'exit' ? { inert: '' } : {})}
             style={pos ? { top: pos.top, left: pos.left, transformOrigin: pos.origin } : { visibility: 'hidden' }}
             onKeyDown={onKey}
           >

@@ -49,7 +49,7 @@ function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
   if (open) last.current = children;
   if (!mounted) return null;
   return (
-    <div ref={ref} className="collapse" data-state={state}>
+    <div ref={ref} className="collapse" data-state={state} {...(state === 'exit' ? { inert: '' } : {})}>
       <div className="collapse-inner">{last.current}</div>
     </div>
   );

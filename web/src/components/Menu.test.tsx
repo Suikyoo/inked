@@ -37,6 +37,14 @@ describe('Menu motion', () => {
     expect(menu()).toBeNull();
   });
 
+  it('focuses the first item once mounted, and makes the exiting menu inert', () => {
+    click();
+    tick(50);
+    expect(document.activeElement).toBe(document.querySelector('[role=menuitem]'));
+    click();
+    expect(menu()?.hasAttribute('inert')).toBe(true);
+  });
+
   it('reopens during the exit', () => {
     click();
     tick(50);

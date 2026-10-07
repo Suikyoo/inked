@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { prefs } from '../lib/prefs';
+import { usePresence } from '../motion';
 
 interface DialogProps {
   open: boolean;
@@ -12,7 +13,16 @@ interface DialogProps {
 
 /** Native <dialog> (focus trap, Esc, inert background) with our styling. */
 export function Dialog({ open, title, onClose, children, describedBy }: DialogProps) {
-  const ref = useRef<HTMLDialogElement>(null);
+  const ref = useRef<HTMLDialogElement | null>(null);
+  const presence = usePresence(open, 140);
+  const presenceRef = presence.ref;
+  const setEl = useCallback(
+    (el: HTMLDialogElement | null) => {
+      ref.current = el;
+      presenceRef(el);
+    },
+    [presenceRef],
+  );
   const titleId = useId();
 
   useEffect(() => {
@@ -28,7 +38,7 @@ export function Dialog({ open, title, onClose, children, describedBy }: DialogPr
 
   return (
     <dialog
-      ref={ref}
+      ref={setEl}
       className="dialog"
       aria-labelledby={titleId}
       aria-describedby={describedBy}
@@ -41,7 +51,8 @@ export function Dialog({ open, title, onClose, children, describedBy }: DialogPr
         if (e.target === ref.current) onClose();
       }}
     >
-      {open && (
+      {/* Body stays mounted through the close transition so the exit fades real content. */}
+      {presence.mounted && (
         <div className="dialog-body">
           <h2 id={titleId} className="dialog-title">
             {title}
