@@ -1,5 +1,11 @@
 {
   "mcpServers": {
-    "inked": { "command": "inked-mcp", "args": ["serve"] }
+    "inked": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/server/cli.cjs",
+        "serve"
+      ]
+    }
   }
 }

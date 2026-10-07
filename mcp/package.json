@@ -7,7 +7,7 @@
     "inked-mcp": "dist/cli.cjs"
   },
   "scripts": {
-    "build": "esbuild src/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/cli.cjs \"--banner:js=#!/usr/bin/env node\"",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/cli.cjs \"--banner:js=#!/usr/bin/env node\" && node -e \"const fs=require('fs');fs.mkdirSync('plugin/server',{recursive:true});fs.copyFileSync('dist/cli.cjs','plugin/server/cli.cjs')\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },

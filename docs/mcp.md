@@ -38,6 +38,8 @@ Before you sign in, `status` tells you to run `inked-mcp login` first. After sig
 inked-mcp login
 ```
 
+Run this in a real terminal (PowerShell or cmd on Windows). The hidden password prompt needs a terminal that is a TTY, so it does not work in Git Bash/mintty. If PowerShell's execution policy blocks the `inked-mcp.ps1` shim, run `inked-mcp.cmd login` instead. If you did not install globally, `node <path-to-repo>/mcp/dist/cli.cjs login` does the same.
+
 It asks for your Inked URL, your username and your password. You can pass the first two as `--url` and `--username` to skip those prompts. The password is typed hidden and is never saved.
 
 What is saved is a credential file at `~/.inked-mcp/credential.json`: the URL, your username and the master secret derived from your password. The master secret is enough to sign in and decrypt your data, but it cannot reveal your password. Any program running as your user can read the file, so treat it like a key.
@@ -144,7 +146,11 @@ After you edit a config, restart the AI client so it starts `serve` again.
 
 ### Claude Code (plugin)
 
-The repository includes a Claude Code plugin that bundles the MCP server and the `inked-notes` skill, which teaches the AI to orient itself, search before writing, and link notes. Install the CLI first (above), then add the repository as a marketplace and install the plugin:
+The repository includes a Claude Code plugin that bundles the MCP server and the `inked-notes` skill, which teaches the AI to orient itself, search before writing, and link notes. The plugin carries its own copy of the server, built by `npm run build -w mcp` into `mcp/plugin/server/`, so build first, then add the repository as a marketplace and install the plugin:
+
+```bash
+npm run build -w mcp
+```
 
 ```bash
 claude plugin marketplace add <path-to-repo>
@@ -156,25 +162,33 @@ claude plugin install inked@inked
 
 Inside a session you can use `/plugin marketplace add <path-to-repo>` and `/plugin install inked@inked` instead. In Claude Code the tools appear as `mcp__plugin_inked_inked__<tool>`, for example `mcp__plugin_inked_inked__list_vaults`.
 
-The plugin runs `inked-mcp serve` with the default folder, so it uses the credential and config you set up above. `inked-mcp` must be on your PATH.
+The plugin runs the bundled server with `node` and the default folder, so it uses the credential and config you set up above. It does not need `inked-mcp` on your PATH (you still need the CLI, or `node mcp/dist/cli.cjs login`, to sign in once). After you update the repository, run `npm run build -w mcp` again and then `/reload-plugins`.
 
-Without the plugin, add the server directly. Options go before the name; omit `--env` to use the default `~/.inked-mcp`:
+Without the plugin, add the server directly. Options go before the name; omit `--env` to use the default `~/.inked-mcp`. This form uses `node` with the absolute path to the built file, which works on every platform:
 
 ```bash
-claude mcp add --env INKED_MCP_HOME=<dir> --transport stdio inked -- inked-mcp serve
+claude mcp add --env INKED_MCP_HOME=<dir> --transport stdio inked -- node <path-to-repo>/mcp/dist/cli.cjs serve
+```
+
+On native Windows, `npm install -g ./mcp` creates an `inked-mcp.cmd` shim, and a client cannot start a `.cmd` file directly. If you want to use the global `inked-mcp` command instead of `node`, wrap it in `cmd /c`:
+
+```bash
+claude mcp add --transport stdio inked -- cmd /c inked-mcp serve
 ```
 
 ### Claude Desktop
 
-Add this to `claude_desktop_config.json` and restart Claude Desktop:
+Add this to `claude_desktop_config.json` and restart Claude Desktop. Use the absolute path to `mcp/dist/cli.cjs` in your clone (on Windows, escape backslashes or use forward slashes):
 
 ```json
 {
   "mcpServers": {
-    "inked": { "command": "inked-mcp", "args": ["serve"] }
+    "inked": { "command": "node", "args": ["<path-to-repo>/mcp/dist/cli.cjs", "serve"] }
   }
 }
 ```
+
+On Windows, if you prefer the global command, use `"command": "cmd", "args": ["/c", "inked-mcp", "serve"]`.
 
 To give Claude the same guidance the plugin gives, upload the folder `mcp/plugin/skills/inked-notes` as a skill in Claude Desktop's skill settings.
 
@@ -185,10 +199,12 @@ Add this to `.cursor/mcp.json` (project) or your global Cursor MCP settings:
 ```json
 {
   "mcpServers": {
-    "inked": { "command": "inked-mcp", "args": ["serve"] }
+    "inked": { "command": "node", "args": ["<path-to-repo>/mcp/dist/cli.cjs", "serve"] }
   }
 }
 ```
+
+On Windows, the global command form is `"command": "cmd", "args": ["/c", "inked-mcp", "serve"]`.
 
 In any client, add `"--config", "<file>"` to `args` to use a specific policy.
 
@@ -198,13 +214,15 @@ Every tool call is recorded as one JSON line in `~/.inked-mcp/audit.log`: the ti
 
 ## Troubleshooting
 
-### Cloudflare blocks the MCP {#cloudflare}
+<a id="cloudflare"></a>
+
+### Cloudflare blocks the MCP
 
 If your Inked is behind Cloudflare, Bot Fight Mode or Super Bot Fight Mode can challenge clients that are not browsers, so `login` or `serve` fails because it gets a web page instead of an API response. Either add a WAF custom rule that skips bot protection for `/api/*` on the Inked hostname, or turn the mode off for that hostname.
 
 ### "Inked credential is stale"
 
-Your password changed (or the credential was revoked). Run `inked-mcp login` again, then restart the AI client.
+The full message is "Inked credential is stale (password changed?). Run `inked-mcp login`, then restart the AI client." Your password changed (or the credential was revoked). Run `inked-mcp login` again, then restart the AI client.
 
 ### "Not permitted by the Inked MCP config"
 
