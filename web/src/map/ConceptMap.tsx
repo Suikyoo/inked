@@ -45,6 +45,8 @@ export interface ConceptMapProps {
   selected: MapSelection | null;
   /** Called with the clicked node, or null when Escape or a background click clears the selection. */
   onSelect: (s: MapSelection | null) => void;
+  /** When `n` changes, the map fits that folder or hub with the animated fit (the preview's "Zoom to folder"). */
+  fitRequest?: { sel: MapSelection; n: number } | null;
   now?: number;
 }
 
@@ -54,7 +56,7 @@ const ms = (n: number) => `${n}ms`;
 const hubKey = (vaultId: string) => `hub:${vaultId}`;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, now = Date.now() }: ConceptMapProps) {
+export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fitRequest = null, now = Date.now() }: ConceptMapProps) {
   const navigate = useNavigate();
   const uid = 'cm' + useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const frameRef = useRef<HTMLDivElement>(null);
@@ -223,6 +225,17 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
     touched.current = true;
     animateTo(fit(b, size));
   };
+
+  // A request already pending at mount is not replayed; only a later change of `n` fits.
+  const seenFit = useRef(fitRequest?.n ?? null);
+  useEffect(() => {
+    if (!fitRequest || fitRequest.n === seenFit.current) return;
+    seenFit.current = fitRequest.n;
+    const { sel } = fitRequest;
+    if (sel.kind === 'folder') fitTo(scene.folderBounds[sel.id]);
+    else if (sel.kind === 'hub') fitTo(scene.vaultBounds[sel.vaultId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitRequest?.n]);
 
   const shown = useMemo(() => scene.dots.map((dot) => ({ dot, ...toScreen(view, dot) })), [scene, view]);
   /** Every focusable node (notes, folders and hubs) in screen space, for arrow-key roving. */

@@ -148,6 +148,75 @@
   -webkit-box-orient: vertical;
 }
 
+/* Rows that newly enter the result set ease in; --i staggers the first reveal (15ms a row). */
+.res-list > li[data-new] {
+  animation: res-in var(--dur-2) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 15ms);
+}
+@keyframes res-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Preview panel: the content scrolls inside its own box and fades in on each new selection. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(70vh, 640px);
+  min-height: 0;
+  animation: preview-in var(--dur-2) var(--ease-out);
+}
+@keyframes preview-in {
+  from {
+    opacity: 0;
+  }
+}
+.preview-head {
+  padding: 0 8px;
+}
+.preview-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-strong);
+  word-break: break-word;
+}
+.preview-meta {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--muted-2);
+}
+.preview-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.preview .md {
+  max-width: none;
+  margin: 0;
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.preview-hint {
+  margin: 0;
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--muted-2);
+}
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 8px;
+}
+.preview-actions .btn {
+  text-decoration: none;
+}
+
 @media (max-width: 760px) {
   .home {
     padding: 14px 16px 24px;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { VaultIcon } from '../brand/VaultIcon';
 import { FOCUS_SEARCH_EVENT } from '../components/AppShell';
@@ -9,9 +9,13 @@ import { useVaultGraphs } from '../map/useVaultGraphs';
 import { highlightSegments } from '../search/fuzzy';
 import { searchBodies, searchTitles, type SearchEntry } from '../search/search';
 import { describeError, relativeTime } from '../lib/util';
-import { homeError, homePending } from './homeStatus';
+import { NodePreview } from './NodePreview';
+import { homeColumn, homeError, homePending } from './homeStatus';
 import { useAppState, useSearchEntries, useStore, vaultStats } from '../state/StoreContext';
 import type { AppState } from '../state/store';
+
+/** The first reveal staggers at most this many rows. */
+const STAGGER_ROWS = 8;
 
 function Highlighted({ text, indices, offset }: { text: string; indices: number[]; offset: number }) {
   return (
@@ -67,10 +71,11 @@ export function HomePage() {
   const mapEntries = useVaultGraphs(state);
   const hitIds = useMemo(() => new Set([...titleHits, ...bodyHits].map((h) => h.entry.noteId)), [titleHits, bodyHits]);
   const [hot, setHot] = useState<string | null>(null);
-  // The map rings and inks the selected node; the right column does not show it yet.
+  // The map rings and inks the selected node; the right column previews it.
   const [selected, setSelected] = useState<MapSelection | null>(null);
+  const [fitRequest, setFitRequest] = useState<{ sel: MapSelection; n: number } | null>(null);
+  const column = homeColumn(state, query, selected);
   const hotFrom = (t: EventTarget) => (t instanceof Element ? t.closest('a.res')?.getAttribute('data-note') ?? null : null);
-  const recent = useMemo(() => [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10), [entries]);
 
   const bodiesPending = state.vaultOrder.some((id) => !state.vaults[id]?.broken && !state.bodiesReady[id]);
   const treesPending = homePending(state);
@@ -90,7 +95,7 @@ export function HomePage() {
       results()[0]?.focus();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const first = titleHits[0]?.entry ?? bodyHits[0]?.entry ?? (!q ? recent[0] : undefined);
+      const first = titleHits[0]?.entry ?? bodyHits[0]?.entry;
       if (first) navigate(hrefFor(first));
     }
   };
@@ -126,6 +131,18 @@ export function HomePage() {
   };
 
   const total = titleHits.length + bodyHits.length;
+
+  // Rows that newly enter the result set ease in; the first reveal of a search staggers them.
+  const shownIds = column === 'search' ? [...titleHits, ...bodyHits].map((h) => h.entry.noteId) : [];
+  const seen = useRef<Set<string>>(new Set());
+  const firstReveal = seen.current.size === 0;
+  useEffect(() => {
+    seen.current = new Set(shownIds);
+  });
+  const rowMotion = (id: string, i: number) => ({
+    'data-new': seen.current.has(id) ? undefined : '',
+    style: firstReveal ? ({ '--i': Math.min(i, STAGGER_ROWS - 1) } as CSSProperties) : undefined,
+  });
 
   return (
     <div className="home">
@@ -170,13 +187,13 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} />
+            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} />
           </section>
         )}
 
         <aside
           className="results"
-          aria-label="Search results"
+          aria-label={column === 'search' ? 'Search results' : 'Preview'}
           id="results"
           ref={listRef}
           onKeyDown={onListKey}
@@ -199,14 +216,14 @@ export function HomePage() {
               <p>You don’t have any vaults yet. A vault holds folders and notes, each encrypted with its own key.</p>
               <p>Use the + next to “Vaults” in the sidebar to create one.</p>
             </div>
-          ) : q ? (
+          ) : column === 'search' ? (
             <>
               <h2 className="results-title" aria-live="polite">
                 {treesPending ? 'Searching…' : `${total} ${total === 1 ? 'match' : 'matches'}`}
               </h2>
               <ul className="res-list">
-                {titleHits.map(({ entry, match }) => (
-                  <li key={entry.noteId}>
+                {titleHits.map(({ entry, match }, i) => (
+                  <li key={entry.noteId} {...rowMotion(entry.noteId, i)}>
                     <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
                       <span className="res-title">
                         <Highlighted text={entry.text.slice(entry.pathStart)} indices={match.indices} offset={entry.pathStart} />
@@ -220,8 +237,8 @@ export function HomePage() {
                 <>
                   <h3 className="results-sub">In note text</h3>
                   <ul className="res-list">
-                    {bodyHits.map(({ entry, snippet }) => (
-                      <li key={entry.noteId}>
+                    {bodyHits.map(({ entry, snippet }, i) => (
+                      <li key={entry.noteId} {...rowMotion(entry.noteId, titleHits.length + i)}>
                         <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
                           <span className="res-title">{entry.text.slice(entry.pathStart)}</span>
                           <span className="res-snippet">
@@ -241,26 +258,12 @@ export function HomePage() {
               )}
               {bodiesPending && q.length >= 2 && <p className="results-note">Still decrypting note text, so some matches may be missing.</p>}
             </>
+          ) : column === 'preview' && selected ? (
+            <NodePreview selection={selected} onZoom={(sel) => setFitRequest((r) => ({ sel, n: (r?.n ?? 0) + 1 }))} />
           ) : (
-            <>
-              <h2 className="results-title">Recently edited</h2>
-              {treesPending && recent.length === 0 ? (
-                <p className="empty">Decrypting your notes…</p>
-              ) : recent.length === 0 ? (
-                <p className="empty">No notes yet. Press New note to write your first one.</p>
-              ) : (
-                <ul className="res-list">
-                  {recent.map((entry) => (
-                    <li key={entry.noteId}>
-                      <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
-                        <span className="res-title">{entry.text.slice(entry.pathStart)}</span>
-                        <ResultMeta state={state} entry={entry} />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
+            <div className="empty">
+              <p>Select a folder or note on the map.</p>
+            </div>
           )}
         </aside>
       </div>

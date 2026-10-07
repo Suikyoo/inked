@@ -445,6 +445,21 @@ describe('ConceptMap', () => {
       expect(gap()).toBeGreaterThan(before * 1.5);
     });
 
+    it('a changed fitRequest.n fits that folder or hub; the same n does not', () => {
+      const e = entry(folders());
+      const { rerender } = render({ entries: [e], fitRequest: null });
+      const at = () => translate(folderNode('f2'))!;
+      const before = at();
+      const req = { sel: { kind: 'folder', vaultId: 'v1', id: 'f2' } as MapSelection, n: 1 };
+      rerender({ entries: [e], fitRequest: req });
+      const fitted = at();
+      expect(fitted).not.toEqual(before);
+      rerender({ entries: [e], fitRequest: { ...req } });
+      expect(at()).toEqual(fitted);
+      rerender({ entries: [e], fitRequest: { sel: { kind: 'hub', vaultId: 'v1' }, n: 2 } });
+      expect(at()).not.toEqual(fitted);
+    });
+
     it('arrow keys rove between folders and notes', () => {
       const e = entry(folders());
       render({ entries: [e] });

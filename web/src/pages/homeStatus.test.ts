@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { homeError, homePending } from './homeStatus';
+import { homeColumn, homeError, homePending } from './homeStatus';
 
 type S = Parameters<typeof homePending>[0];
 const state = (vaultsStatus: S['vaultsStatus'], trees: S['trees'] = {}, vaultOrder: string[] = Object.keys(trees)): S => ({ vaultsStatus, trees, vaultOrder });
@@ -32,5 +32,30 @@ describe('homeError', () => {
   it('is false when ready', () => {
     expect(homeError(state('ready'))).toBe(false);
     expect(homeError(state('ready', { a: t('ready') }))).toBe(false);
+  });
+});
+
+describe('homeColumn', () => {
+  const note = { id: 'n1', vaultId: 'v1', folderId: null, title: 'A', size: 0, createdAt: '', updatedAt: '' };
+  const s = {
+    vaults: { v1: { id: 'v1' } },
+    trees: { v1: { status: 'ready', folders: { f1: { id: 'f1' } }, notes: { n1: note } } },
+  } as unknown as Parameters<typeof homeColumn>[0];
+  const sel = { kind: 'note', vaultId: 'v1', id: 'n1' } as const;
+  it('a non-empty query is search, even with a selection', () => {
+    expect(homeColumn(s, 'abc', sel)).toBe('search');
+  });
+  it('a selection with no query is preview', () => {
+    expect(homeColumn(s, '', sel)).toBe('preview');
+    expect(homeColumn(s, '', { kind: 'folder', vaultId: 'v1', id: 'f1' })).toBe('preview');
+    expect(homeColumn(s, '', { kind: 'hub', vaultId: 'v1' })).toBe('preview');
+  });
+  it('neither is empty', () => {
+    expect(homeColumn(s, '', null)).toBe('empty');
+  });
+  it('a selection that no longer exists is empty', () => {
+    expect(homeColumn(s, '', { kind: 'note', vaultId: 'v1', id: 'gone' })).toBe('empty');
+    expect(homeColumn({ ...s, trees: {} }, '', sel)).toBe('empty');
+    expect(homeColumn({ ...s, vaults: {} }, '', { kind: 'hub', vaultId: 'v1' })).toBe('empty');
   });
 });
