@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { folder, note, tree } from './fixtures';
 import { buildVaultGraph } from './graph';
-import { MIN_GAP, layoutVault, layoutWorld, type VaultLayout } from './layout';
+import { HUB_GAP, MIN_GAP, NOTE_SPREAD, layoutVault, layoutWorld, type VaultLayout } from './layout';
 import type { FolderView, NoteView } from '../state/store';
 
 const graphOf = (folders: FolderView[], notes: NoteView[]) => buildVaultGraph('v1', tree(folders, notes), {}, true);
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+/** Signed difference a - b, wrapped into (-pi, pi]. */
+const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+const angleOf = (p: { x: number; y: number }) => Math.atan2(p.y, p.x);
 
 describe('layoutVault', () => {
   it('is deterministic, whatever order the tree lists things in', () => {
@@ -24,6 +27,38 @@ describe('layoutVault', () => {
     const after = layoutVault(graphOf(fs, [...ns, note('a2', 'fa'), note('a3', 'fa')]));
     for (const id of ['fb', 'fb2']) expect(after.folders[id]).toEqual(before.folders[id]);
     for (const id of ['b1', 'b2', 'r1']) expect(after.notes[id]).toEqual(before.notes[id]);
+  });
+
+  it('the first root note in a folders-only vault moves no folder or note dot', () => {
+    const fs = [folder('fa', null, 'A'), folder('fb', null, 'B'), folder('fb2', 'fb', 'B2')];
+    const ns = [note('a1', 'fa'), note('b1', 'fb'), note('b2', 'fb2')];
+    const before = layoutVault(graphOf(fs, ns));
+    const after = layoutVault(graphOf(fs, [...ns, note('r1', null)]));
+    expect(after.folders).toEqual(before.folders);
+    for (const id of ['a1', 'b1', 'b2']) expect(after.notes[id]).toEqual(before.notes[id]);
+  });
+
+  it("clusters a folder's notes around its centre angle when the slice is wide", () => {
+    const ns = Array.from({ length: 5 }, (_, i) => note(`n${i}`, 'fa'));
+    const l = layoutVault(graphOf([folder('fa', null, 'A')], ns));
+    const centre = angleOf(l.folders.fa);
+    for (const n of ns) {
+      const p = l.notes[n.id];
+      const step = 2 * Math.asin(MIN_GAP / (2 * Math.hypot(p.x, p.y)));
+      expect(Math.abs(angleDiff(angleOf(p), centre))).toBeLessThanOrEqual((NOTE_SPREAD * step * (ns.length - 1)) / 2 + 1e-9);
+    }
+  });
+
+  it('leaves the HUB_GAP at the top of the circle free of dots', () => {
+    const fs = [folder('f1', null), folder('f2', null), folder('f3', 'f1')];
+    const ns = [
+      ...Array.from({ length: 40 }, (_, i) => note(`a${i}`, 'f1')),
+      ...Array.from({ length: 40 }, (_, i) => note(`r${i}`, null)),
+      ...Array.from({ length: 40 }, (_, i) => note(`c${i}`, 'f3')),
+    ];
+    const l = layoutVault(graphOf(fs, ns));
+    for (const p of [...Object.values(l.folders), ...Object.values(l.notes)])
+      expect(Math.abs(angleDiff(angleOf(p), -Math.PI / 2))).toBeGreaterThanOrEqual(HUB_GAP / 2 - 1e-9);
   });
 
   it('places root notes around the hub with a null parent', () => {

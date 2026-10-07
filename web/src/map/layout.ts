@@ -28,8 +28,15 @@ export const NSTEP = 14;
 export const MIN_GAP = 12;
 /** Room past the farthest dot for its label. */
 export const LABEL_MARGIN = 28;
+/** Most a row's angular spacing may be, in multiples of the MIN_GAP step, so notes cluster at their folder. */
+export const NOTE_SPREAD = 1.6;
+/** Angle left free at the top of the circle, where the hub name sits. */
+export const HUB_GAP = Math.PI / 3;
 const MIN_RADIUS = 60;
-const START = -Math.PI / 2;
+const START = -Math.PI / 2 + HUB_GAP / 2;
+
+/** Angle between neighbours a chord of MIN_GAP apart at radius `r`. */
+const minStep = (r: number) => 2 * Math.asin(Math.min(1, MIN_GAP / (2 * r)));
 
 const polar = (r: number, a: number): Pt => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
 const tie = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -41,8 +48,7 @@ export function noteRows(count: number, span: number, r0: number): { r: number; 
   const rows: { r: number; n: number }[] = [];
   for (let left = count, k = 0; left > 0; k++) {
     const r = r0 + k * NSTEP;
-    const step = 2 * Math.asin(Math.min(1, MIN_GAP / (2 * r)));
-    const n = Math.min(left, Math.max(1, Math.floor(span / step + 1e-9)));
+    const n = Math.min(left, Math.max(1, Math.floor(span / minStep(r) + 1e-9)));
     rows.push({ r, n });
     left -= n;
   }
@@ -74,9 +80,12 @@ export function layoutVault(graph: VaultGraph): VaultLayout {
   const placeNotes = (list: GraphNote[], parent: string | null, a0: number, span: number, r0: number): number => {
     let i = 0;
     let outer = 0;
+    const centre = a0 + span / 2;
     for (const row of noteRows(list.length, span, r0)) {
+      // Clustered around the slice centre; never wider than the slice.
+      const spacing = Math.min(span / row.n, NOTE_SPREAD * minStep(row.r));
       for (let j = 0; j < row.n; j++, i++) {
-        out.notes[list[i].id] = polar(row.r, a0 + ((j + 0.5) * span) / row.n);
+        out.notes[list[i].id] = polar(row.r, centre + (j - (row.n - 1) / 2) * spacing);
         out.parent[list[i].id] = parent;
       }
       outer = row.r;
@@ -103,15 +112,15 @@ export function layoutVault(graph: VaultGraph): VaultLayout {
 
   const top = kids.get(null) ?? [];
   const rootNotes = notesIn.get(null) ?? [];
-  const total = top.reduce((s, f) => s + weight(f), 0) + (rootNotes.length ? 1 : 0);
+  // The root slice (weight 1) is always reserved, so the first root note moves nothing.
+  const total = top.reduce((s, f) => s + weight(f), 0) + 1;
+  const circle = 2 * Math.PI - HUB_GAP;
   let a = START;
-  if (rootNotes.length) {
-    const s = (2 * Math.PI) / total;
-    placeNotes(rootNotes, null, a, s, R0);
-    a += s;
-  }
+  const rootSpan = circle / total;
+  placeNotes(rootNotes, null, a, rootSpan, R0);
+  a += rootSpan;
   for (const f of top) {
-    const s = (2 * Math.PI * weight(f)) / total;
+    const s = (circle * weight(f)) / total;
     placeFolder(f, a, s, R0);
     a += s;
   }
