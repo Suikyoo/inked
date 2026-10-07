@@ -35,8 +35,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   transition:
-    border-color 120ms,
-    box-shadow 120ms;
+    border-color var(--dur-2),
+    box-shadow var(--dur-2);
 }
 .search:focus-within {
   border-color: var(--ink-light);

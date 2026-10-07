@@ -151,9 +151,9 @@ kbd {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color 120ms,
-    border-color 120ms,
-    color 120ms;
+    background-color var(--dur-2),
+    border-color var(--dur-2),
+    color var(--dur-2);
 }
 .btn:hover:not(:disabled) {
   background: var(--panel-3);
@@ -268,7 +268,7 @@ kbd {
   background: var(--panel);
   border-radius: var(--radius-md);
   box-shadow: 0 0 0 1px var(--border);
-  transition: box-shadow 120ms;
+  transition: box-shadow var(--dur-2);
 }
 .input-wrap.has-action {
   padding-right: 4px;
@@ -421,11 +421,20 @@ select.input-sm {
   border-right-color: transparent;
   border-radius: 50%;
   opacity: 0.8;
-  animation: spin 700ms linear infinite;
+  animation: spin 1.2s linear infinite;
 }
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
   }
 }
 .splash {
@@ -519,6 +528,12 @@ select.input-sm {
   *::before,
   *::after {
     animation-duration: 1ms !important;
-    transition-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-property: opacity, color, background-color, border-color !important;
+    transition-duration: var(--dur-2) !important;
+  }
+  /* The one allowed loop: a gentle opacity pulse instead of rotation. */
+  .spinner {
+    animation: pulse 1.6s ease-in-out infinite !important;
   }
 }

@@ -344,13 +344,13 @@
     transform: translateX(-102%);
     visibility: hidden;
     transition:
-      transform 200ms var(--ease-out),
-      visibility 0s linear 200ms;
+      transform var(--dur-3) var(--ease-out),
+      visibility 0s linear var(--dur-3);
   }
   .drawer-open .sidebar {
     transform: none;
     visibility: visible;
-    transition: transform 200ms var(--ease-out);
+    transition: transform var(--dur-3) var(--ease-out);
     box-shadow: 16px 0 40px -20px rgba(0, 0, 0, 0.8);
   }
   .drawer-open .scrim {
