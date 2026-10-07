@@ -176,6 +176,24 @@
 .cmap-dot.tier-dry {
   fill: var(--ink-dry);
 }
+/* The node's tier ink, for the density rings and the hollow orphan. */
+.cmap-node.tier-wet { color: var(--ink-wet); }
+.cmap-node.tier-fresh { color: var(--ink-fresh); }
+.cmap-node.tier-drying { color: var(--ink-drying); }
+.cmap-node.tier-dry { color: var(--ink-dry); }
+/* An orphan note is drawn hollow. */
+.cmap-node.is-orphan .cmap-dot {
+  fill: var(--canvas);
+  stroke: currentColor;
+  stroke-width: 1.4;
+  paint-order: normal;
+}
+/* One ring for two links, two for three or more. */
+.cmap-dens {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+}
 .cmap-glow.tier-wet {
   opacity: 0.38;
 }

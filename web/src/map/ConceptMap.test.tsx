@@ -15,8 +15,8 @@ import type { MapEntry } from './useVaultGraphs';
 
 const NOW = Date.parse('2026-10-07T12:00:00.000Z');
 
-function entry(t: TreeView, id = 'v1', linksReady = true): MapEntry {
-  const graph = buildVaultGraph(id, t, {}, linksReady);
+function entry(t: TreeView, id = 'v1', linksReady = true, bodies: Record<string, string> = {}): MapEntry {
+  const graph = buildVaultGraph(id, t, bodies, linksReady);
   return { vaultId: id, vault: vault(id), status: t.status, level: 0, graph, layout: layoutVault(graph) };
 }
 const base = () =>
@@ -210,7 +210,8 @@ describe('ConceptMap', () => {
     fire(node('n1'), new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
     click(svg());
     expect(node('n1').querySelector('.cmap-label')).toBeNull();
-    expect(node('n1').querySelector('.cmap-dot')?.getAttribute('r')).toBe('4');
+    // n1 has no links, so it is a hollow orphan at its resting radius (3.4).
+    expect(node('n1').querySelector('.cmap-dot')?.getAttribute('r')).toBe('3.4');
     expect(nodes().filter((n) => n.getAttribute('tabindex') === '0').map((n) => n.dataset.note)).toEqual(['n3']);
   });
 
@@ -590,5 +591,34 @@ describe('ConceptMap', () => {
       act(() => void vi.advanceTimersByTime(1000));
       expect(host!.querySelector('.cmap-pending')).toBeNull();
     });
+  });
+});
+
+describe('link density cues', () => {
+  const linked = () => {
+    const t = tree([], ['a', 'b', 'c', 'd', 'e'].map((id) => note(id, null, id.toUpperCase())));
+    return [entry(t, 'v1', true, { a: '[[B]] [[C]]', d: '[[A]]' })];
+  };
+  it('draws two rings and counts the links for a hub note', () => {
+    render({ entries: linked() });
+    expect(node('a').querySelectorAll('.cmap-dens')).toHaveLength(2);
+    expect(node('a').getAttribute('aria-label')).toMatch(/, 3 links$/);
+    expect(node('a').classList.contains('is-orphan')).toBe(false);
+  });
+  it('leaves a single-link note ringless', () => {
+    render({ entries: linked() });
+    expect(node('b').querySelector('.cmap-dens')).toBeNull();
+    expect(node('b').getAttribute('aria-label')).toMatch(/, 1 link$/);
+  });
+  it('marks an unlinked note as a hollow orphan with no count', () => {
+    render({ entries: linked() });
+    expect(node('e').classList.contains('is-orphan')).toBe(true);
+    expect(node('e').querySelector('.cmap-dens')).toBeNull();
+    expect(node('e').getAttribute('aria-label')).not.toMatch(/link/);
+  });
+  it('moves the selection ring outward with density', () => {
+    render({ entries: linked() });
+    click(node('a'));
+    expect(node('a').querySelector('.cmap-sel')!.getAttribute('r')).toBe('11.5');
   });
 });

@@ -5,7 +5,7 @@ import { FitIcon, MinusIcon, PlusIcon } from '../components/Icons';
 import { relativeTime } from '../lib/util';
 import { prefersReducedMotion, usePresence } from '../motion';
 import { inkTier } from './recency';
-import { arrowDir, buildScene, chainPath, curvePath, edgeWidth, HIERARCHY_BEND, linkPath, nearestInDirection } from './scene';
+import { arrowDir, buildScene, chainPath, curvePath, densityClass, edgeWidth, HIERARCHY_BEND, linkPath, nearestInDirection, selRingRadius } from './scene';
 import { fit, panBy, toScreen, useViewport, zoomAt, type Bounds, type Size } from './useViewport';
 import type { MapEntry } from './useVaultGraphs';
 
@@ -511,7 +511,8 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
             const tier = inkTier(dot.updatedAt, now);
             const active = dot.id === hover || dot.id === focusId;
             const big = dot.id === selNote || dot.id === hot || active;
-            const r = big ? 5 : 4;
+            const dens = densityClass(dot.degree);
+            const r = dens === 'hollow' ? 3.4 : big ? 5 : 4;
             const when = relativeTime(dot.updatedAt, now);
             const showLabel = view.scale >= LABEL_SCALE || inkedNotes.has(dot.id) || active;
             const seen = firstSeen.current.get(dot.id);
@@ -519,12 +520,12 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
               <g
                 key={dot.id}
                 ref={nodeRef(dot.id)}
-                className={`cmap-node${searching && !inkedNotes.has(dot.id) ? ' is-faded' : ''}`}
+                className={`cmap-node tier-${tier}${dens === 'hollow' ? ' is-orphan' : ''}${searching && !inkedNotes.has(dot.id) ? ' is-faded' : ''}`}
                 data-note={dot.id}
                 transform={`translate(${f1(x)} ${f1(y)})`}
                 style={writing ? { animationDelay: ms(dot.folderIds.length * WRITE_STEP_MS + NODE_LAG_MS) } : undefined}
                 role="button"
-                aria-label={`${dot.title}, ${dot.folderPath || 'vault root'}, edited ${when}`}
+                aria-label={`${dot.title}, ${dot.folderPath || 'vault root'}, edited ${when}${dot.degree > 0 ? `, ${plural(dot.degree, 'link')}` : ''}`}
                 {...nodeFocusProps(dot.id)}
                 onClick={(e) => onDotClick(e, dot.vaultId, dot.id)}
                 onKeyDown={(e) => {
@@ -541,8 +542,10 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
                 {/* Keyed by the edit time, so each new edit mounts a fresh pulse. */}
                 {seen !== undefined && seen !== dot.updatedAt && <circle key={dot.updatedAt} className="cmap-pulse" r={r + 4} filter={`url(#${uid}-glow)`} />}
                 {(tier === 'wet' || tier === 'fresh') && <circle className={`cmap-glow tier-${tier}`} r={r + 3} filter={`url(#${uid}-glow)`} />}
+                {(dens === 'r1' || dens === 'r2') && <circle className="cmap-dens" r={6.5} />}
+                {dens === 'r2' && <circle className="cmap-dens" r={9.25} />}
                 <circle className={`cmap-dot tier-${tier}`} r={r} />
-                {dot.id === selNote && <circle className="cmap-sel" r={r + 3} />}
+                {dot.id === selNote && <circle className="cmap-sel" r={selRingRadius(dot.degree)} />}
                 {showLabel && (
                   <text className="cmap-label" x={r + 5} y={3.5}>
                     {active ? `${dot.title} · ${when}` : dot.title}

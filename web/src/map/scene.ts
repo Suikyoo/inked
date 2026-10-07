@@ -17,6 +17,8 @@ export interface SceneDot {
   /** Ids of the folders above this note, top-down. */
   folderIds: string[];
   updatedAt: string;
+  /** [[Links]] in plus out, each pair of notes counted once. 0 while links are still decrypting. */
+  degree: number;
 }
 export interface SceneFolder {
   id: string;
@@ -45,6 +47,11 @@ export interface Seg {
   x2: number;
   y2: number;
 }
+/** A [[link]] between two notes, a and b being their ids. */
+export interface LinkSeg extends Seg {
+  a: string;
+  b: string;
+}
 /** A hierarchy edge from a parent (hub or folder) to a child. */
 export interface PencilSeg extends Seg {
   /** Depth of the parent: 0 for the hub, 1 for a top-level folder, and so on. */
@@ -57,7 +64,7 @@ export interface Scene {
   folders: SceneFolder[];
   hubs: SceneHub[];
   pencil: PencilSeg[];
-  links: Seg[];
+  links: LinkSeg[];
   /** Some vault's note text is still decrypting, so its links are not drawn yet. */
   linksPending: boolean;
   bounds: Bounds;
@@ -210,7 +217,7 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
         const key = l.from < l.to ? `${l.from}|${l.to}` : `${l.to}|${l.from}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        scene.links.push(seg(key, pos(l.from), pos(l.to)));
+        scene.links.push({ ...seg(key, pos(l.from), pos(l.to)), a: l.from, b: l.to });
       }
     } else {
       scene.linksPending = true;
@@ -236,13 +243,25 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
         folderIds: chainIds,
         folderPath: chainIds.map((id) => folderById.get(id)!.name).join(' / '),
         updatedAt: n.updatedAt,
+        degree: 0,
       });
       ink(n.id, chainIds, w);
       cover(chainIds, w);
     }
   }
+  const degree = new Map<string, number>();
+  for (const l of scene.links) {
+    degree.set(l.a, (degree.get(l.a) ?? 0) + 1);
+    degree.set(l.b, (degree.get(l.b) ?? 0) + 1);
+  }
+  for (const d of scene.dots) d.degree = degree.get(d.id) ?? 0;
   return scene;
 }
+
+/** Radius of the selection ring, pushed out past the density rings. */
+export const selRingRadius = (degree: number) => (degree >= 3 ? 11.5 : degree === 2 ? 9 : 7);
+/** 'hollow' for an orphan, 'r1' for two links, 'r2' for three or more, '' for one. */
+export const densityClass = (degree: number): 'hollow' | '' | 'r1' | 'r2' => (degree === 0 ? 'hollow' : degree === 1 ? '' : degree === 2 ? 'r1' : 'r2');
 
 export type Dir = 'left' | 'right' | 'up' | 'down';
 const KEYS: Record<string, Dir> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };

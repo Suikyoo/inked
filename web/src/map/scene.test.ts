@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { folder, note, tree } from './fixtures';
 import { buildVaultGraph } from './graph';
 import { layoutVault, layoutWorld } from './layout';
-import { arrowDir, buildScene, chainPath, curvePath, displayTitle, edgeWidth, linkPath, nearestInDirection, type SceneInput } from './scene';
+import { arrowDir, buildScene, chainPath, curvePath, densityClass, displayTitle, edgeWidth, linkPath, nearestInDirection, selRingRadius, type SceneInput } from './scene';
 
 function input(vaultId: string, bodies: Record<string, string> = {}, ready = true): SceneInput {
   const t = tree(
@@ -158,5 +158,37 @@ describe('arrow-key navigation', () => {
     expect(arrowDir('ArrowLeft')).toBe('left');
     expect(arrowDir('ArrowDown')).toBe('down');
     expect(arrowDir('Enter')).toBeNull();
+  });
+});
+
+describe('link density', () => {
+  function densityScene() {
+    const t = tree([], ['a', 'b', 'c', 'd', 'e'].map((id) => note(id, null, id.toUpperCase())));
+    const graph = buildVaultGraph('v1', t, { a: '[[B]] [[C]]', d: '[[A]]' }, true);
+    return buildScene([{ vaultId: 'v1', graph, layout: layoutVault(graph) }]);
+  }
+  it('counts links in plus out per dot', () => {
+    const s = densityScene();
+    const deg = (id: string) => s.dots.find((d) => d.id === id)!.degree;
+    expect([deg('a'), deg('b'), deg('c'), deg('d'), deg('e')]).toEqual([3, 1, 1, 1, 0]);
+  });
+  it('carries the two note ids on each link', () => {
+    const s = densityScene();
+    expect(s.links.map((l) => [l.a, l.b].sort().join('|')).sort()).toEqual(['a|b', 'a|c', 'a|d']);
+  });
+  it('counts a two-way link once, as it is drawn once', () => {
+    const t = tree([], [note('a', null, 'A'), note('b', null, 'B')]);
+    const graph = buildVaultGraph('v1', t, { a: '[[B]]', b: '[[A]]' }, true);
+    const s = buildScene([{ vaultId: 'v1', graph, layout: layoutVault(graph) }]);
+    expect(s.dots.map((d) => d.degree)).toEqual([1, 1]);
+  });
+  it('has degree 0 while links are pending', () => {
+    const t = tree([], [note('a', null, 'A'), note('b', null, 'B')]);
+    const graph = buildVaultGraph('v1', t, {}, false);
+    expect(buildScene([{ vaultId: 'v1', graph, layout: layoutVault(graph) }]).dots.map((d) => d.degree)).toEqual([0, 0]);
+  });
+  it('sizes the selection ring and picks the density class by degree', () => {
+    expect([0, 1, 2, 3, 9].map(selRingRadius)).toEqual([7, 7, 9, 11.5, 11.5]);
+    expect([0, 1, 2, 3, 9].map(densityClass)).toEqual(['hollow', '', 'r1', 'r2', 'r2']);
   });
 });
