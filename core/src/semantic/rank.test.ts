@@ -55,10 +55,53 @@ describe('mergeRank', () => {
     expect(r[0].noteId).toBe('exact');
   });
   it('caps meaning-only results and the total', () => {
-    const sem = Array.from({ length: 20 }, (_, i) => ({ noteId: `s${i}`, similarity: 0.8, chunk: 0 }));
+    const sem = Array.from({ length: 20 }, (_, i) => ({ noteId: `s${i}`, similarity: 0.9, chunk: 0 }));
     const fz = Array.from({ length: 40 }, (_, i) => ({ noteId: `f${i}`, kind: 'title' as const, score: 40 - i }));
     const r = mergeRank(fz, sem, new Set());
     expect(r.filter((x) => x.fuzzy === 0)).toHaveLength(MAX_MEANING_ONLY);
     expect(r).toHaveLength(MAX_RESULTS);
+  });
+  it('keeps negative and zero title scores in order, all within [0.5, 1]', () => {
+    const r = mergeRank(
+      [
+        { noteId: 'neg', kind: 'title', score: -30 },
+        { noteId: 'zero', kind: 'title', score: 0 },
+        { noteId: 'top', kind: 'title', score: 5 },
+      ],
+      [],
+      new Set(),
+    );
+    expect(r.map((x) => x.noteId)).toEqual(['top', 'zero', 'neg']);
+    for (const x of r) {
+      expect(x.fuzzy).toBeGreaterThanOrEqual(0.5);
+      expect(x.fuzzy).toBeLessThanOrEqual(1);
+    }
+    const allNonPositive = mergeRank(
+      [
+        { noteId: 'a', kind: 'title', score: -30 },
+        { noteId: 'b', kind: 'title', score: -10 },
+        { noteId: 'c', kind: 'title', score: 0 },
+      ],
+      [],
+      new Set(),
+    );
+    expect(allNonPositive.map((x) => x.noteId)).toEqual(['c', 'b', 'a']);
+    expect(allNonPositive.map((x) => x.fuzzy)).toEqual([1, expect.closeTo(0.8333, 3), 0.5]);
+  });
+  it('does not count the lowest-scoring title hit as meaning-only', () => {
+    const sem = Array.from({ length: 10 }, (_, i) => ({ noteId: `s${i}`, similarity: 0.9, chunk: 0 }));
+    const r = mergeRank(
+      [
+        { noteId: 'top', kind: 'title', score: 10 },
+        { noteId: 'low', kind: 'title', score: 0 },
+      ],
+      sem,
+      new Set(),
+    );
+    expect(r.find((x) => x.noteId === 'low')).toBeDefined();
+    expect(r.filter((x) => x.noteId.startsWith('s'))).toHaveLength(MAX_MEANING_ONLY);
+  });
+  it('drops semantic hits at exactly the floor', () => {
+    expect(mergeRank([], [{ noteId: 'x', similarity: 0.55, chunk: 0 }], new Set())).toEqual([]);
   });
 });

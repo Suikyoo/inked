@@ -3,13 +3,17 @@ export const SEM_CEIL = 0.85;
 export const AGREE = 0.15;
 export const MAX_RESULTS = 30;
 export const MAX_MEANING_ONLY = 8;
-/** A substring hit in the note text: present, but weaker than a strong title match. */
+/** A substring hit in the note text: present, but weaker than a strong title match. Also the floor of the title scale. */
 export const TEXT_HIT_SCORE = 0.5;
 
 export type Why = 'title' | 'text' | 'meaning';
 export interface FuzzyInput {
   noteId: string;
   kind: 'title' | 'text';
+  /**
+   * Raw `FuzzyMatch.score` for title hits; may be zero or negative. Title hits are min-max
+   * normalised within the query into [TEXT_HIT_SCORE, 1] (all equal → 1). Text hits pass 0, which is ignored.
+   */
   score: number;
 }
 export interface SemanticInput {
@@ -34,15 +38,23 @@ export function mergeRank(
   semantic: readonly SemanticInput[],
   exactTitles: ReadonlySet<string>,
 ): Ranked[] {
-  const maxTitle = Math.max(0, ...fuzzy.filter((h) => h.kind === 'title').map((h) => h.score));
+  const titleScores = fuzzy.filter((h) => h.kind === 'title').map((h) => h.score);
+  const lo = titleScores.length ? Math.min(...titleScores) : 0;
+  const hi = titleScores.length ? Math.max(...titleScores) : 0;
+  const fuzzyIds = new Set(fuzzy.map((h) => h.noteId));
   const rows = new Map<string, { fuzzy: number; kind: 'title' | 'text' | null; semantic: number; chunk: number | null }>();
   for (const h of fuzzy) {
-    const f = h.kind === 'title' ? (maxTitle > 0 ? h.score / maxTitle : 1) : TEXT_HIT_SCORE;
+    const f =
+      h.kind === 'title'
+        ? hi === lo
+          ? 1
+          : TEXT_HIT_SCORE + ((1 - TEXT_HIT_SCORE) * (h.score - lo)) / (hi - lo)
+        : TEXT_HIT_SCORE;
     const prev = rows.get(h.noteId);
     if (!prev || f > prev.fuzzy) rows.set(h.noteId, { fuzzy: f, kind: h.kind, semantic: prev?.semantic ?? 0, chunk: prev?.chunk ?? null });
   }
   for (const h of semantic) {
-    if (h.similarity < SEM_FLOOR) continue;
+    if (h.similarity <= SEM_FLOOR) continue;
     const s = semanticScore(h.similarity);
     const prev = rows.get(h.noteId) ?? { fuzzy: 0, kind: null, semantic: 0, chunk: null };
     if (s >= prev.semantic) rows.set(h.noteId, { ...prev, semantic: s, chunk: h.chunk });
@@ -64,7 +76,7 @@ export function mergeRank(
   const out: Ranked[] = [];
   let meaningOnly = 0;
   for (const r of ranked) {
-    if (r.fuzzy === 0) {
+    if (!fuzzyIds.has(r.noteId)) {
       if (meaningOnly >= MAX_MEANING_ONLY) continue;
       meaningOnly++;
     }
