@@ -34,11 +34,7 @@ Set `CLOUDFLARED_NET_CIDR` in `.env` to the subnet of `cloudflared-net`. nginx t
 docker network inspect cloudflared-net --format '{{(index .IPAM.Config 0).Subnet}}'
 ```
 
-The encrypted database lives in `INKED_DATA_DIR` (default `./data`, mounted at `/data` in the container). Set it in `.env` to keep the data elsewhere. On Linux, make that directory writable by the container user (uid 1000):
-
-```bash
-mkdir -p "${INKED_DATA_DIR:-./data}" && sudo chown 1000:1000 "${INKED_DATA_DIR:-./data}"
-```
+The encrypted database lives in the named volume `inked_inked-data` (mounted at `/data` in the container). Docker creates it on the first `up` with the right owner (the container runs as uid 1000, not root), so there is nothing to prepare. `docker compose down` keeps it; only `docker compose down -v` or `docker volume rm` deletes it.
 
 ## 3. Cloudflare dashboard
 
@@ -84,7 +80,38 @@ Copy the first-run setup token, open the hostname, and create the admin account.
 
 ## 6. Backups
 
-`INKED_DATA_DIR` (default `./data`) holds only ciphertext and hashes. The SQLite database runs in WAL mode, so for a consistent copy either stop the container first (`docker compose stop inked`) or use `sqlite3 <db> ".backup <file>"`.
+The volume `inked_inked-data` holds `inked.db` (only ciphertext and hashes) and `server-secret`. The SQLite database runs in WAL mode, so stop Inked while copying for a consistent snapshot.
+
+Back up to a tarball in the current directory:
+
+```bash
+docker compose stop inked
+docker run --rm -v inked_inked-data:/data:ro -v "$PWD":/backup alpine tar czf /backup/inked-data-$(date +%F).tgz -C /data .
+docker compose start inked
+```
+
+Restore a tarball (this replaces the volume's contents):
+
+```bash
+docker compose stop inked
+docker run --rm -v inked_inked-data:/data -v "$PWD":/backup alpine sh -c 'rm -rf /data/* && tar xzf /backup/inked-data-2026-10-07.tgz -C /data && chown -R 1000:1000 /data'
+docker compose start inked
+```
+
+To move Inked to another host, copy the tarball there, run `docker compose up -d --build` once (it creates the volume), then restore as above. The tarball is ciphertext, but `server-secret` signs device cookies, so keep backups private.
+
+### Migrating from the old `./data` folder
+
+Earlier versions bind-mounted `./data` and ran under the folder's project name (for example `notes`). To move that data into the named volume, run from the repo folder:
+
+```bash
+docker compose -p notes down                      # old stack; ./data is untouched
+docker compose create                             # new "inked" stack + empty volume, not started
+docker run --rm -v inked_inked-data:/data -v "$PWD/data":/old:ro alpine sh -c 'cp -a /old/. /data/ && chown -R 1000:1000 /data'
+docker compose up -d
+```
+
+On Windows PowerShell use `${PWD}/data` instead of `$PWD/data`. Check the app (sign in, open a note) before deleting `./data`.
 
 ## 7. Accepted risk
 
@@ -108,11 +135,12 @@ Inked does not need them, and its CSP (`script-src 'self'` and `style-src 'self'
 ## Local test
 
 ```bash
-d=$(mktemp -d); sudo chown 1000:1000 "$d"; INKED_DATA_DIR=$d docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
+docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
 bash deploy/smoke-test.sh
+docker compose -p inked-test -f compose.yaml -f compose.local.yaml down -v
 ```
 
-The `chown` is needed on Linux only. Lockout counters live in the server's memory, so recreate the stack (`docker compose -p inked-test -f compose.yaml -f compose.local.yaml down`, then `up` again) before each smoke run; otherwise the per-account cap builds up in the long-running container. A fresh data directory is optional.
+The test project gets its own volume (`inked-test_inked-data`), never the production one, and `down -v` deletes it. Lockout counters live in the server's memory, so run `down -v` and `up` again before each smoke run; otherwise the per-account cap builds up in the long-running container.
 
 The test stack uses the same fixed `inked-internal` subnet (172.31.250.0/28) as production, so it cannot run alongside the production stack on the same host. Stop one before starting the other.
 

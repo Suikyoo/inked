@@ -1,13 +1,15 @@
 # Inked behind nginx on the external cloudflared-net network. No host ports are published.
 # Deploy guide: docs/deploy.md.
-# Local testing ONLY (never on the production host): d=$(mktemp -d); sudo chown 1000:1000 "$d"; INKED_DATA_DIR=$d docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
+# Local testing ONLY (never on the production host): docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
+# Project name pins the data volume to "inked_inked-data"; the test project gets its own "inked-test_inked-data".
+name: inked
 services:
   inked:
     build: .
     restart: unless-stopped
     volumes:
-      # The container runs as uid 1000 ("node"); on Linux: mkdir -p data && sudo chown 1000:1000 data
-      - ${INKED_DATA_DIR:-./data}:/data
+      # Named volume: Docker seeds it with the image's /data ownership (uid 1000, "node"), so no chown is needed.
+      - inked-data:/data
     environment:
       COOKIE_SECURE: "true"
       # Only nginx on the private network may set the client IP (it forwards Cloudflare's CF-Connecting-IP).
@@ -38,6 +40,9 @@ services:
       cloudflared-net:
         aliases:
           - inked-nginx
+
+volumes:
+  inked-data: {}
 
 networks:
   inked-internal:
