@@ -10,3 +10,12 @@ describe('prefs.spellcheck', () => {
     expect(prefs.spellcheck()).toBe(true);
   });
 });
+
+describe('prefs.semantic', () => {
+  beforeEach(() => localStorage.clear());
+  it('semantic search is off by default and persists', () => {
+    expect(prefs.semantic()).toBe(false);
+    prefs.setSemantic(true);
+    expect(prefs.semantic()).toBe(true);
+  });
+});

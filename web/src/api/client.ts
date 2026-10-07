@@ -175,6 +175,10 @@ export const api = {
     data<{ vault: VaultDTO }>('POST', '/api/vaults', body),
   updateVault: (id: string, encMeta: string) => data<{ vault: VaultDTO }>('PATCH', `/api/vaults/${enc(id)}`, { encMeta }),
   deleteVault: (id: string) => data<unknown>('DELETE', `/api/vaults/${enc(id)}`),
+  listVectors: (vaultId: string) =>
+    data<{ vectors: { noteId: string; model: string; encVec: string; sourceUpdatedAt: string }[] }>('GET', `/api/vaults/${enc(vaultId)}/vectors`),
+  putVector: (noteId: string, body: { model: string; encVec: string; sourceUpdatedAt: string }) =>
+    data<{ ok: true }>('PUT', `/api/notes/${enc(noteId)}/vector`, body),
   tree: (vaultId: string) =>
     data<{ folders: FolderDTO[]; notes: NoteHeadDTO[] }>('GET', `/api/vaults/${enc(vaultId)}/tree`),
   bodies: (vaultId: string) =>
