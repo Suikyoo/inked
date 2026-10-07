@@ -159,6 +159,56 @@ The current blanket rule (everything at 1ms) is replaced. Under `prefers-reduced
 - **Save status:** the text crossfades. "Saved" fades in, then dims.
 - **Hover and press:** colour changes over `--dur-1`. Buttons scale to 0.98 while pressed.
 
+## Section 4: Folder Index notes and the Home preview panel
+
+The owner's point: folder nodes have nothing to describe them. So every folder gets an `Index` note, and Home's right column becomes a preview of the selected node.
+
+### Index notes
+
+- **What an Index is:** an ordinary encrypted note titled exactly `Index` inside a folder; at the vault root, it is the vault's description.
+  - It is identified client-side from the decrypted title (case-sensitive `Index`).
+  - If a folder holds several, the oldest by `createdAt` is the Index.
+  - No server, API or crypto change.
+- **Created with every new folder:**
+  - `createFolder` is followed by `createNote(vault, folderId, 'Index', body)`, with the body `# {folder name}
+
+Describe what lives in this folder.
+`.
+  - The new Index opens in the main pane, in edit mode.
+  - If creating the Index fails, the folder still exists; the folder's card offers "Add description".
+- **Existing folders and the vault root:** nothing is migrated. A folder or vault with no Index shows an "Add description" button in its preview, which creates the Index and opens it in edit mode.
+- **Renaming or deleting an Index:** allowed. The folder then has no Index, and "Add description" returns.
+- **Links:** `[[Index]]` resolves through the normal title index, so the most recently edited Index wins. Linking a specific folder's Index by path is out of scope.
+
+### Sidebar tree
+
+- The Index row is pinned first in its folder and styled apart from both folders and notes:
+  - a 9px ◇ diamond glyph in `--ink-light`, echoing the map's on-path folder diamond;
+  - the label "Index" in `--muted-2`, at a row height equal to the other rows.
+- **Expanding opens the Index:** expanding a collapsed folder navigates to its Index note, if it has one, unless the current route is already a note inside that folder. Collapsing does not navigate.
+
+### Map
+
+- An Index note gets no dot. The folder square represents it, and the vault hub represents the root Index.
+- Search hits on an Index note ink the path to its folder and turn that folder into a diamond.
+- The map's selection card (MapSlip) is removed; the preview panel replaces it.
+- Clicking a node selects it, shows its ring and ink path, and fills the preview panel.
+- A folder's "fit" moves from click to the panel's "Zoom to folder" button and to double-click.
+
+### Home right column (replaces "Recently edited")
+
+The column shows one of three states, in this order of priority:
+
+1. **Search:** while the query is not empty, the column shows search results, unchanged.
+2. **Selection:** when a node is selected, it shows a preview panel.
+   - **Note:** title, folder path, "edited …", the rendered Markdown (same renderer and sanitizer as the note page), backlinks, and actions **Open note** and **Edit**.
+   - **Folder:** folder name and path, the rendered Index (or "Add description"), the count of notes and subfolders, a list of its notes (pinned Index excluded), and actions **Open Index**, **New note here** and **Zoom to folder**.
+   - **Vault hub:** the same as a folder, using the root Index.
+   - Note text comes from the decrypted bodies already in memory. Bodies that have not finished decrypting show "Decrypting…".
+3. **Empty:** when there is no query and nothing selected, a short line: "Select a folder or note on the map."
+
+The "Recently edited" list is removed. The preview crossfades between selections over `--dur-2`, and its content scrolls independently of the page.
+
 ## Testing
 
 - **Unit (vitest):**
@@ -174,6 +224,14 @@ The current blanket rule (everything at 1ms) is replaced. Under `prefers-reduced
   - Search rows animate only when their id is new.
 - **Browser check (controller):** each priority area in the preview with reduced motion off and on. Nothing shifts layout or blocks clicks. The map matches the CHOSEN artboard.
 - **Docs:** `DESIGN.md` gains a "Motion" section with the tokens and rules, and its map description is updated for curves and square folders.
+
+### Additional tests for Section 4
+
+- **Store:** creating a folder creates its Index note; a failed Index creation leaves the folder intact; "Add description" creates an Index.
+- **Index identification:** exact title, the oldest Index wins, and root versus folder Indexes are told apart.
+- **Map:** an Index note has no dot; a search hit on an Index inks its folder.
+- **Home panel:** the three states in priority order, the note preview, the folder preview with and without an Index, the hub preview, and "Decrypting…".
+- **Sidebar:** Index pinned first with its own class; expanding a folder navigates to its Index; collapsing does not.
 
 ## Out of scope
 
