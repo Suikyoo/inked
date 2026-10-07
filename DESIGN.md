@@ -37,6 +37,13 @@ colors:
   error-text: "#e9c9cf"
   ok: "#8fd1b5"
   warn: "#d19c3c"
+  danger: "#8f3348"
+  danger-hover: "#a33c54"
+  menu-hover: "#2e2b39"
+  sync-bg: "#2b2029"
+  scroll-thumb-hover: "#403d4d"
+  text-lead: "#a8a3b8"
+  code-text: "#cfcbda"
 typography:
   wordmark:
     fontFamily: "Spectral, Georgia, serif"
@@ -274,7 +281,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 
 ### Buttons
 - **Shape:** 6px radius, 30px high (28px small, 34px block), 12.5px / 500.
-- **Default:** `panel` fill, 1px `border`, hover `panel-3`. **Primary:** ink fill and border, white text, hover ink-hover. **Danger:** #8f3348 fill, white text; **quiet danger:** transparent, error text, `error-bg` on hover. Disabled is 55% opacity.
+- **Default:** `panel` fill, 1px `border`, hover `panel-3`. **Primary:** ink fill and border, white text, hover ink-hover. **Danger:** `danger` (#8f3348) fill, `danger-hover` (#a33c54) on hover, white text; **quiet danger:** transparent, error text, `error-bg` on hover. Disabled is 55% opacity.
 - **Icon button:** 24px (22 / 20 small), transparent, 5px radius, `muted-2` text, hover `panel-3`. Transitions are 120ms on background, border and color.
 
 ### Inputs / Fields
@@ -296,10 +303,10 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - Menu: 188px wide, `panel-3`, 1px `border-2`, 8px radius, 30px items, danger items in error rose. Dialog: native `<dialog>`, 400px max, `panel-2`, 10px radius, 18px padding, title 15px/600, right-aligned actions, 8px gap.
 
 ### Cards and notices
-- Card: `panel`, 1px `side-border`, 10px radius, 18px padding, 12px internal gap. Banner / notice: `panel-2`, 8px or 6px radius, 12.5px text. Alert: `error-bg` with `error-text`, no border. Sync bar: 32px, #2b2029 with `error-text`.
+- Card: `panel`, 1px `side-border`, 10px radius, 18px padding, 12px internal gap. Banner / notice: `panel-2`, 8px or 6px radius, 12.5px text. Alert: `error-bg` with `error-text`, no border. Sync bar: 32px, `sync-bg` (#2b2029) with `error-text`.
 
 ### Concept map (signature)
-A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Folder structure draws as pencil lines, explicit links as dashed pencil, ink strokes as tapered paths. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. A slip card (220px, `panel-2`) shows title (2-line clamp), path, meta, and "Open note". A legend row beneath (11px `muted-3`) names the four recency steps. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels.
+A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Folder structure draws as pencil lines, explicit links as dashed pencil, ink strokes as tapered paths. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. A slip card (220px, `panel-2`) shows title (2-line clamp), path, meta, and "Open note". A legend row beneath (11px `muted-3`) names the four recency steps. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. These 10px labels are the one exception to the 11px type floor: the panel is only 220px wide and the map carries up to 12 rows, so 11px would collide.
 
 ## Do's and Don'ts
 
@@ -320,4 +327,4 @@ A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px
 - **Don't** encode map recency with anything but the wet-to-dry lightness ramp, or add ramp steps without checking them against `canvas`.
 - **Don't** add a light theme without redoing the tokens; the system is dark only.
 
-<!-- Defects the build carries, deliberately not canonized: off-token hex literals (#2b2029 sync bar, #8f3348/#a33c54 danger, #a8a3b8 auth lead, #2e2b39 menu hover, #34323f/#2e2c38/#403d4d scrollbar, #4a4659 dashed missing-link border, #cfcbda code text) should be promoted to tokens or replaced; the local map caption (8.5px uppercase, tracked) is a kicker-style label below the compact type floor; the 8.5-10px local-map text is smaller than the 11px floor. -->
+<!-- Design debt cleared in the 2026-10-07 cleanup round: the off-token hex literals (sync bar, danger, auth lead, menu hover, scrollbar thumb, code text) are now tokens in tokens.css, the dashed missing-link border uses map-pencil, and the local-map caption is 10px sentence case. The 9-10px local-map text remains the one deliberate exception to the 11px floor (220px panel, 12 rows). -->

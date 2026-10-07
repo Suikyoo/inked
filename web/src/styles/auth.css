@@ -42,7 +42,7 @@
   max-width: 38ch;
   font-size: 13px;
   line-height: 1.5;
-  color: #a8a3b8;
+  color: var(--text-lead);
 }
 .auth-form {
   width: 100%;

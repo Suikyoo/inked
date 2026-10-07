@@ -289,10 +289,8 @@
   fill: var(--text);
 }
 .lmap-caption {
-  font: 500 8.5px var(--font-ui);
+  font: 500 10px var(--font-ui);
   fill: var(--muted-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 .lmap-more {
   font: 500 9px var(--font-ui);

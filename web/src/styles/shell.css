@@ -46,8 +46,8 @@
   gap: 12px;
   height: 32px;
   padding: 0 12px 0 24px;
-  background: #2b2029;
-  color: #e9c9cf;
+  background: var(--sync-bg);
+  color: var(--error-text);
   font-size: 12.5px;
 }
 .sync-bar span {

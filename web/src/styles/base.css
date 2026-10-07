@@ -63,7 +63,7 @@ textarea::placeholder {
 /* Scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #34323f transparent;
+  scrollbar-color: var(--border-2) transparent;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -73,18 +73,18 @@ textarea::placeholder {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2e2c38;
+  background: var(--border);
   border: 3px solid transparent;
   border-radius: 8px;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #403d4d;
+  background-color: var(--scroll-thumb-hover);
 }
 
 mark {
   background: var(--mark);
-  color: #ede9ff;
+  color: var(--text-strong);
   border-radius: 2px;
 }
 
@@ -174,13 +174,13 @@ kbd {
   color: #fff;
 }
 .btn-danger {
-  background: #8f3348;
-  border-color: #8f3348;
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 .btn-danger:hover:not(:disabled) {
-  background: #a33c54;
-  border-color: #a33c54;
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
 }
 .btn-danger-quiet {
   background: transparent;
@@ -467,7 +467,7 @@ select.input-sm {
 }
 .menu-item:hover,
 .menu-item:focus-visible {
-  background: #2e2b39;
+  background: var(--menu-hover);
   color: var(--text);
   outline: none;
 }

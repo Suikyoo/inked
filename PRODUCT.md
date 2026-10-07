@@ -8,11 +8,11 @@ web
 
 ## Stack
 
-Undecided. Must ship as Docker containers orchestrated by a `compose.yaml`. (Inferred from brief; frontend/backend framework not yet chosen.)
+React 18 + Vite + TypeScript (web), Fastify 5 + node:sqlite (server), shipped as Docker containers via `compose.yaml` with nginx in front and cloudflared for the tunnel. Encryption is browser-side and zero-knowledge.
 
 ## Users
 
-Primary user: the owner (a developer) and possibly a small number of trusted people, self-hosting a private knowledge base. They write and browse personal/technical notes daily at a desk. (Assumption: single-user or small-team; not yet confirmed.)
+Several people on one self-hosted instance: an admin plus users added by invite. They write and browse personal/technical notes daily at a desk. Each user has their own encrypted vaults; the server only ever holds ciphertext.
 
 ## Product Purpose
 
@@ -33,9 +33,9 @@ The home screen is the vault map: every vault rendered as a concept-map cluster,
 ## Capabilities and Constraints
 
 - Markdown rendering must follow standards (CommonMark / GFM assumed).
-- Notes are never stored as plaintext .md; encryption scheme is an open decision pending a security review.
+- Notes are never stored as plaintext .md; encryption is browser-side and zero-knowledge.
 - Dockerized, compose-based deployment.
-- Open: multi-user vs single-user, key derivation (login password vs separate vault key), sync, attachments.
+- Multi-user with admin and invites; keys are derived in the browser. Open: sync, attachments.
 
 ## Evidence on Hand
 

@@ -12,6 +12,9 @@
   --canvas: #1a1920;
   --hover: #1f1d26;
   --row-selected: #2a2440;
+  --menu-hover: #2e2b39;
+  --sync-bg: #2b2029;
+  --scroll-thumb-hover: #403d4d;
 
   /* Lines */
   --border: #2e2c38;
@@ -27,6 +30,8 @@
   --muted-2: #8d879f;
   --muted-3: #6e6880;
   --placeholder: #7d7790;
+  --text-lead: #a8a3b8;
+  --code-text: #cfcbda;
 
   /* Ink */
   --ink: #7452e0;
@@ -51,6 +56,8 @@
   --error-text: #e9c9cf;
   --ok: #8fd1b5;
   --warn: #d19c3c;
+  --danger: #8f3348;
+  --danger-hover: #a33c54;
 
   /* Type */
   --font-ui: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;

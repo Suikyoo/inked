@@ -1,5 +1,7 @@
 # Follow-ups after the deploy + follow-ups branch (2026-10-07)
 
+> **Status: resolved (2026-10-07).** Every item below was triaged FIX or ACCEPT in `docs/superpowers/specs/2026-10-07-cleanup-round-design.md`; see that spec for the per-item outcome.
+
 Non-blocking items left after the final review of branch deploy-and-followups. Rulings and deferred minors from the task reviews:
 
 ## Parked rulings

@@ -272,7 +272,7 @@ a.crumb:hover {
 }
 .md .wl-missing {
   color: var(--muted-2);
-  border-bottom: 1px dashed #4a4659;
+  border-bottom: 1px dashed var(--map-pencil);
   cursor: help;
 }
 .md strong {
@@ -300,7 +300,7 @@ a.crumb:hover {
   background: none;
   border-radius: 0;
   font: 400 12.5px/1.6 var(--font-mono);
-  color: #cfcbda;
+  color: var(--code-text);
   white-space: pre;
 }
 .md blockquote {
