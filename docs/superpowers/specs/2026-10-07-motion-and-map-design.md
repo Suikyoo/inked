@@ -207,7 +207,13 @@ The column shows one of three states, in this order of priority:
    - Note text comes from the decrypted bodies already in memory. Bodies that have not finished decrypting show "Decrypting…".
 3. **Empty:** when there is no query and nothing selected, a short line: "Select a folder or note on the map."
 
-The "Recently edited" list is removed. The preview crossfades between selections over `--dur-2`, and its content scrolls independently of the page.
+The "Recently edited" list is removed.
+
+### Map legend removed
+
+- The legend row under the Home map (`MapLegend`: pencil, ink, the wet → dry ramp, [[links]]) is removed. The map explains itself through the preview panel and the aria descriptions.
+- The one useful line it carried, "Links appear once note text is decrypted.", moves inside the map frame as a small `--muted-3` caption at the bottom left. It shows only while links are pending and fades out over `--dur-2`.
+- DESIGN.md drops the legend from its map description. The preview crossfades between selections over `--dur-2`, and its content scrolls independently of the page.
 
 ## Testing
 
