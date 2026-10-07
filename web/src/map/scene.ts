@@ -19,6 +19,8 @@ export interface SceneDot {
   updatedAt: string;
   /** [[Links]] in plus out, each pair of notes counted once. 0 while links are still decrypting. */
   degree: number;
+  /** This vault's links are decrypted, so degree is real. While false, draw no density cue. */
+  linksReady: boolean;
 }
 export interface SceneFolder {
   id: string;
@@ -244,6 +246,7 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
         folderPath: chainIds.map((id) => folderById.get(id)!.name).join(' / '),
         updatedAt: n.updatedAt,
         degree: 0,
+        linksReady: graph.linksReady,
       });
       ink(n.id, chainIds, w);
       cover(chainIds, w);

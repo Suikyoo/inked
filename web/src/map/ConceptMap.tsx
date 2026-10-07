@@ -511,7 +511,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
             const tier = inkTier(dot.updatedAt, now);
             const active = dot.id === hover || dot.id === focusId;
             const big = dot.id === selNote || dot.id === hot || active;
-            const dens = densityClass(dot.degree);
+            const dens = dot.linksReady ? densityClass(dot.degree) : '';
             const r = dens === 'hollow' ? 3.4 : big ? 5 : 4;
             const when = relativeTime(dot.updatedAt, now);
             const showLabel = view.scale >= LABEL_SCALE || inkedNotes.has(dot.id) || active;
@@ -525,7 +525,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
                 transform={`translate(${f1(x)} ${f1(y)})`}
                 style={writing ? { animationDelay: ms(dot.folderIds.length * WRITE_STEP_MS + NODE_LAG_MS) } : undefined}
                 role="button"
-                aria-label={`${dot.title}, ${dot.folderPath || 'vault root'}, edited ${when}${dot.degree > 0 ? `, ${plural(dot.degree, 'link')}` : ''}`}
+                aria-label={`${dot.title}, ${dot.folderPath || 'vault root'}, edited ${when}${dot.linksReady && dot.degree > 0 ? `, ${plural(dot.degree, 'link')}` : ''}`}
                 {...nodeFocusProps(dot.id)}
                 onClick={(e) => onDotClick(e, dot.vaultId, dot.id)}
                 onKeyDown={(e) => {

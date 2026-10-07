@@ -185,7 +185,17 @@ describe('link density', () => {
   it('has degree 0 while links are pending', () => {
     const t = tree([], [note('a', null, 'A'), note('b', null, 'B')]);
     const graph = buildVaultGraph('v1', t, {}, false);
-    expect(buildScene([{ vaultId: 'v1', graph, layout: layoutVault(graph) }]).dots.map((d) => d.degree)).toEqual([0, 0]);
+    const dots = buildScene([{ vaultId: 'v1', graph, layout: layoutVault(graph) }]).dots;
+    expect(dots.map((d) => d.degree)).toEqual([0, 0]);
+    expect(dots.every((d) => !d.linksReady)).toBe(true);
+  });
+  it('keeps linksReady per vault', () => {
+    const mk = (id: string, ready: boolean) => {
+      const g = buildVaultGraph(id, tree([], [note(`${id}a`, null, 'A'), note(`${id}b`, null, 'B')]), ready ? { [`${id}a`]: '[[B]]' } : {}, ready);
+      return { vaultId: id, graph: g, layout: layoutVault(g) };
+    };
+    const s = buildScene([mk('v1', true), mk('v2', false)]);
+    expect(s.dots.map((d) => [d.id, d.linksReady, d.degree])).toEqual([['v1a', true, 1], ['v1b', true, 1], ['v2a', false, 0], ['v2b', false, 0]]);
   });
   it('sizes the selection ring and picks the density class by degree', () => {
     expect([0, 1, 2, 3, 9].map(selRingRadius)).toEqual([7, 7, 9, 11.5, 11.5]);

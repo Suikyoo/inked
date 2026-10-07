@@ -621,4 +621,19 @@ describe('link density cues', () => {
     click(node('a'));
     expect(node('a').querySelector('.cmap-sel')!.getAttribute('r')).toBe('11.5');
   });
+  it('draws a plain solid dot with no cue while links are pending', () => {
+    const t = tree([], [note('a', null, 'A'), note('b', null, 'B')]);
+    render({ entries: [entry(t, 'v1', false)] });
+    expect(node('a').classList.contains('is-orphan')).toBe(false);
+    expect(node('a').querySelector('.cmap-dot')!.getAttribute('r')).toBe('4');
+    expect(node('a').querySelector('.cmap-dens')).toBeNull();
+    expect(node('a').getAttribute('aria-label')).not.toMatch(/link/);
+  });
+  it('keeps the rings of a ready vault while another vault is pending', () => {
+    const t1 = tree([], ['a', 'b', 'c'].map((id) => note(id, null, id.toUpperCase())));
+    const t2 = tree([], [note('x', null, 'X')]);
+    render({ entries: [entry(t1, 'v1', true, { a: '[[B]] [[C]]' }), entry(t2, 'v2', false)] });
+    expect(node('a').querySelectorAll('.cmap-dens')).toHaveLength(1);
+    expect(node('x').classList.contains('is-orphan')).toBe(false);
+  });
 });
