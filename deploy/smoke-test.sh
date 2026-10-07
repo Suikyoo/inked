@@ -4,12 +4,12 @@
 #   COMPOSE_ARGS  docker compose arguments naming the stack, used to read its logs
 #                 (default "-p inked-test -f compose.yaml -f compose.local.yaml"; paths are relative to the repo root)
 set -Eeuo pipefail
-trap 'rc=$?; echo "FAIL: line $LINENO: command exited $rc (curl transport error or docker failure)"; exit $rc' ERR
+trap 'rc=$?; echo "FAIL: line $LINENO: command exited $rc (curl transport error or docker failure)" >&2; exit $rc' ERR
 cd "$(dirname "$0")/.."
 BASE="http://127.0.0.1:${INKED_PORT:-8088}"
 COMPOSE_ARGS="${COMPOSE_ARGS:--p inked-test -f compose.yaml -f compose.local.yaml}"
 SECRET=SMOKE-SECRET-TOKEN-123
-fail() { echo "FAIL: $*"; exit 1; }
+fail() { echo "FAIL: $*" >&2; exit 1; }
 # 1. Through nginx: app answers, Inked's CSP and nginx HSTS present
 h=$(curl -sS -D - -o /dev/null "$BASE/api/status")
 echo "$h" | grep -qi '^content-security-policy: default-src' || fail "CSP missing"
