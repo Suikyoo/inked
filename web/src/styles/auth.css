@@ -109,3 +109,108 @@
   font-family: var(--font-mono);
   font-size: 13px;
 }
+
+/* ---- Motion: sign-in flow ------------------------------------------------------------------ */
+
+/* Calm entry for the auth card; also what lock and sign-out land on (they skip the view transition). */
+.auth-col {
+  animation: auth-in var(--dur-3) var(--ease-out) both;
+}
+@keyframes auth-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Recovery key panel fades in. */
+.rk-panel {
+  animation: auth-in var(--dur-3) var(--ease-out) both;
+}
+
+/* Wrong password: one small sideways nudge. */
+.field-nudge.nudge {
+  animation: nudge var(--dur-3) var(--ease-std) 1;
+}
+@keyframes nudge {
+  0%,
+  100% {
+    transform: none;
+  }
+  33% {
+    transform: translateX(-3px);
+  }
+  66% {
+    transform: translateX(3px);
+  }
+}
+
+/* Ink drop that fills while keys are derived. */
+.ink-fill {
+  flex: 0 0 auto;
+}
+.ink-fill-level {
+  animation: ink-rise 1.5s var(--ease-out) both;
+}
+.ink-fill.is-done .ink-fill-level {
+  animation: ink-complete var(--dur-2) var(--ease-out) both;
+}
+@keyframes ink-rise {
+  from {
+    transform: translateY(11.56px);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes ink-complete {
+  from {
+    transform: translateY(3.24px);
+  }
+  to {
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ink-fill-level,
+  .ink-fill.is-done .ink-fill-level {
+    animation: none !important;
+    transform: none;
+  }
+  .ink-fill {
+    animation: pulse 1.6s ease-in-out infinite !important;
+  }
+}
+.ink-fill.is-static .ink-fill-level {
+  animation: none;
+}
+.ink-fill.is-static {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* Unlock: the unlocked app spreads out from the button as an ink wipe. */
+:root {
+  --wipe-x: 50%;
+  --wipe-y: 50%;
+}
+::view-transition-old(root) {
+  animation: none;
+}
+::view-transition-new(root) {
+  animation: ink-wipe var(--dur-4) var(--ease-out) both;
+}
+@keyframes ink-wipe {
+  from {
+    clip-path: circle(0 at var(--wipe-x) var(--wipe-y));
+  }
+  to {
+    clip-path: circle(150% at var(--wipe-x) var(--wipe-y));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}

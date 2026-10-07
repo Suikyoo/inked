@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
+import { InkFill } from '../brand/InkFill';
+import { FormError, PasswordField, TextField } from '../components/Fields';
 import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
 import { describeError, MIN_PASSWORD, USERNAME_RE } from '../lib/util';
 import { useStore } from '../state/StoreContext';
@@ -151,7 +152,7 @@ export function RegisterFlow({
           disabled={busy}
         />
         <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
-          {busy && <Spinner />}
+          {busy && <InkFill done={false} />}
           {busy ? 'Creating your keys…' : 'Create account'}
         </button>
         <FormError>{error}</FormError>

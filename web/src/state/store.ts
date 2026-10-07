@@ -262,6 +262,11 @@ function forgetRememberedUsername() {
 export class AppStore {
   private state: AppState = initialState;
   private listeners = new Set<() => void>();
+  /**
+   * Set by the unlock screen. When present, the notification that follows a change into the unlocked
+   * phase is passed to it so the UI can run the re-render inside a View Transition.
+   */
+  unlockTransition: ((notify: () => void) => void) | null = null;
   private userKey: CryptoKey | null = null;
   private vaultKeys = new Map<string, CryptoKey>();
   /** Bumped on every lock/unlock so late async results from an old session are dropped. */
@@ -322,8 +327,14 @@ export class AppStore {
 
   private set(update: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
     const patch = typeof update === 'function' ? update(this.state) : update;
+    const unlocking = patch.phase === 'unlocked' && this.state.phase !== 'unlocked';
     this.state = { ...this.state, ...patch };
-    for (const l of this.listeners) l();
+    const notify = () => {
+      for (const l of this.listeners) l();
+    };
+    // The state is already final; only the moment subscribers re-render may be handed to the UI.
+    if (unlocking && this.unlockTransition) this.unlockTransition(notify);
+    else notify();
   }
 
   clearNotice() {

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { Link } from 'react-router-dom';
+import { InkFill } from '../brand/InkFill';
+import { setWipeOrigin, withViewTransition } from '../motion';
 import { isApiError } from '../api/client';
-import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
+import { FormError, PasswordField, TextField } from '../components/Fields';
 import { UnlockIcon } from '../components/Icons';
 import { isCryptoError } from '../crypto';
 import { describeError } from '../lib/util';
@@ -19,11 +22,22 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const [nudge, setNudge] = useState(false);
   const [failures, setFailures] = useState(0);
   const [waitUntil, setWaitUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
   const pwRef = useRef<HTMLInputElement>(null);
   const userRef = useRef<HTMLInputElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  // The store is already unlocked when it notifies; only the screen swap is animated, as an ink wipe.
+  useEffect(() => {
+    store.unlockTransition = (notify) => withViewTransition(() => flushSync(notify));
+    return () => {
+      store.unlockTransition = null;
+    };
+  }, [store]);
 
   useEffect(() => {
     if (known) setUsername(known);
@@ -54,11 +68,15 @@ export function LoginPage() {
       else if (!password) setError('Enter your password.');
       return;
     }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setWipeOrigin(r.left + r.width / 2, r.top + r.height / 2);
     setBusy(true);
+    setNudge(false);
     setError(null);
     store.clearNotice();
     try {
       await store.unlock(u, password);
+      setUnlocked(true);
       setFailures(0);
       // The route guard redirects once the store is unlocked.
     } catch (err) {
@@ -72,6 +90,7 @@ export function LoginPage() {
         setFailures(0);
         setError(null);
       } else if (isApiError(err, 401)) {
+        setNudge(true);
         const n = failures + 1;
         setFailures(n);
         const left = MAX_TRIES - n;
@@ -136,18 +155,20 @@ export function LoginPage() {
           />
         )}
         {known && <input type="hidden" name="username" autoComplete="username" value={known} readOnly />}
-        <PasswordField
-          ref={pwRef}
-          label="Password"
-          name="password"
-          autoComplete="current-password"
-          placeholder="Enter your password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={busy}
-        />
-        <button type="submit" className="btn btn-primary btn-block" disabled={busy || waitLeft > 0}>
-          {busy ? <Spinner /> : <UnlockIcon />}
+        <div className={nudge ? 'field-nudge nudge' : 'field-nudge'} onAnimationEnd={() => setNudge(false)}>
+          <PasswordField
+            ref={pwRef}
+            label="Password"
+            name="password"
+            autoComplete="current-password"
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+        <button ref={btnRef} type="submit" className="btn btn-primary btn-block" disabled={busy || waitLeft > 0}>
+          {busy ? <InkFill done={unlocked} /> : <UnlockIcon />}
           {busy ? 'Unlocking…' : 'Unlock'}
         </button>
         {waitLeft > 0 ? (

@@ -1,6 +1,6 @@
 import { useId } from 'react';
 
-const DROP = 'M8 1.2C7.2 3 3.3 6.5 3.3 10.1a4.7 4.7 0 0 0 9.4 0C12.7 6.5 8.8 3 8 1.2z';
+export const DROP = 'M8 1.2C7.2 3 3.3 6.5 3.3 10.1a4.7 4.7 0 0 0 9.4 0C12.7 6.5 8.8 3 8 1.2z';
 
 export function inkLevelLabel(level: number): string {
   return `${Math.round(Math.max(0, Math.min(1, level)) * 100)}% of notes edited this week`;
