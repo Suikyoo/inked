@@ -5,6 +5,10 @@ services:
     environment:
       COOKIE_SECURE: "false"
   nginx:
+    environment:
+      # Local only: nginx is published on 127.0.0.1, so trust CF-Connecting-IP from any peer
+      # (the smoke test sets it). Overrides a production CLOUDFLARED_NET_CIDR from .env.
+      CLOUDFLARED_NET_CIDR: "0.0.0.0/0"
     networks: !override
       inked-internal: {}
       # Not internal: Docker can't publish ports for a container that is only on an internal network.
