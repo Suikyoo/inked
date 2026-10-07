@@ -91,11 +91,14 @@ export class SemanticStore {
   private modelGen = 0;
   private unlocked = false;
   private lastTrees: unknown = null;
+  private lastBodies: unknown = null;
   private manifest: Manifest | null = null;
   private embedder: EmbedderLike | null = null;
   private vectors = new Map<string, StoredVector>();
   private queue: string[] = [];
   private queued = new Set<string>();
+  /** Stale notes skipped for want of a body (a reload dropped the old text); queued once it arrives. */
+  private awaitingBody = new Set<string>();
   private resaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private staleRequeues = new Map<string, number>();
   /** Vaults whose stored vectors were requested this session. */
@@ -137,7 +140,8 @@ export class SemanticStore {
 
   private onApp = () => {
     const s = this.app.getState();
-    const unlocked = s.phase === 'unlocked';
+    // A lock, sign-out or session end starts with `locking` while the keys are still here: stop then.
+    const unlocked = s.phase === 'unlocked' && !s.locking;
     if (unlocked !== this.unlocked) {
       this.unlocked = unlocked;
       if (unlocked) void this.start();
@@ -150,6 +154,12 @@ export class SemanticStore {
     if (s.trees !== this.lastTrees) {
       this.lastTrees = s.trees;
       this.refreshCoverage();
+    }
+    if (s.bodies !== this.lastBodies) {
+      this.lastBodies = s.bodies;
+      const arrived = [...this.awaitingBody].filter((id) => id in s.bodies);
+      for (const id of arrived) this.awaitingBody.delete(id);
+      if (arrived.length) this.enqueue(arrived);
     }
   };
 
@@ -179,6 +189,8 @@ export class SemanticStore {
     this.stopEmbedder();
     this.manifest = null;
     this.lastTrees = null;
+    this.lastBodies = null;
+    this.awaitingBody.clear();
     this.vectors.clear();
     this.queue = [];
     this.queued.clear();
@@ -355,8 +367,11 @@ export class SemanticStore {
     const { bodies } = this.app.getState();
     for (const id of ids) {
       const head = this.app.noteHead(id);
-      if (this.queued.has(id) || !head || head.broken || !(id in bodies) || !this.vectorsIn.has(head.vaultId)) continue;
-      if (this.fresh(id)) continue;
+      if (this.queued.has(id) || !head || head.broken || !this.vectorsIn.has(head.vaultId) || this.fresh(id)) continue;
+      if (!(id in bodies)) {
+        this.awaitingBody.add(id);
+        continue;
+      }
       this.queue.push(id);
       this.queued.add(id);
     }
@@ -387,7 +402,11 @@ export class SemanticStore {
     const emb = this.embedder;
     const head = this.app.noteHead(id);
     const body = this.app.getState().bodies[id];
-    if (!m || !emb || !head || head.broken || body === undefined || this.fresh(id)) return;
+    if (!m || !emb || !head || head.broken || this.fresh(id)) return;
+    if (body === undefined) {
+      this.awaitingBody.add(id);
+      return;
+    }
     const { vaultId, updatedAt: snapshot } = head;
     const texts = chunkNote(head.title, body);
     if (!texts.length) return;

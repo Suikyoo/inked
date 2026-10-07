@@ -313,6 +313,8 @@ export class AppStore {
   private savedListeners = new Set<(ids: string[]) => void>();
   /** Notes saved since the last consumeUnseenSaves; ids only, dropped with the keys. */
   private unseenSaves = new Set<string>();
+  /** Vaults whose tree has loaded this session: later loads are reloads, and new notes in them count as saved. */
+  private readyTrees = new Set<string>();
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
@@ -515,6 +517,7 @@ export class AppStore {
     this.vaultKeys.clear();
     this.ownStamps.clear();
     this.unseenSaves.clear();
+    this.readyTrees.clear();
     this.lastUserId = user.id;
     setRequestUser(user.id);
     const deferred = this.deferredNotices.get(user.id) ?? null;
@@ -531,6 +534,7 @@ export class AppStore {
     this.vaultKeys.clear();
     this.ownStamps.clear();
     this.unseenSaves.clear();
+    this.readyTrees.clear();
     for (const e of this.pending) e.copyTitle = null;
     // Every signed-out transition passes here: data requests name nobody until the next sign-in.
     setRequestUser(null);
@@ -938,7 +942,6 @@ export class AppStore {
   async loadTree(vaultId: string): Promise<void> {
     const ep = this.epoch;
     const key = this.vaultKey(vaultId);
-    const before = this.state.trees[vaultId];
     this.set((s) => ({
       trees: { ...s.trees, [vaultId]: { ...(s.trees[vaultId] ?? { folders: {}, notes: {} }), status: 'loading' } },
     }));
@@ -947,14 +950,27 @@ export class AppStore {
       const fViews = await Promise.all(folders.map((f) => this.openFolder(key, vaultId, f)));
       const nViews = await Promise.all(notes.map((n) => this.openNoteHead(key, vaultId, n)));
       if (ep !== this.epoch) return;
-      const tree: TreeView = { status: 'ready', folders: {}, notes: {} };
-      for (const f of fViews) tree.folders[f.id] = f;
-      for (const n of nViews) tree.notes[n.id] = n;
-      this.set((s) => ({ trees: { ...s.trees, [vaultId]: tree } }));
-      // A reload (not the vault's first load this session): new or newer notes were saved elsewhere.
-      if (before?.status === 'ready') {
-        this.emitSaved(nViews.filter((n) => !before.notes[n.id] || before.notes[n.id].updatedAt < n.updatedAt).map((n) => n.id));
-      }
+      // A reload (this vault's tree already loaded once this session): new or newer notes were saved elsewhere.
+      // Diffed against the tree being replaced, so a save here meanwhile is not reported twice.
+      const reload = this.readyTrees.has(vaultId);
+      let moved: string[] = [];
+      this.set((s) => {
+        const cur = s.trees[vaultId]?.notes ?? {};
+        const tree: TreeView = { status: 'ready', folders: {}, notes: {} };
+        for (const f of fViews) tree.folders[f.id] = f;
+        // A head this tab stored meanwhile (its own save) is newer than the response: keep it.
+        for (const n of nViews) tree.notes[n.id] = cur[n.id] && cur[n.id].updatedAt > n.updatedAt ? cur[n.id] : n;
+        if (!reload) return { trees: { ...s.trees, [vaultId]: tree } };
+        moved = nViews.filter((n) => !cur[n.id] || cur[n.id].updatedAt < n.updatedAt).map((n) => n.id);
+        // Their cached text is the old version: drop it so nothing reads it as the new one.
+        const bodies = { ...s.bodies };
+        for (const id of moved) delete bodies[id];
+        return { trees: { ...s.trees, [vaultId]: tree }, bodies };
+      });
+      this.readyTrees.add(vaultId);
+      this.emitSaved(moved);
+      // Fetch their text; loadBodies fills only the bodies missing here.
+      if (moved.length) void this.loadBodies(vaultId).catch(() => undefined);
     } catch (e) {
       if (ep === this.epoch) {
         this.set((s) => ({
@@ -1007,8 +1023,13 @@ export class AppStore {
       }),
     );
     if (ep !== this.epoch) return;
-    // Bodies loaded or saved locally in the meantime are newer; keep them.
-    this.set((s) => ({ bodies: { ...out, ...s.bodies }, bodiesReady: { ...s.bodiesReady, [vaultId]: true } }));
+    // Bodies loaded or saved locally in the meantime are newer; keep them. A fetched body older than
+    // the head this tab holds (the tree reloaded during this fetch) is skipped, never shown as current.
+    this.set((s) => {
+      const heads = s.trees[vaultId]?.notes ?? {};
+      for (const n of notes) if (n.id in out && heads[n.id] && heads[n.id].updatedAt > n.updatedAt) delete out[n.id];
+      return { bodies: { ...out, ...s.bodies }, bodiesReady: { ...s.bodiesReady, [vaultId]: true } };
+    });
   }
 
   // ---- Vault mutations -----------------------------------------------------------------------
@@ -1037,6 +1058,7 @@ export class AppStore {
       trees: { ...s.trees, [id]: { status: 'ready', folders: {}, notes: {} } },
       bodiesReady: { ...s.bodiesReady, [id]: true },
     }));
+    this.readyTrees.add(id);
     return view;
   }
 
@@ -1054,6 +1076,7 @@ export class AppStore {
   async deleteVault(id: string): Promise<void> {
     await api.deleteVault(id);
     this.vaultKeys.delete(id);
+    this.readyTrees.delete(id);
     this.set((s) => {
       const vaults = { ...s.vaults };
       delete vaults[id];
@@ -1165,8 +1188,9 @@ export class AppStore {
     const prev = this.state.trees[vaultId]?.notes[head.id];
     if (prev && prev.updatedAt > head.updatedAt) return false;
     this.patchTree(vaultId, (t) => ({ notes: { ...t.notes, [head.id]: head } }));
-    // Stored only when the tree is loaded; a new note or a newer version counts as saved.
-    if (this.state.trees[vaultId] && (!prev || prev.updatedAt < head.updatedAt)) this.emitSaved([head.id]);
+    // A newer version counts as saved, and so does a new note once the tree has loaded (not a note
+    // opened while the first load is still running: the tree brings it in as already there).
+    if (prev ? prev.updatedAt < head.updatedAt : this.readyTrees.has(vaultId)) this.emitSaved([head.id]);
     return true;
   }
 

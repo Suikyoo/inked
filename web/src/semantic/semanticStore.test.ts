@@ -238,6 +238,49 @@ describe('SemanticStore', () => {
     expect(s.getState().coverage.v).toEqual({ done: 0, total: 1 });
   });
 
+  it('stops when a lock starts flushing: a pending upload never resumes and nothing new starts', async () => {
+    const app = fakeApp();
+    let wake!: () => void;
+    const delay = vi.fn((ms: number) => (ms === 0 ? Promise.resolve() : new Promise<void>((r) => (wake = r))));
+    const put = vi.fn().mockRejectedValueOnce(Object.assign(new Error('down'), { status: 503 })).mockResolvedValue({ ok: true });
+    const { d, embedder } = deps({ delay, api: { listVectors: async () => ({ vectors: [] }), putVector: put } });
+    const s = new SemanticStore(app as any, d as any);
+    app.set({
+      phase: 'unlocked',
+      trees: tree([{ id: 'a', updatedAt: '2026-10-02T00:00:00.000Z' }, { id: 'b', updatedAt: '2026-10-01T00:00:00.000Z' }]),
+      bodies: { a: 'x', b: 'y' },
+      bodiesReady: { v: true },
+    });
+    await flushN(3);
+    expect(put).toHaveBeenCalledTimes(1);
+    // lock() sets `locking` and waits for editors to flush while the phase is still 'unlocked'.
+    app.set({ locking: true });
+    expect(embedder.terminate).toHaveBeenCalled();
+    expect(s.getState().coverage).toEqual({});
+    wake();
+    await flushN(5);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(embedder.embed).toHaveBeenCalledTimes(1);
+    app.save(['b']);
+    await flushN(3);
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stale note whose text is not in yet waits for it, then embeds the new text', async () => {
+    const app = fakeApp();
+    const { d, embedder } = deps();
+    new SemanticStore(app as any, d as any);
+    // A reload moved a's head to T1 and dropped its old text; the new text is still on its way.
+    app.set({ phase: 'unlocked', trees: tree([{ id: 'a', updatedAt: '2026-10-05T00:00:00.000Z', title: '' }]), bodies: {}, bodiesReady: { v: true } });
+    await flushN(5);
+    expect(d.api.putVector).not.toHaveBeenCalled();
+    app.set({ bodies: { a: 'new text' } });
+    await flushN(5);
+    expect(embedder.embed).toHaveBeenCalledWith(['new text'], 'passage');
+    expect(d.api.putVector).toHaveBeenCalledTimes(1);
+    expect(d.api.putVector.mock.calls[0][1].sourceUpdatedAt).toBe('2026-10-05T00:00:00.000Z');
+  });
+
   it('keeps vectors for Related when the toggle is off, without loading a model', async () => {
     const app = fakeApp();
     const { d, embedder } = deps({ prefs: { semantic: () => false, setSemantic: vi.fn() } });
