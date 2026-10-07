@@ -7,9 +7,11 @@ Inked is a self-hosted, multi-user Markdown notes app. Notes are encrypted in th
 ```
 /compose.yaml            `inked` (private network only) + `nginx` (joins external `cloudflared-net`); see `docs/deploy.md`
 /Dockerfile              multi-stage: build web, build server, run on node:22-alpine
-/package.json            npm workspaces: server, web
+/package.json            npm workspaces: core, server, web, mcp
+/core                    shared, platform-neutral TypeScript: crypto, search, Index rules, API DTO types (used by web and mcp)
 /server                  Fastify API + static hosting of web/dist, node:sqlite storage
-/web                     React + Vite + TypeScript SPA; all crypto lives here
+/web                     React + Vite + TypeScript SPA; all crypto runs here (from /core)
+/mcp                     local MCP server `inked-mcp` (stdio) + Claude Code plugin; see docs/mcp.md
 /docs                    this file
 ```
 
@@ -26,6 +28,7 @@ Residual risks we accept and state plainly:
 - **Cloudflare in the TLS and JavaScript path.** In the documented deployment (`docs/deploy.md`) Cloudflare terminates TLS. It sees request URLs (invite tokens, usernames), `authKey`, cookies and ciphertext, but never the password, any key that can decrypt, or plaintext. It also serves the JavaScript, so it could inject or rewrite it, which is the malicious-JavaScript risk above. Its HTML/JS rewriting features (Rocket Loader, Email Address Obfuscation, injected Web Analytics/Zaraz, Automatic HTTPS Rewrites) should be off; the CSP would block what they inject anyway, which can break pages.
 - **Login blocking for new devices.** The per-account login cap (30 attempts per 15 min) still applies to devices that have never signed in to the account, so a determined attacker who knows a username can keep blocking logins and recovery from new devices. Known devices (those holding a valid `inked_device` cookie for the account) are exempt and can still sign in.
 - **Enhanced browser spell-check.** Some browsers send text to a remote service for enhanced spell-check, which would take plaintext off-device. Spell-check is therefore off by default for every field that holds note content or names (note body and title, folder, vault and note names in dialogs, inline renames and Settings), with one toggle in Settings; fields that hold credentials or search queries never spell-check.
+- **Local MCP credential.** If you use the optional local MCP server (`docs/mcp.md`), `~/.inked-mcp/credential.json` holds the `masterSecret`, which is account-equivalent for reading and writing data: any program running as you can use it. It cannot reveal the password, and it dies on a password change (the KDF salt changes and other sessions are deleted), so revocation is changing the password. The provisioned-actions policy guards the AI, not the host: malware could read the credential directly. The MCP holds `userKey`, so the vault allowlist is enforced only inside the MCP process. The server cannot tell the MCP from a browser, so the audit log is local only. Anything the MCP returns to the AI client goes to that client's model provider.
 
 ## Key hierarchy (browser)
 
