@@ -100,19 +100,6 @@ docker compose start inked
 
 To move Inked to another host, copy the tarball there, run `docker compose up -d --build` once (it creates the volume), then restore as above. The tarball is ciphertext, but `server-secret` signs device cookies, so keep backups private.
 
-### Migrating from the old `./data` folder
-
-Earlier versions bind-mounted `./data` and ran under the folder's project name (for example `notes`). To move that data into the named volume, run from the repo folder:
-
-```bash
-docker compose -p notes down                      # old stack; ./data is untouched
-docker compose create                             # new "inked" stack + empty volume, not started
-docker run --rm -v inked_inked-data:/data -v "$PWD/data":/old:ro alpine sh -c 'cp -a /old/. /data/ && chown -R 1000:1000 /data'
-docker compose up -d
-```
-
-On Windows PowerShell use `${PWD}/data` instead of `$PWD/data`. Check the app (sign in, open a note) before deleting `./data`.
-
 ## 7. Accepted risk
 
 Any container placed on `cloudflared-net` can reach nginx and could forge `CF-Connecting-IP`, which would let it choose the IP that login lockouts are keyed on. Only trusted containers belong on that network. The Docker host itself can do the same: its bridge gateway address sits inside the trusted range, so a process on the host can also set `CF-Connecting-IP`. The per-account lockout cap still applies.
