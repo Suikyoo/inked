@@ -2,6 +2,7 @@ import { aad } from './aad';
 import { packCiphertext, unpackCiphertext, IV_BYTES } from './cipher';
 import { fromUtf8, randomBytes, utf8, type Bytes } from './encoding';
 import { CryptoError } from './errors';
+import { EMBED_DIM, MAX_CHUNKS } from '../semantic/chunk';
 
 const subtle = () => globalThis.crypto.subtle;
 
@@ -89,3 +90,33 @@ export const encryptNoteBody = (key: CryptoKey, vaultId: string, noteId: string,
   encryptString(key, body, aad.noteBody(vaultId, noteId));
 export const decryptNoteBody = (key: CryptoKey, vaultId: string, noteId: string, ct: string) =>
   decryptString(key, ct, aad.noteBody(vaultId, noteId));
+
+/** Plaintext: [chunk count: u8][count × EMBED_DIM int8]. */
+export async function encryptNoteVector(
+  key: CryptoKey,
+  vaultId: string,
+  noteId: string,
+  model: string,
+  chunks: readonly Int8Array[],
+): Promise<string> {
+  if (chunks.length < 1 || chunks.length > MAX_CHUNKS || chunks.some((c) => c.length !== EMBED_DIM)) {
+    throw new CryptoError('format', 'Vector has the wrong shape');
+  }
+  const buf = new Uint8Array(1 + chunks.length * EMBED_DIM);
+  buf[0] = chunks.length;
+  chunks.forEach((c, i) => buf.set(new Uint8Array(c.buffer, c.byteOffset, c.length), 1 + i * EMBED_DIM));
+  return encryptBytes(key, buf, aad.noteVector(vaultId, noteId, model));
+}
+
+export async function decryptNoteVector(
+  key: CryptoKey,
+  vaultId: string,
+  noteId: string,
+  model: string,
+  ct: string,
+): Promise<Int8Array[]> {
+  const buf = await decryptBytes(key, ct, aad.noteVector(vaultId, noteId, model));
+  const n = buf[0];
+  if (!n || n > MAX_CHUNKS || buf.length !== 1 + n * EMBED_DIM) throw new CryptoError('format', 'Vector has the wrong shape');
+  return Array.from({ length: n }, (_, i) => new Int8Array(buf.buffer, buf.byteOffset + 1 + i * EMBED_DIM, EMBED_DIM).slice());
+}

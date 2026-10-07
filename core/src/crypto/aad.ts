@@ -7,6 +7,7 @@ export const aad = {
   folderMeta: (vaultId: string, folderId: string) => `inked/folder/${vaultId}/${folderId}`,
   noteMeta: (vaultId: string, noteId: string) => `inked/note-meta/${vaultId}/${noteId}`,
   noteBody: (vaultId: string, noteId: string) => `inked/note-body/${vaultId}/${noteId}`,
+  noteVector: (vaultId: string, noteId: string, model: string) => `inked/note-vector/${vaultId}/${noteId}/${model}`,
 } as const;
 
 export const HKDF_INFO = {
