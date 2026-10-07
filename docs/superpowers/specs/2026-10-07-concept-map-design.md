@@ -78,13 +78,13 @@ export function layoutWorld(layouts: VaultLayout[], gap?: number): Record<string
 ```
 
 - **Coordinates.** `layoutVault` works in vault-local units with the hub at (0,0). `parent` maps every folder id and note id to its parent folder id, or to `null` for the hub. Pencil lines and ink paths are drawn from `parent`.
-- **Slices.** The full circle is split among the top-level entries: each top-level folder, plus one "root notes" slice if any note has no folder. A slice's angle is proportional to its weight. The weight is `1 + the weight of each child folder`, so it counts folders only. Notes are left out so that adding a note never resizes another folder's slice (see Stability).
+- **Slices.** The circle, less a gap of `HUB_GAP` (π/3) left free at the top for the hub name, is split among the top-level entries: each top-level folder, plus one "root notes" slice of weight 1. The root slice is always reserved, even when it is empty, so the first root note moves nothing. The first slice starts at `−π/2 + HUB_GAP/2`. A slice's angle is proportional to its weight. The weight is `1 + the weight of each child folder`, so it counts folders only. Notes are left out so that adding a note never resizes another folder's slice (see Stability).
 - **Folder rings.** A top-level folder sits at radius `R0`, at the angular centre of its slice. Child folders split the parent's slice by weight in the same way. They sit at `max(r + RSTEP, outermost note row of the parent + NR)`, which depends only on the parent's own notes.
-- **Note rows.** A folder's own notes sit in the folder's slice, in hub-centred rows at radius `r + NR + k·NSTEP` (k = 0, 1, …), spread evenly across the slice. A row holds as many notes as fit with a chord of at least `MIN_GAP` between neighbours. Any notes left over wrap to the next row out.
+- **Note rows.** A folder's own notes sit in the folder's slice, in hub-centred rows at radius `r + NR + k·NSTEP` (k = 0, 1, …), clustered around the slice's centre angle. Neighbours in a row are `min(span / n, NOTE_SPREAD × step)` apart, where `step` is the angle of a `MIN_GAP` chord and `NOTE_SPREAD` is 1.6. A row holds as many notes as fit with a chord of at least `MIN_GAP` between neighbours. Any notes left over wrap to the next row out.
 - **Root notes.** They sit in their own slice using the same rows, starting at radius `R0`.
 - **Order.** Siblings are sorted by `name.localeCompare` (folders) or `title.localeCompare` (notes), with the id as tie-break. Nothing is random.
 - **Radius.** `radius` is the distance from the hub to the farthest dot, plus the label margin.
-- **Constants.** `R0`, `RSTEP`, `NR`, `NSTEP` and `MIN_GAP` are exported constants. The plan chooses their values. They must keep dots in one arc at least `MIN_GAP` apart.
+- **Constants.** `R0`, `RSTEP`, `NR`, `NSTEP`, `MIN_GAP`, `NOTE_SPREAD` and `HUB_GAP` are exported constants. The plan chooses their values. They must keep dots in one arc at least `MIN_GAP` apart.
 - **World layout.** `layoutWorld` places the vault circles in rows, in the given (sidebar) order, with the row width capped at about the square root of the total area. It returns each vault's world-space centre.
 - **Stability.** Links and edit times never affect positions. Adding, removing or renaming a note moves only dots in that note's folder and that folder's descendant folders. Adding or removing a folder rebalances the slices.
 
@@ -135,14 +135,14 @@ export function inkTier(updatedAt: string, now: number): InkTier;
 ### Rendering
 
 - Screen coordinates are computed in JavaScript as `world·scale + t`. The SVG `viewBox` matches the element's pixel size. Dots, strokes and text therefore stay the same size at every zoom level.
-- The element's size comes from a `ResizeObserver`, with a fallback of 800×480 (also the size under jsdom).
+- The SVG is absolutely positioned inside the frame, so it never sizes the frame. The frame is measured once on mount and then followed with a `ResizeObserver`, with a fallback of 800×480 (also the size under jsdom).
 - Layers, back to front:
   1. Pencil lines: `parent` → child, 1 px, `--map-pencil`.
   2. Link lines: 1 px dashed (`3 3`), `--map-pencil`. Drawn only when `linksReady`.
   3. Ink: one tapered filled path per inked note, following the hub → folder chain → note, in `--map-ink`. The polygon is wider at the hub end and narrower at the note end.
   4. Dots: radius 4 px (8 px marker), or 5 px when selected, hot or hovered. Filled with the tier colour, with a 2 px ring in the canvas colour. Each dot has a transparent hit circle of radius 12 px (24 px target).
-  5. Folder labels: Public Sans 10.5 px on a canvas-coloured pill.
-  6. Hubs: the `VaultIcon` plus the vault name in Spectral italic.
+  5. Folder labels: Public Sans 10.5 px with a canvas-coloured halo (a stroke drawn under the text).
+  6. Hubs: the `VaultIcon`, with the vault name in Spectral italic centred above it.
 - **Note labels** show when `scale ≥ 1.6`, or when the note is hovered, focused, selected, hot or a hit.
 - **Hover and focus label.** A hovered or focused dot shows `{title} · {relativeTime}` as its label, so hover and keyboard focus show the same details. Labels use text tokens, never the tier colour.
 - **Search fading.** When `hits` is non-empty, notes that are not hits drop to 30 % opacity.
@@ -169,16 +169,16 @@ export function inkTier(updatedAt: string, now: number): InkTier;
 - **Dots** are `<g role="button" aria-label="{title}, {folder path or 'vault root'}, edited {relativeTime}">` with a visible focus ring.
 - **Keys:**
   - Arrow keys move focus to the nearest dot within a 90° cone in that direction, measured in screen space.
-  - `+` or `=` zooms in, `-` zooms out, and `0` fits.
+  - `+` or `=` zooms in, `-` zooms out, and `0` fits. With Ctrl, Meta or Alt held these keys do nothing, so browser zoom still works.
   - Focusing a dot that is outside the view pans it into view.
 - The results list stays the full text alternative.
 
 ### States
 
-- While `vaultsStatus !== 'ready'`, or any tree is still loading and nothing is drawn yet, the frame shows "Decrypting your notes…".
+- While `vaultsStatus` is neither `'ready'` nor `'error'`, or any tree is still loading, and nothing is drawn yet, the frame shows "Decrypting your notes…".
 - With no vaults, the map section isn't rendered, and the existing empty message in the results column stays.
 - An empty vault shows its hub only.
-- A vault whose tree has `status: 'error'` shows its hub with the caption "Couldn't load".
+- A vault whose tree has `status: 'error'` shows its hub with the caption "Couldn't load" below it. Screen readers get "{vault name}: couldn’t load" from a visually hidden line outside the SVG.
 - While any `linksReady` is false, the legend adds "Links appear once note text is decrypted."
 - Viewport and selection are component state. They are not stored anywhere and are reset on lock, because the component unmounts.
 
@@ -212,20 +212,22 @@ export function localGraph(graph: VaultGraph, noteId: string): LocalGraph | null
 ### `map/LocalMap.tsx`
 
 - It is a section at the top of `aside.ctx`, titled "Local map", above Backlinks.
-- It uses a fixed frame (`aspect-ratio: 100 / 78`) and the same SVG approach as the Home map, with no pan or zoom.
-- **Placement** (in a 320×250 viewBox). Twelve always-labelled notes per group don't fit on arcs in a side panel, so each group gets a column:
+- It uses the same SVG approach as the Home map, with no pan or zoom. The viewBox is 220 wide, matching the ~220 px panel so text renders near its CSS size. Its height follows the longest column: `88 + rows × 12.5`, plus 14 when a column says "+N more" or 4 otherwise, and at least 120. The SVG is `width: 100%; height: auto`.
+- It is shown only for a note that is on the map; a broken note gets no "Local map" section.
+- **Placement** (in the 220-wide viewBox: parent at (110, 16), centre at (110, 46), columns at x = 4, 77 and 150, rows from y = 88). Twelve always-labelled notes per group don't fit on arcs in a side panel, so each group gets a column:
   - the parent (folder label, or the vault drop icon plus the vault name) sits at the top centre;
   - the centre note sits below it, with a 1.5 px ring in `--map-ink`;
   - underneath are three captioned columns: "links in" on the left, "same folder" in the middle and "links out" on the right;
   - each column is a vertical list of dots with their labels to the right. Each row's hit area is a transparent rectangle covering the dot and its label;
   - pencil lines join the parent to the centre and to each sibling, and dashed lines join the centre to each linked note;
   - a "+N more" label ends any column that was capped.
-- Labels are always visible, cut to 14 characters with "…". The full title is in the `aria-label` and the SVG `<title>`.
+- Labels are always visible, 10 px, cut to 11 characters with "…" (the parent to 20, the centre note to 16). The full title is in the `aria-label` and the SVG `<title>`.
 - Clicking a dot, or pressing Enter or Space, navigates to `/v/{vaultId}/n/{id}`.
 - Keyboard behaviour is the same roving tabindex and arrow-key model as the Home map.
 - **States:**
   - "Drawing links…" while `!linksReady`; siblings are still drawn;
   - "No neighbours yet" when every group is empty.
+  - Both messages sit under the SVG in normal flow, so they never cover a row.
 
 ### Backlinks from the graph
 
