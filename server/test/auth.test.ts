@@ -1,12 +1,11 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import * as cryptoMod from '../src/crypto.js';
-import { type Account, call, fakeCipher, inviteUser, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
+import { type Account, authSaltOf, call, fakeCipher, inviteUser, key32, makeApp, registerBody, sessionCookie, setupAdmin, setupBody, TEST_SETUP_TOKEN, type TestApp } from './helpers.js';
 
 let t: TestApp;
 beforeEach(async () => {
@@ -268,16 +267,8 @@ describe('known devices (I-3)', () => {
   });
 
   const secret = () => readFileSync(path.join(t.dataDir, 'server-secret'));
-  const authSaltOf = (userId: string) => {
-    const db = new DatabaseSync(path.join(t.dataDir, 'inked.db'), { readOnly: true });
-    try {
-      return (db.prepare('SELECT auth_salt FROM users WHERE id = ?').get(userId) as { auth_salt: string }).auth_salt;
-    } finally {
-      db.close();
-    }
-  };
   const deviceValue = (userId: string) =>
-    `${Buffer.from(userId).toString('base64url')}.${createHmac('sha256', secret()).update(`device:${userId}:${authSaltOf(userId)}`).digest('base64url')}`;
+    `${Buffer.from(userId).toString('base64url')}.${createHmac('sha256', secret()).update(`device:${userId}:${authSaltOf(t.dataDir, userId)}`).digest('base64url')}`;
   const deviceCookie = (res: { cookies: Array<{ name: string; value: string }> }) =>
     res.cookies.find((c) => c.name === 'inked_device');
   const login = (authKey: string, ip: string, device?: string) =>
@@ -413,14 +404,6 @@ describe('known devices (I-3)', () => {
 describe('device cookie on setup and register (A1)', () => {
   const deviceHeader = (res: { headers: Record<string, unknown> }) =>
     ([] as string[]).concat(res.headers['set-cookie'] as string | string[]).find((c) => c.startsWith('inked_device='))!;
-  const saltOf = (userId: string) => {
-    const db = new DatabaseSync(path.join(t.dataDir, 'inked.db'), { readOnly: true });
-    try {
-      return (db.prepare('SELECT auth_salt FROM users WHERE id = ?').get(userId) as { auth_salt: string }).auth_salt;
-    } finally {
-      db.close();
-    }
-  };
   const expectDevice = (res: { statusCode: number; headers: Record<string, unknown> }, userId: string) => {
     expect(res.statusCode).toBe(200);
     const raw = deviceHeader(res);
@@ -428,8 +411,9 @@ describe('device cookie on setup and register (A1)', () => {
     expect(raw).toContain('Path=/api/auth');
     expect(raw).toContain('HttpOnly');
     expect(raw).toContain('SameSite=Strict');
+    expect(raw).toContain('Max-Age=15552000');
     const tag = createHmac('sha256', readFileSync(path.join(t.dataDir, 'server-secret')))
-      .update(`device:${userId}:${saltOf(userId)}`)
+      .update(`device:${userId}:${authSaltOf(t.dataDir, userId)}`)
       .digest('base64url');
     expect(raw.split(';')[0]).toBe(`inked_device=${Buffer.from(userId).toString('base64url')}.${tag}`);
   };
@@ -442,6 +426,24 @@ describe('device cookie on setup and register (A1)', () => {
     const invite = await call(t.app, 'POST', '/api/invites', { cookie: sessionCookie(setup), body: {} });
     const reg = await call(t.app, 'POST', '/api/auth/register', { body: { ...bob, inviteToken: invite.json().token } });
     expectDevice(reg, bob.userId);
+  });
+
+  it('marks both cookies Secure when cookieSecure is on (D2b)', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'inked-test-'));
+    const app = await buildApp({ dataDir, webDist: path.join(dataDir, 'no-web'), cookieSecure: true, setupToken: TEST_SETUP_TOKEN, logger: { level: 'silent' } });
+    try {
+      const res = await call(app, 'POST', '/api/setup', { body: setupBody('admin') });
+      expect(res.statusCode).toBe(200);
+      const raw = ([] as string[]).concat(res.headers['set-cookie'] as string | string[]);
+      for (const name of ['inked_device', 'inked_session']) {
+        const c = raw.find((h) => h.startsWith(`${name}=`));
+        expect(c, name).toBeDefined();
+        expect(c).toContain('Secure');
+      }
+    } finally {
+      await app.close();
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   });
 });
 

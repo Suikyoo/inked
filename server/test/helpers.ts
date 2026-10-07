@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { buildApp } from '../src/app.js';
@@ -102,4 +103,14 @@ export async function inviteUser(app: FastifyInstance, admin: Account, username:
   const res = await call(app, 'POST', '/api/auth/register', { body });
   if (res.statusCode !== 200) throw new Error(`register failed: ${res.statusCode} ${res.body}`);
   return { username, authKey: body.authKey, recoveryAuth: body.recoveryAuth, cookie: sessionCookie(res), userId: body.userId };
+}
+
+/** The user's auth_salt, read straight from the test database (used to recompute device cookies). */
+export function authSaltOf(dataDir: string, userId: string): string {
+  const db = new DatabaseSync(path.join(dataDir, 'inked.db'), { readOnly: true });
+  try {
+    return (db.prepare('SELECT auth_salt FROM users WHERE id = ?').get(userId) as { auth_salt: string }).auth_salt;
+  } finally {
+    db.close();
+  }
 }
