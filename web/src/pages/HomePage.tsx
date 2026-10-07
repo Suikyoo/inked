@@ -14,6 +14,11 @@ import { homeColumn, homeError, homePending } from './homeStatus';
 import { useAppState, useSearchEntries, useStore, vaultStats } from '../state/StoreContext';
 import type { AppState } from '../state/store';
 
+interface RowFlags {
+  fresh: boolean;
+  stagger: number | null;
+}
+
 /** The first reveal staggers at most this many rows. */
 const STAGGER_ROWS = 8;
 
@@ -132,17 +137,29 @@ export function HomePage() {
 
   const total = titleHits.length + bodyHits.length;
 
-  // Rows that newly enter the result set ease in; the first reveal of a search staggers them.
+  // A row that newly enters the result set eases in; the first reveal (the previous render had no query)
+  // staggers the rows. The flags are frozen when a row enters and kept while its id stays in the set, so
+  // typing, hover and store updates do not cut the animation short or replay it.
   const shownIds = column === 'search' ? [...titleHits, ...bodyHits].map((h) => h.entry.noteId) : [];
-  const seen = useRef<Set<string>>(new Set());
-  const firstReveal = seen.current.size === 0;
+  const rowFlags = useRef(new Map<string, RowFlags>());
+  const wasIdle = useRef(true);
+  const flags = new Map<string, RowFlags>();
+  shownIds.forEach((id, i) => flags.set(id, rowFlags.current.get(id) ?? { fresh: true, stagger: wasIdle.current ? Math.min(i, STAGGER_ROWS - 1) : null }));
   useEffect(() => {
-    seen.current = new Set(shownIds);
+    rowFlags.current = flags;
+    wasIdle.current = !q;
   });
-  const rowMotion = (id: string, i: number) => ({
-    'data-new': seen.current.has(id) ? undefined : '',
-    style: firstReveal ? ({ '--i': Math.min(i, STAGGER_ROWS - 1) } as CSSProperties) : undefined,
-  });
+  const rowMotion = (id: string) => {
+    const f = flags.get(id);
+    return {
+      'data-new': f?.fresh ? '' : undefined,
+      style: f?.fresh && f.stagger != null ? ({ '--i': f.stagger } as CSSProperties) : undefined,
+      // Once the entry animation has finished the flag is spent; the next render drops it with no visible change.
+      onAnimationEnd: () => {
+        if (f) f.fresh = false;
+      },
+    };
+  };
 
   return (
     <div className="home">
@@ -222,8 +239,8 @@ export function HomePage() {
                 {treesPending ? 'Searching…' : `${total} ${total === 1 ? 'match' : 'matches'}`}
               </h2>
               <ul className="res-list">
-                {titleHits.map(({ entry, match }, i) => (
-                  <li key={entry.noteId} {...rowMotion(entry.noteId, i)}>
+                {titleHits.map(({ entry, match }) => (
+                  <li key={entry.noteId} {...rowMotion(entry.noteId)}>
                     <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
                       <span className="res-title">
                         <Highlighted text={entry.text.slice(entry.pathStart)} indices={match.indices} offset={entry.pathStart} />
@@ -237,8 +254,8 @@ export function HomePage() {
                 <>
                   <h3 className="results-sub">In note text</h3>
                   <ul className="res-list">
-                    {bodyHits.map(({ entry, snippet }, i) => (
-                      <li key={entry.noteId} {...rowMotion(entry.noteId, titleHits.length + i)}>
+                    {bodyHits.map(({ entry, snippet }) => (
+                      <li key={entry.noteId} {...rowMotion(entry.noteId)}>
                         <Link className="res" to={hrefFor(entry)} data-note={entry.noteId}>
                           <span className="res-title">{entry.text.slice(entry.pathStart)}</span>
                           <span className="res-snippet">

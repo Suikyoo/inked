@@ -23,7 +23,7 @@ export function homeColumn(state: Pick<AppState, 'vaults' | 'trees'>, query: str
   let alive: boolean;
   if (selection.kind === 'hub') {
     const v = state.vaults[selection.vaultId];
-    alive = !!v && !v.broken;
+    alive = !!v && !v.broken && !!tree;
   } else if (selection.kind === 'folder') {
     const f = tree?.folders[selection.id];
     alive = !!f && !f.broken;

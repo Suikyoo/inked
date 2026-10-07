@@ -57,5 +57,6 @@ describe('homeColumn', () => {
     expect(homeColumn(s, '', { kind: 'note', vaultId: 'v1', id: 'gone' })).toBe('empty');
     expect(homeColumn({ ...s, trees: {} }, '', sel)).toBe('empty');
     expect(homeColumn({ ...s, vaults: {} }, '', { kind: 'hub', vaultId: 'v1' })).toBe('empty');
+    expect(homeColumn({ ...s, trees: {} }, '', { kind: 'hub', vaultId: 'v1' })).toBe('empty');
   });
 });

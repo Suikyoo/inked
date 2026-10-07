@@ -124,6 +124,8 @@ describe('HomePage right column', () => {
     expect(first.length).toBeGreaterThan(0);
     expect(first.every((r) => r.hasAttribute('data-new'))).toBe(true);
     const had = new Set(first.map(titleOf));
+    // The entry animation ends; the flags are spent.
+    act(() => rows().forEach((r) => void r.dispatchEvent(new Event('animationend', { bubbles: true }))));
     type('alph');
     type('a');
     const after = rows().filter((r) => r.querySelector('a.res'));
@@ -142,7 +144,21 @@ describe('HomePage right column', () => {
       .map((r) => Number(r.style.getPropertyValue('--i')));
     expect(idx.slice(0, 8)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
     expect(Math.max(...idx)).toBe(7);
+    act(() => rows().forEach((r) => void r.dispatchEvent(new Event('animationend', { bubbles: true }))));
     type('memo 1');
     expect(rows().every((r) => r.style.getPropertyValue('--i') === '')).toBe(true);
+  });
+
+  it('keeps data-new and --i through re-renders inside the animation window', () => {
+    mount(baseState());
+    type('alpha');
+    const snap = () => rows().filter((r) => r.querySelector('a.res')).map((r) => [r.hasAttribute('data-new'), r.style.getPropertyValue('--i')]);
+    const before = snap();
+    expect(before[0]).toEqual([true, '0']);
+    // A hover sets the hot note and re-renders; so does a store update.
+    act(() => void host!.querySelector('a.res')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    expect(snap()).toEqual(before);
+    type('alpha');
+    expect(snap()).toEqual(before);
   });
 });

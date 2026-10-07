@@ -37,7 +37,7 @@ export function makeState(over: Partial<AppState> = {}): AppState {
     vaults: { v1: vault('v1', 'Work') },
     vaultOrder: ['v1'],
     trees: { v1: t },
-    bodies: { n1: 'Hello **bold**', n2: '# Ops\n\nThe *ops* folder.', n3: 'Root **desc**', n4: 'see [[Alpha]]', n5: '' },
+    bodies: { n1: 'Hello **bold** [[Linker]]\n\n- [ ] todo', n2: '# Ops\n\nThe *ops* folder.', n3: 'Root **desc**', n4: 'see [[Alpha]]', n5: '' },
     bodiesReady: { v1: true },
     ...over,
   } as unknown as AppState;
@@ -89,10 +89,29 @@ describe('NodePreview', () => {
     expect(link('Edit')?.getAttribute('href')).toBe('/v/v1/n/n1');
   });
 
-  it('note: Edit opens the note with fresh state', () => {
+  it('note: Edit opens the note in edit mode without the fresh (title-select) state', () => {
     mount(makeState(), { kind: 'note', vaultId: 'v1', id: 'n1' });
     click(link('Edit'));
-    expect(where()?.getAttribute('data-state')).toBe('{"fresh":true}');
+    expect(where()?.getAttribute('data-state')).toBe('{"mode":"edit"}');
+  });
+
+  it('note: a wiki-link in the body routes in-app', () => {
+    mount(makeState(), { kind: 'note', vaultId: 'v1', id: 'n1' });
+    const a = host!.querySelector<HTMLAnchorElement>('.md a[data-wikilink]')!;
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    act(() => void a.dispatchEvent(ev));
+    expect(ev.defaultPrevented).toBe(true);
+    expect(where()?.textContent).toBe('/v/v1/n/n4');
+  });
+
+  it('note: task checkboxes are read-only in the preview', () => {
+    mount(makeState(), { kind: 'note', vaultId: 'v1', id: 'n1' });
+    const box = host!.querySelector<HTMLInputElement>('.md input.task-checkbox')!;
+    expect(box.checked).toBe(false);
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    act(() => void box.dispatchEvent(ev));
+    expect(ev.defaultPrevented).toBe(true);
+    expect(box.checked).toBe(false);
   });
 
   it('note: body not decrypted yet shows Decrypting…', () => {

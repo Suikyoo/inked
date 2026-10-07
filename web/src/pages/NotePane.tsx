@@ -76,7 +76,10 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
   const editor = useNoteEditor(vault.id, noteId);
   const tree = state.trees[vault.id];
   const head = tree?.notes[noteId];
-  const fresh = (location.state as { fresh?: boolean } | null)?.fresh === true;
+  const navState = location.state as { fresh?: boolean; mode?: string } | null;
+  const fresh = navState?.fresh === true;
+  /** Opened with Edit from the Home preview: edit mode, caret in the body, title left alone. */
+  const editBody = navState?.mode === 'edit';
 
   const [mode, setMode] = useState<'edit' | 'view'>('view');
   const [title, setTitle] = useState(head?.title ?? '');
@@ -87,13 +90,16 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
   // Pick the initial mode once the note has loaded.
   useEffect(() => {
     if (editor.status !== 'ready') return;
-    const startEdit = fresh || editor.body.trim() === '';
+    const startEdit = fresh || editBody || editor.body.trim() === '';
     setMode(startEdit ? 'edit' : 'view');
     if (fresh) {
       window.setTimeout(() => {
         titleRef.current?.focus();
         titleRef.current?.select();
       }, 0);
+      navigate('.', { replace: true, state: null });
+    } else if (editBody) {
+      window.setTimeout(() => textRef.current?.focus(), 0);
       navigate('.', { replace: true, state: null });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

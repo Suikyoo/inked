@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { uniqueTitle } from '../components/VaultTree';
 import { describeError, relativeTime } from '../lib/util';
@@ -8,6 +8,7 @@ import { incomingLinks } from '../map/graph';
 import type { MapSelection } from '../map/ConceptMap';
 import { useVaultGraph } from '../map/useVaultGraphs';
 import { renderMarkdown } from '../markdown/render';
+import { followNoteLink } from './NotePane';
 import { folderPath, useAppState, useStore } from '../state/StoreContext';
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
@@ -15,6 +16,7 @@ const href = (vaultId: string, noteId: string) => `/v/${vaultId}/n/${noteId}`;
 
 function Markdown({ body, ready, vaultId }: { body: string | undefined; ready: boolean; vaultId: string }) {
   const state = useAppState();
+  const navigate = useNavigate();
   const titles = useMemo(() => titleIndex(state.trees[vaultId]), [state.trees, vaultId]);
   const html = useMemo(
     () =>
@@ -31,7 +33,15 @@ function Markdown({ body, ready, vaultId }: { body: string | undefined; ready: b
   if (body === undefined) return <p className="preview-hint">{ready ? 'No text available.' : 'Decrypting…'}</p>;
   if (!body.trim()) return <p className="preview-hint">This note is empty.</p>;
   // Sanitised by DOMPurify in renderMarkdown, as in NotePane.
-  return <article className="md" dangerouslySetInnerHTML={{ __html: html }} />;
+  const onClick = (e: MouseEvent<HTMLElement>) => {
+    // Task boxes are read-only here; they toggle on the note page.
+    if (e.target instanceof HTMLInputElement && e.target.classList.contains('task-checkbox')) {
+      e.preventDefault();
+      return;
+    }
+    followNoteLink(e, navigate);
+  };
+  return <article className="md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 /** What the Home column shows for a node picked on the map. */
@@ -45,6 +55,8 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
   const tree = state.trees[vaultId];
   const graph = useVaultGraph(state, vaultId);
   const ready = !!state.bodiesReady[vaultId];
+  const key = selection.kind === 'hub' ? `hub:${vaultId}` : selection.id;
+  useEffect(() => setError(null), [key]);
   if (!vault || !tree) return null;
 
   const run = async (job: () => Promise<{ id: string }>) => {
@@ -57,7 +69,6 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
     }
   };
 
-  const key = selection.kind === 'hub' ? `hub:${vaultId}` : selection.id;
 
   if (selection.kind === 'note') {
     const n = tree.notes[selection.id];
@@ -97,7 +108,7 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
           <Link className="btn btn-primary btn-sm" to={href(vaultId, n.id)}>
             Open note
           </Link>
-          <Link className="btn btn-sm" to={href(vaultId, n.id)} state={{ fresh: true }}>
+          <Link className="btn btn-sm" to={href(vaultId, n.id)} state={{ mode: 'edit' }}>
             Edit
           </Link>
         </div>
