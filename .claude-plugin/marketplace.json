@@ -1,0 +1,8 @@
+{
+  "name": "inked",
+  "description": "Plugins for working with Inked, the zero-knowledge Markdown notes app.",
+  "owner": { "name": "Inked" },
+  "plugins": [
+    { "name": "inked", "source": "./mcp/plugin", "description": "Inked MCP server and the inked-notes skill." }
+  ]
+}

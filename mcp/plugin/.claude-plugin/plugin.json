@@ -1,0 +1,6 @@
+{
+  "name": "inked",
+  "version": "0.1.0",
+  "description": "Read and build linked notes in your Inked vaults: the inked-mcp server plus the inked-notes skill.",
+  "author": { "name": "Inked" }
+}

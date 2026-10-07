@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "inked": { "command": "inked-mcp", "args": ["serve"] }
+  }
+}
