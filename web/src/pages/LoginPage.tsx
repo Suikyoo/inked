@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { InkFill } from '../brand/InkFill';
-import { setWipeOrigin, withViewTransition } from '../motion';
+import { prefersReducedMotion, setWipeOrigin, withViewTransition } from '../motion';
 import { isApiError } from '../api/client';
 import { FormError, PasswordField, TextField } from '../components/Fields';
 import { UnlockIcon } from '../components/Icons';
@@ -12,6 +12,8 @@ import { useAppState, useStore } from '../state/StoreContext';
 import { AuthLayout } from './AuthLayout';
 
 const MAX_TRIES = 5;
+/** Lets the drop finish filling before the swap; mirrors --dur-2. */
+const DROP_DONE_MS = 140;
 
 export function LoginPage() {
   const store = useStore();
@@ -33,9 +35,22 @@ export function LoginPage() {
 
   // The store is already unlocked when it notifies; only the screen swap is animated, as an ink wipe.
   useEffect(() => {
-    store.unlockTransition = (notify) => withViewTransition(() => flushSync(notify));
+    const hook = (notify: () => void) => {
+      const swap = () => {
+        const root = document.documentElement;
+        root.classList.add('is-unlocking');
+        const t = withViewTransition(() => flushSync(notify));
+        const clear = () => root.classList.remove('is-unlocking');
+        if (t?.finished) void t.finished.then(clear, clear);
+        else clear();
+      };
+      setUnlocked(true);
+      if (prefersReducedMotion()) swap();
+      else setTimeout(swap, DROP_DONE_MS);
+    };
+    store.unlockTransition = hook;
     return () => {
-      store.unlockTransition = null;
+      if (store.unlockTransition === hook) store.unlockTransition = null;
     };
   }, [store]);
 
@@ -155,7 +170,9 @@ export function LoginPage() {
           />
         )}
         {known && <input type="hidden" name="username" autoComplete="username" value={known} readOnly />}
-        <div className={nudge ? 'field-nudge nudge' : 'field-nudge'} onAnimationEnd={() => setNudge(false)}>
+        <div className={nudge ? 'field-nudge nudge' : 'field-nudge'} onAnimationEnd={(e) => {
+            if (e.target === e.currentTarget) setNudge(false);
+          }}>
           <PasswordField
             ref={pwRef}
             label="Password"

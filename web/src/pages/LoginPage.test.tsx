@@ -87,17 +87,40 @@ describe('LoginPage motion', () => {
   });
 
   it('runs the unlock re-render inside a view transition, wiping from the button', async () => {
-    const start = vi.fn((cb: () => void) => cb());
+    const start = vi.fn((cb: () => void) => {
+      cb();
+      return { finished: new Promise<void>(() => undefined) };
+    });
     (document as unknown as { startViewTransition: unknown }).startViewTransition = start;
-    const store = fakeStore(vi.fn().mockResolvedValue(undefined));
+    const store = fakeStore(vi.fn(() => new Promise<void>(() => undefined)));
     const el = render(store);
     expect(store.unlockTransition).toBeTypeOf('function');
-    const notify = vi.fn();
-    store.unlockTransition!(notify);
-    expect(start).toHaveBeenCalledWith(expect.any(Function));
-    expect(notify).toHaveBeenCalledTimes(1);
     await submitWith(el, 'right-pass');
     expect(document.documentElement.style.getPropertyValue('--wipe-x')).not.toBe('');
+    const notify = vi.fn();
+    vi.useFakeTimers();
+    act(() => store.unlockTransition!(notify));
+    // The drop completes first, then the swap runs inside the transition.
+    expect(el.querySelector('svg.ink-fill')!.classList.contains('is-done')).toBe(true);
+    expect(start).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(140);
+    });
+    vi.useRealTimers();
+    expect(start).toHaveBeenCalledWith(expect.any(Function));
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(document.documentElement.classList.contains('is-unlocking')).toBe(true);
+  });
+
+  it('ignores animationend bubbling from children', async () => {
+    const store = fakeStore(vi.fn().mockRejectedValue(new ApiError(401, 'bad_credentials')));
+    const el = render(store);
+    await submitWith(el, 'wrong-pass');
+    const wrap = el.querySelector('.field-nudge')!;
+    act(() => {
+      el.querySelector('input')!.dispatchEvent(new Event('animationend', { bubbles: true }));
+    });
+    expect(wrap.classList.contains('nudge')).toBe(true);
   });
 
   it('removes its transition hook on unmount', () => {

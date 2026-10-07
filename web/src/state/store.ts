@@ -33,6 +33,9 @@ import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
 import { sendPending, type DropReason, type PendingSave } from './pending';
 import { TabLink } from './tabs';
 
+/** If the unlock hook never calls back, subscribers are notified after this long. */
+export const UNLOCK_TRANSITION_MAX_MS = 1000;
+
 export type Phase = 'booting' | 'offline' | 'setup' | 'signedOut' | 'locked' | 'unlocked';
 
 export interface VaultView {
@@ -267,6 +270,7 @@ export class AppStore {
    * phase is passed to it so the UI can run the re-render inside a View Transition.
    */
   unlockTransition: ((notify: () => void) => void) | null = null;
+  private notifyHeld = false;
   private userKey: CryptoKey | null = null;
   private vaultKeys = new Map<string, CryptoKey>();
   /** Bumped on every lock/unlock so late async results from an old session are dropped. */
@@ -332,9 +336,27 @@ export class AppStore {
     const notify = () => {
       for (const l of this.listeners) l();
     };
+    // While an unlock notification is deferred, later ones are held: the deferred call reads the latest state.
+    if (this.notifyHeld) return;
     // The state is already final; only the moment subscribers re-render may be handed to the UI.
-    if (unlocking && this.unlockTransition) this.unlockTransition(notify);
-    else notify();
+    if (unlocking && this.unlockTransition) {
+      this.notifyHeld = true;
+      let flushed = false;
+      const flush = () => {
+        if (flushed) return;
+        flushed = true;
+        clearTimeout(timer);
+        this.notifyHeld = false;
+        notify();
+      };
+      const timer = setTimeout(flush, UNLOCK_TRANSITION_MAX_MS);
+      try {
+        this.unlockTransition(flush);
+      } catch (e) {
+        flush();
+        throw e;
+      }
+    } else notify();
   }
 
   clearNotice() {

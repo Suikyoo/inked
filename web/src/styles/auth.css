@@ -195,10 +195,10 @@
   --wipe-x: 50%;
   --wipe-y: 50%;
 }
-::view-transition-old(root) {
+html.is-unlocking::view-transition-old(root) {
   animation: none;
 }
-::view-transition-new(root) {
+html.is-unlocking::view-transition-new(root) {
   animation: ink-wipe var(--dur-4) var(--ease-out) both;
 }
 @keyframes ink-wipe {
@@ -210,7 +210,19 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-new(root) {
+  html.is-unlocking::view-transition-new(root) {
     animation: none;
+  }
+}
+
+/* Error text and the lock notice fade in. Under reduced motion the fade stays, at 120ms. */
+.form-error,
+.notice {
+  animation: auth-in var(--dur-3) var(--ease-out) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .form-error,
+  .notice {
+    animation-duration: 120ms !important;
   }
 }
