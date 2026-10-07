@@ -113,7 +113,7 @@ function SemanticSearch() {
       {sem.phase === 'loading' && <p className="field-hint">Preparing the search model…</p>}
       {sem.phase === 'error' && (
         <>
-          <p className="form-error">{sem.error}</p>
+          <FormError>{sem.error}</FormError>
           <div className="row-actions">
             <button type="button" className="btn btn-sm" onClick={() => store.retry()}>
               Retry

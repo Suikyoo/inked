@@ -22,4 +22,28 @@ describe('ProgressBar', () => {
     act(() => root.unmount());
     host.remove();
   });
+
+  const bar = (value: number, max: number) => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<ProgressBar value={value} max={max} label="x" />));
+    const el = host.querySelector('[role="progressbar"]')!;
+    const out = { now: el.getAttribute('aria-valuenow'), max: el.getAttribute('aria-valuemax'), width: (el.firstElementChild as HTMLElement).style.width };
+    act(() => root.unmount());
+    host.remove();
+    return out;
+  };
+
+  it('keeps aria-valuenow within range when max is 0', () => {
+    expect(bar(5, 0)).toEqual({ now: '0', max: '0', width: '0%' });
+  });
+
+  it('clamps a value above max', () => {
+    expect(bar(300, 210)).toEqual({ now: '210', max: '210', width: '100%' });
+  });
+
+  it('treats NaN as 0', () => {
+    expect(bar(NaN, 10).now).toBe('0');
+  });
 });

@@ -92,9 +92,15 @@ describe('Settings: Search by meaning', () => {
 
   it('shows the error with a working Retry', () => {
     const { retry } = renderSettings({ enabled: true, phase: 'error', error: 'Couldn’t download the search model.' });
-    expect(host!.querySelector('.form-error')?.textContent).toBe('Couldn’t download the search model.');
+    expect(host!.querySelector('.form-error[role="alert"]')?.textContent).toBe('Couldn’t download the search model.');
     act(() => button('Retry').click());
     expect(retry).toHaveBeenCalled();
+  });
+
+  it('turns off when unticked while enabled', () => {
+    const { setEnabled } = renderSettings({ enabled: true, phase: 'ready' });
+    act(() => semanticBox().click());
+    expect(setEnabled).toHaveBeenCalledWith(false);
   });
 
   it('explains a paused model', () => {
