@@ -79,11 +79,6 @@ export const ChevronRight = (p: P) => (
     <path d="M9 6l6 6-6 6" />
   </Svg>
 );
-export const ChevronDown = (p: P) => (
-  <Svg strokeWidth={2.6} {...p}>
-    <path d="M6 9l6 6 6-6" />
-  </Svg>
-);
 export const MoreIcon = (p: P) => (
   <Svg strokeWidth={2.4} {...p}>
     <path d="M6 12h.01M12 12h.01M18 12h.01" />
@@ -146,9 +141,20 @@ export const ClockIcon = (p: P) => (
   </Svg>
 );
 
-/** The Index row's glyph: a small filled diamond. */
-export const IndexIcon = ({ size = 9, className }: P) => (
-  <svg className={className ? `index-icon ${className}` : 'index-icon'} width={size} height={size} viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
-    <path d="M5 .5 9.5 5 5 9.5.5 5z" />
+/** The Index row's glyph: a small outline ◇ diamond, inset so the stroke isn't clipped. */
+export const IndexIcon = ({ size = 9, strokeWidth = 1.3, className }: P) => (
+  <svg
+    className={className ? `index-icon ${className}` : 'index-icon'}
+    width={size}
+    height={size}
+    viewBox="0 0 10 10"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinejoin="round"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path d="M5 1 9 5 5 9 1 5z" />
   </svg>
 );

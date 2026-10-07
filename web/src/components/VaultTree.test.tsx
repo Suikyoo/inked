@@ -111,7 +111,12 @@ describe('Index row', () => {
     expect(rows).toEqual(['idx', 'a', 'z']);
     const r = row('idx');
     expect(r.classList.contains('tree-index')).toBe(true);
-    expect(r.querySelector('svg.index-icon')).not.toBeNull();
+    const glyph = r.querySelector('svg.index-icon')!;
+    expect(glyph).not.toBeNull();
+    // An outline ◇: stroked in currentColor (--ink-light from .tree-chev), never filled.
+    expect(glyph.getAttribute('fill')).toBe('none');
+    expect(glyph.getAttribute('stroke')).toBe('currentColor');
+    expect(glyph.querySelector('path')!.hasAttribute('fill')).toBe(false);
     expect(r.querySelector('.tree-label')?.textContent).toBe('Index');
     expect(row('a').classList.contains('tree-index')).toBe(false);
   });
