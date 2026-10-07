@@ -7,15 +7,17 @@ import { localGraph } from './localGraph';
 import { inkTier } from './recency';
 import { arrowDir, displayTitle, nearestInDirection } from './scene';
 
-const W = 320;
-const H = 250;
-const PARENT = { x: 160, y: 18 };
-const CENTER = { x: 160, y: 58 };
-const COLS = { incoming: 12, siblings: 117, outgoing: 222 } as const;
+/** Sized to the ~220 px context panel so text renders at about its CSS size. */
+const W = 220;
+const MIN_H = 120;
+const PARENT = { x: 110, y: 16 };
+const CENTER = { x: 110, y: 46 };
+const COLS = { incoming: 4, siblings: 77, outgoing: 150 } as const;
+const COL_GAP = 73;
 const CAPTIONS = { incoming: 'links in', siblings: 'same folder', outgoing: 'links out' } as const;
-const CAPTION_Y = 92;
-const ROW0 = 106;
-const ROW = 11.5;
+const CAPTION_Y = 74;
+const ROW0 = 88;
+const ROW = 12.5;
 
 type Kind = keyof typeof COLS;
 interface Spot {
@@ -25,7 +27,7 @@ interface Spot {
   y: number;
 }
 
-export const clip = (s: string, n = 14) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+export const clip = (s: string, n = 11) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 export function LocalMap({
   graph,
@@ -59,6 +61,8 @@ export function LocalMap({
     ['siblings', lg.siblingsMore, lg.siblings.length],
     ['outgoing', lg.outgoingMore, lg.outgoing.length],
   ];
+  const rows = Math.max(lg.incoming.length, lg.siblings.length, lg.outgoing.length);
+  const H = Math.max(MIN_H, ROW0 + rows * ROW + (more.some(([, n]) => n > 0) ? 14 : 4));
   const rovingId = focusId && spots.some((s) => s.note.id === focusId) ? focusId : (spots[0]?.note.id ?? null);
   const open = (id: string) => navigate(`/v/${graph.vaultId}/n/${id}`);
 
@@ -74,7 +78,7 @@ export function LocalMap({
     );
     if (next) {
       setFocusId(next);
-      refs.current.get(next)?.focus();
+      refs.current.get(next)?.focus({ preventScroll: true });
     }
   };
 
@@ -84,7 +88,7 @@ export function LocalMap({
 
   return (
     <div className="lmap">
-      <svg viewBox={`0 0 ${W} ${H}`} className="lmap-svg" role="group" aria-label={`Notes near ${centerTitle}`} onKeyDown={onKeyDown}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="lmap-svg" role="group" aria-label={`Notes near ${centerTitle}`} onKeyDown={onKeyDown}>
         <g className="cmap-pencil">
           <line x1={PARENT.x} y1={PARENT.y} x2={CENTER.x} y2={CENTER.y} />
           {spots
@@ -107,14 +111,15 @@ export function LocalMap({
             </g>
           )}
           <text className="lmap-parent-name" x={hub ? 10 : 0} y={4} textAnchor={hub ? 'start' : 'middle'}>
-            {clip(parentName, 24)}
+            {clip(parentName, 20)}
           </text>
         </g>
         <g transform={`translate(${CENTER.x} ${CENTER.y})`}>
           <circle className={`cmap-dot tier-${inkTier(lg.center.updatedAt, now)}`} r={4.5} />
           <circle className="lmap-ring" r={8} />
           <text className="cmap-label" x={12} y={3.5}>
-            {clip(centerTitle, 24)}
+            {/* 16, not 20: the label starts at x = 122, and 20 characters run past W. */}
+            {clip(centerTitle, 16)}
           </text>
         </g>
         {(Object.keys(COLS) as Kind[])
@@ -150,7 +155,7 @@ export function LocalMap({
               onFocus={() => setFocusId(s.note.id)}
             >
               <title>{title}</title>
-              <rect className="cmap-hit" x={-6} y={-ROW / 2} width={100} height={ROW} />
+              <rect className="cmap-hit" x={-6} y={-ROW / 2} width={COL_GAP - 1} height={ROW} />
               <circle className={`cmap-dot tier-${inkTier(s.note.updatedAt, now)}`} r={3} />
               <text className="lmap-label" x={7} y={3.2}>
                 {clip(title)}

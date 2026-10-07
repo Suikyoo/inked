@@ -260,9 +260,8 @@
 }
 
 /* Local map (note page) */
+/* The viewBox matches the ~220 px panel; its height follows the longest column. */
 .lmap {
-  position: relative;
-  aspect-ratio: 100 / 78;
   background: var(--canvas);
   border: 1px solid var(--side-border);
   border-radius: 8px;
@@ -271,13 +270,13 @@
 .lmap-svg {
   display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
 }
 .lmap-svg .cmap-dot {
   stroke-width: 3;
 }
 .lmap-label {
-  font: 500 9.5px var(--font-ui);
+  font: 500 10px var(--font-ui);
   fill: var(--muted);
   pointer-events: none;
 }
@@ -304,14 +303,11 @@
   stroke: var(--map-ink);
   stroke-width: 1.5;
 }
+/* In normal flow under the svg, so it never covers a row or "+N more". */
 .lmap-msg {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 6px;
   margin: 0;
+  padding: 0 8px 8px;
   text-align: center;
   font-size: 11px;
   color: var(--muted-3);
-  pointer-events: none;
 }

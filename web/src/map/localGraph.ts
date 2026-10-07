@@ -20,6 +20,9 @@ function capped(list: GraphNote[]): [GraphNote[], number] {
   return [sorted.slice(0, LOCAL_CAP), Math.max(0, sorted.length - LOCAL_CAP)];
 }
 
+/** True when the note has a dot on the map, i.e. when localGraph() would return a centre. */
+export const isOnMap = (graph: VaultGraph, noteId: string) => graph.notes.some((n) => n.id === noteId);
+
 /** One hop around a note: its folder, folder siblings, and notes it links to or from. */
 export function localGraph(graph: VaultGraph, noteId: string): LocalGraph | null {
   const byId = new Map(graph.notes.map((n) => [n.id, n]));

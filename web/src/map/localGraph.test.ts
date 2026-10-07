@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { folder, note, tree } from './fixtures';
 import { buildVaultGraph } from './graph';
-import { LOCAL_CAP, localGraph } from './localGraph';
+import { LOCAL_CAP, isOnMap, localGraph } from './localGraph';
 
 const at = (i: number) => new Date(Date.UTC(2026, 8, 1) + i * 3_600_000).toISOString();
 
@@ -29,5 +29,12 @@ describe('localGraph', () => {
     const g = buildVaultGraph('v1', tree([], [note('c', null)]), {}, true);
     expect(localGraph(g, 'c')!.parent).toEqual({ kind: 'hub' });
     expect(localGraph(g, 'nope')).toBeNull();
+  });
+
+  it('isOnMap is true exactly when localGraph has a centre; a broken note is not on the map (F10)', () => {
+    const g = buildVaultGraph('v1', tree([], [note('c', null), note('b', null, 'b', { broken: true })]), {}, true);
+    for (const id of ['c', 'b', 'nope']) expect(isOnMap(g, id)).toBe(localGraph(g, id) !== null);
+    expect(isOnMap(g, 'c')).toBe(true);
+    expect(isOnMap(g, 'b')).toBe(false);
   });
 });

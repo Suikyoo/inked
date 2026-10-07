@@ -4,6 +4,7 @@ import { Spinner } from '../components/Fields';
 import { renderMarkdown, toggleTaskAtLine } from '../markdown/render';
 import { incomingLinks } from '../map/graph';
 import { LocalMap } from '../map/LocalMap';
+import { isOnMap } from '../map/localGraph';
 import { useVaultGraph } from '../map/useVaultGraphs';
 import { prefs } from '../lib/prefs';
 import { describeError, formatDate, relativeTime, wordCount } from '../lib/util';
@@ -263,7 +264,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
       </main>
 
       <aside className="ctx" aria-label="Note context">
-        {graph && head && (
+        {graph && head && isOnMap(graph, noteId) && (
           <section className="ctx-section">
             <h2 className="ctx-title">Local map</h2>
             <LocalMap graph={graph} noteId={noteId} vaultName={vault.name} vaultColor={vault.color} level={vaultStats(vault, tree).level} />

@@ -49,9 +49,9 @@ describe('LocalMap', () => {
   it('puts links in, siblings and links out in three columns', () => {
     render(graph());
     expect(row('i1')?.dataset.kind).toBe('incoming');
-    expect(row('i1')?.getAttribute('transform')).toMatch(/^translate\(12 /);
-    expect(row('s1')?.getAttribute('transform')).toMatch(/^translate\(117 /);
-    expect(row('o1')?.getAttribute('transform')).toMatch(/^translate\(222 /);
+    expect(row('i1')?.getAttribute('transform')).toMatch(/^translate\(4 /);
+    expect(row('s1')?.getAttribute('transform')).toMatch(/^translate\(77 /);
+    expect(row('o1')?.getAttribute('transform')).toMatch(/^translate\(150 /);
     expect(row('c')).toBeNull();
     expect(host!.textContent).toContain('Ops');
   });
@@ -69,6 +69,17 @@ describe('LocalMap', () => {
     expect(host!.querySelector('.lmap-more')?.textContent).toBe('+3 more');
   });
 
+  it('sizes the map to its panel, with a height driven by the longest column (V4)', () => {
+    const svgEl = () => host!.querySelector('svg.lmap-svg')!;
+    render(graph());
+    expect(svgEl().getAttribute('viewBox')).toBe('0 0 220 120'); // 2 rows: 88 + 25 + 4 = 117, raised to the minimum
+    act(() => root?.unmount());
+    host?.remove();
+    const sibs = Array.from({ length: 15 }, (_, i) => note(`s${i}`, 'f1', `s${i}`));
+    render(buildVaultGraph('v1', tree([folder('f1', null)], [note('c', 'f1', 'c'), ...sibs]), {}, true));
+    expect(svgEl().getAttribute('viewBox')).toBe('0 0 220 252'); // 88 + 12 x 12.5 + 14 for "+3 more"
+  });
+
   it('says when links are still being drawn, and when there are no neighbours', () => {
     render(graph(false));
     expect(host!.querySelector('.lmap-msg')?.textContent).toBe('Drawing links…');
@@ -76,5 +87,6 @@ describe('LocalMap', () => {
     host?.remove();
     render(buildVaultGraph('v1', tree([], [note('c', null)]), {}, true));
     expect(host!.querySelector('.lmap-msg')?.textContent).toBe('No neighbours yet');
+    expect(host!.querySelector('svg.lmap-svg')?.nextElementSibling?.className).toBe('lmap-msg');
   });
 });
