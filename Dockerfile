@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
+COPY mcp/package.json mcp/
 RUN npm ci
 COPY core core
 COPY server server
@@ -20,6 +21,7 @@ COPY package.json package-lock.json ./
 COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
+COPY mcp/package.json mcp/
 RUN npm ci --omit=dev -w server && npm cache clean --force
 
 # ---- runtime ---------------------------------------------------------------

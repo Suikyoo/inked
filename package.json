@@ -5,11 +5,12 @@
   "workspaces": [
     "core",
     "server",
-    "web"
+    "web",
+    "mcp"
   ],
   "scripts": {
     "build": "npm run build -w web && npm run build -w server",
-    "test": "npm test -w core && npm test -w server && npm test -w web",
+    "test": "npm test -w core && npm test -w server && npm test -w web && npm test -w mcp",
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "start": "npm start -w server"
