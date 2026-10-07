@@ -94,6 +94,9 @@ const headFor = (b: NoteBody, updatedAt: string) => ({
   note: { id: b.id, folderId: b.folderId, encMeta: b.encMeta, size: 1, createdAt: 'a', updatedAt },
 });
 
+/** A real conflict: the note as stored holds someone else's body, so a queued 409 becomes a copy (D4a). */
+const changedElsewhere = () => api.getNote.mockResolvedValue({ note: { encBody: 'v1.changed-elsewhere' } });
+
 describe('AppStore', () => {
   beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); FakeChannel.bus = []; kdfGate.hold = null; kdfGate.entered = 0; });
 
@@ -338,6 +341,7 @@ describe('AppStore', () => {
     api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
     const created = await s.createNote(vaultId, null, 'Plan', '');
     api.updateNote.mockRejectedValue(new ApiError(409, 'conflict'));
+    changedElsewhere();
     api.listVaults.mockResolvedValue({ vaults: [] });
     await s.stashUnsaved(vaultId, created.id, 'my plan text', 't1');
     expect(s.getState().pendingCount).toBe(0);
@@ -349,6 +353,25 @@ describe('AppStore', () => {
     expect(copy.encBody).not.toContain('plan');
     expect(s.getState().notice).toBe('Saved your changes as “Plan (unsaved copy)” because the note changed elsewhere.');
     await vi.waitFor(() => expect(api.listVaults).toHaveBeenCalled());
+  });
+
+  it('a queued edit whose earlier attempt landed after timing out counts as saved: no copy, no notice (D4a)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Plan', '');
+    const sent: NoteBody = api.createNote.mock.calls[0][1];
+    // The server holds exactly the queued ciphertext, so the retry's base is stale.
+    api.updateNote.mockRejectedValue(new ApiError(409, 'conflict'));
+    api.getNote.mockImplementation(async () => ({
+      note: { ...headFor(sent, 't2').note, encBody: api.updateNote.mock.calls.at(-1)![1].encBody },
+    }));
+    await s.stashUnsaved(vaultId, created.id, 'my plan text', 't1');
+    expect(s.getState().pendingCount).toBe(0);
+    expect(api.createNote).toHaveBeenCalledTimes(1); // the note itself, no copy
+    expect(s.getState().notice).toBeNull();
+    // The check is bounded and names the item's owner, like every queued request.
+    expect(api.getNote.mock.calls[0]).toEqual([created.id, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: s.getState().user!.id }]);
   });
 
   it('drops a queued edit once a slow save of the same text lands (I4)', async () => {
@@ -990,6 +1013,7 @@ describe('AppStore', () => {
     api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
     const created = await s.createNote(vaultId, null, 'Secret plan', '');
     api.updateNote.mockRejectedValue(new ApiError(409, 'conflict'));
+    changedElsewhere();
     s.registerFlusher(() => s.stashUnsaved(vaultId, created.id, 'my plan text', 't1'));
     api.logout.mockResolvedValue({ ok: true });
     await s.lock();
@@ -1001,6 +1025,31 @@ describe('AppStore', () => {
     expect(notice).toBe('A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.');
     // The plaintext title never outlives the keys.
     expect(notice).not.toContain('Secret');
+  });
+
+  it('keeps a deferred notice for its own account: another account signing in on this tab never sees it (D4f)', async () => {
+    const s = await registeredStore(); // ann
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Secret plan', '');
+    api.updateNote.mockRejectedValue(new ApiError(409, 'conflict'));
+    changedElsewhere();
+    const unregister = s.registerFlusher(() => s.stashUnsaved(vaultId, created.id, 'my plan text', 't1'));
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    unregister(); // ann's editor is gone
+    expect(api.createNote).toHaveBeenCalledTimes(2); // the copy was made during the flush: its notice waits for ann
+    expect(s.getState().notice).toBeNull();
+    // Bob signs in on the same tab: ann's notice is not his.
+    await s.register({ username: 'bob', password: 'pw-bob-123456', setupToken: 'tok-12345678' });
+    expect(s.getState().user?.username).toBe('bob');
+    expect(s.getState().notice).toBeNull();
+    await s.lock();
+    expect(s.getState().notice).toBeNull();
+    // Ann signs in again and sees it, once.
+    mockUnlock();
+    await s.unlock('ann', 'pw-ann-123456');
+    expect(s.getState().notice).toBe('A note changed elsewhere while you were editing, so your version was saved as an “(unsaved copy)” note next to it.');
   });
 
   it('counts only the signed-in account’s queued edits, and sends them only with its session (B2)', async () => {
@@ -1187,6 +1236,7 @@ describe('AppStore', () => {
       if (!afterUnlock) throw new ApiError(0, 'network');
       throw new ApiError(409, 'conflict');
     });
+    changedElsewhere();
     await s.stashUnsaved(vaultId, conflicting.id, 'my plan text', 't1');
     expect(s.getState().pendingCount).toBe(1);
     // The lock's flush queues text the server refuses: that notice is deferred.
@@ -1454,6 +1504,27 @@ describe('AppStore', () => {
     await s.loadNote(vaultId, created.id);
     expect(s.getState().bodies[created.id]).toBe('new body');
     expect(s.getState().trees[vaultId].notes[created.id].updatedAt).toBe('2026-01-02T00:00:00.000Z');
+  });
+
+  it('a note load older than the stored head reads once more and returns the current head and body (D5d)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, '2026-01-01T00:00:00.000Z'));
+    const created = await s.createNote(vaultId, null, 'Plan', 'old body');
+    const old: NoteBody = api.createNote.mock.calls[0][1];
+    api.updateNote.mockResolvedValueOnce(headFor(old, '2026-01-02T00:00:00.000Z'));
+    await s.saveNoteBody(vaultId, created.id, 'new body', '2026-01-01T00:00:00.000Z');
+    const savedBody: string = api.updateNote.mock.calls[0][1].encBody;
+    // The first read left the server before the save landed; the second sees it.
+    api.getNote
+      .mockResolvedValueOnce({ note: { ...headFor(old, '2026-01-01T00:00:00.000Z').note, encBody: old.encBody } })
+      .mockResolvedValueOnce({ note: { ...headFor(old, '2026-01-02T00:00:00.000Z').note, encBody: savedBody } });
+    const { head, body } = await s.loadNote(vaultId, created.id);
+    expect(api.getNote).toHaveBeenCalledTimes(2);
+    expect(head.updatedAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(head.title).toBe('Plan');
+    expect(body).toBe('new body');
+    expect(s.getState().bodies[created.id]).toBe('new body');
   });
 
   it('a late save response older than the stored head leaves the loaded body alone (B3)', async () => {

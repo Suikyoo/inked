@@ -46,11 +46,14 @@ const refused = (e: ApiError): PendingResult => dropped(e.status === 413 ? 'too_
 type PendingIO = {
   updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) => Promise<unknown>;
   createNote: (vaultId: string, b: PendingSave['copy']) => Promise<unknown>;
+  /** Reads the note as stored now, to tell our own landed write from a real conflict. */
+  getNote?: (id: string) => Promise<{ note: { encBody: string } }>;
 };
 
 /**
  * Sends one queued save. A conflict (409) or a note deleted elsewhere (404) becomes a copy note,
- * so the text is never lost; network, 5xx, 401 and user_mismatch errors leave the item for a later retry.
+ * so the text is never lost. A 409 whose stored body is exactly this ciphertext (an earlier attempt
+ * that timed out but landed) counts as saved; network, 5xx, 401 and user_mismatch errors leave the item for a later retry.
  * Other client errors can never succeed, so the item is dropped (and the user told why).
  */
 export async function sendPending(p: PendingSave, io: PendingIO): Promise<PendingResult> {
@@ -60,6 +63,10 @@ export async function sendPending(p: PendingSave, io: PendingIO): Promise<Pendin
   } catch (e) {
     if (transient(e)) return { outcome: 'retry' };
     if (e instanceof ApiError && e.status !== 409 && e.status !== 404) return refused(e);
+    if (e instanceof ApiError && e.status === 409 && io.getNote) {
+      const landed = await alreadyStored(p, io.getNote);
+      if (landed !== false) return landed;
+    }
   }
   const result = await createCopy(p.vaultId, p.copy, io);
   // The note's folder was deleted elsewhere (with the note): put the copy at the vault root.
@@ -68,6 +75,20 @@ export async function sendPending(p: PendingSave, io: PendingIO): Promise<Pendin
   const atRoot = await createCopy(p.vaultId, { ...p.copy, folderId: null }, io);
   if (atRoot === 'folderGone') return dropped('deleted'); // cannot happen at the root
   return atRoot.outcome === 'copied' ? { outcome: 'copiedToRoot' } : atRoot;
+}
+
+/**
+ * After a 409: `saved` when the server already holds exactly this ciphertext (its IV is random, so an
+ * equal body can only be our own write), `retry` on a transient read error, and false (make the copy)
+ * for anything else: another body, or a note that is gone or unreadable.
+ */
+async function alreadyStored(p: PendingSave, getNote: NonNullable<PendingIO['getNote']>): Promise<PendingResult | false> {
+  try {
+    const { note } = await getNote(p.noteId);
+    return note.encBody === p.encBody ? { outcome: 'saved' } : false;
+  } catch (e) {
+    return transient(e) ? { outcome: 'retry' } : false;
+  }
 }
 
 async function createCopy(vaultId: string, copy: PendingSave['copy'], io: PendingIO): Promise<PendingResult | 'folderGone'> {

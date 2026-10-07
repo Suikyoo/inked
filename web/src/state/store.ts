@@ -157,6 +157,7 @@ const QUEUE_IO = {
     bounded(api.updateNote(id, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: owner })),
   createNote: (owner: string, vaultId: string, b: PendingSave['copy']) =>
     bounded(api.createNote(vaultId, b, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: owner })),
+  getNote: (owner: string, id: string) => bounded(api.getNote(id, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: owner })),
 };
 
 const SESSION_ENDED_NOTICE = 'Your session ended. Sign in again.';
@@ -1077,10 +1078,28 @@ export class AppStore {
     return head;
   }
 
-  /** Fetches and decrypts a note. The vault id comes from the URL and is bound by the AAD. */
+  /**
+   * Fetches and decrypts a note. The vault id comes from the URL and is bound by the AAD.
+   * A read older than the head this tab already has (it left before a save landed) is read once
+   * more: the server holds the newer version, since the stored head came from it. If even that read
+   * is stale it is returned anyway, and the editor's next save takes the conflict path.
+   */
   async loadNote(vaultId: string, noteId: string): Promise<{ head: NoteView; body: string }> {
     const ep = this.epoch;
     const key = this.vaultKey(vaultId);
+    let read = await this.readNote(key, vaultId, noteId, ep);
+    if (!this.putHead(vaultId, read.head)) {
+      read = await this.readNote(key, vaultId, noteId, ep);
+      // Still stale: keep the newer body this tab has.
+      if (!this.putHead(vaultId, read.head)) return read;
+    }
+    const { body } = read;
+    this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
+    return read;
+  }
+
+  /** One fetch and decrypt of a note, dropped if the keys went away meanwhile. Stores nothing. */
+  private async readNote(key: CryptoKey, vaultId: string, noteId: string, ep: number): Promise<{ head: NoteView; body: string }> {
     const { note } = await api.getNote(noteId);
     if (ep !== this.epoch) throw new LockedError();
     const meta = await decryptNoteMeta(key, vaultId, noteId, note.encMeta);
@@ -1095,8 +1114,6 @@ export class AppStore {
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
     };
-    // An older read than what this tab already has (e.g. it left before a save landed): keep the newer body.
-    if (this.putHead(vaultId, head)) this.set((s) => ({ bodies: { ...s.bodies, [noteId]: body } }));
     return { head, body };
   }
 
@@ -1256,6 +1273,7 @@ export class AppStore {
     const ioFor = (owner: string) => ({
       updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) => guard(() => QUEUE_IO.updateNote(owner, id, b)),
       createNote: (vaultId: string, b: PendingSave['copy']) => guard(() => QUEUE_IO.createNote(owner, vaultId, b)),
+      getNote: (id: string) => guard(() => QUEUE_IO.getNote(owner, id)),
     });
     const copied: QueueEntry[] = [];
     let atRoot = 0;

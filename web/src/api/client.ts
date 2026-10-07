@@ -191,7 +191,7 @@ export const api = {
     body: { id: string; folderId: string | null; encMeta: string; encBody: string },
     opts: CallOptions = {},
   ) => data<{ note: NoteHeadDTO }>('POST', `/api/vaults/${enc(vaultId)}/notes`, body, opts),
-  getNote: (id: string) => data<{ note: NoteDTO }>('GET', `/api/notes/${enc(id)}`),
+  getNote: (id: string, opts: CallOptions = {}) => data<{ note: NoteDTO }>('GET', `/api/notes/${enc(id)}`, undefined, opts),
   updateNote: (
     id: string,
     body: { encMeta?: string; encBody?: string; folderId?: string | null; baseUpdatedAt?: string },

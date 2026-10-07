@@ -35,6 +35,53 @@ describe('sendPending', () => {
     expect(await sendPending(item(), io)).toEqual({ outcome: 'retry' });
   });
 
+  it('counts a 409 as saved when the server already holds exactly the queued ciphertext (D4a)', async () => {
+    // An earlier attempt timed out after the server applied it: the retry's base is now stale.
+    const io = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn(),
+      getNote: vi.fn().mockResolvedValue({ note: { encBody: 'v1.body' } }),
+    };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'saved' });
+    expect(io.getNote).toHaveBeenCalledWith('n1');
+    expect(io.createNote).not.toHaveBeenCalled();
+  });
+  it('still copies on a 409 when the server holds a different body (D4a)', async () => {
+    const io = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn().mockResolvedValue({}),
+      getNote: vi.fn().mockResolvedValue({ note: { encBody: 'v1.other' } }),
+    };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'copied' });
+    expect(io.createNote).toHaveBeenCalledWith('v1', item().copy);
+  });
+  it('retries a 409 when the check of the stored body hits a network error (D4a)', async () => {
+    const io = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn(),
+      getNote: vi.fn().mockRejectedValue(new ApiError(0, 'network')),
+    };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'retry' });
+    expect(io.createNote).not.toHaveBeenCalled();
+  });
+  it('copies on a 409 when the note is gone by the time its body is checked (D4a)', async () => {
+    const io = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn().mockResolvedValue({}),
+      getNote: vi.fn().mockRejectedValue(new ApiError(404, 'not_found')),
+    };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'copied' });
+  });
+  it('never checks the stored body on a 404 (D4a)', async () => {
+    const io = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(404, 'not_found')),
+      createNote: vi.fn().mockResolvedValue({}),
+      getNote: vi.fn(),
+    };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'copied' });
+    expect(io.getNote).not.toHaveBeenCalled();
+  });
+
   const inFolder = (): PendingSave => ({ ...item(), copy: { ...item().copy, folderId: 'f1' } });
 
   it('puts the copy at the vault root when its folder was deleted elsewhere, and says so (B1)', async () => {
