@@ -50,6 +50,7 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
   const store = useStore();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const { vaultId } = selection;
   const vault = state.vaults[vaultId];
   const tree = state.trees[vaultId];
@@ -59,13 +60,20 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
   useEffect(() => setError(null), [key]);
   if (!vault || !tree) return null;
 
-  const run = async (job: () => Promise<{ id: string }>) => {
+  /**
+   * Creates a note and opens it. `fresh` selects the title (a new "Untitled" note); an Index opens
+   * in edit mode with the body focused, so the first keystroke can't rename it away from "Index".
+   */
+  const run = async (job: () => Promise<{ id: string }>, navState: { fresh: true } | { mode: 'edit' }) => {
     setError(null);
+    setBusy(true);
     try {
       const n = await job();
-      navigate(href(vaultId, n.id), { state: { fresh: true } });
+      navigate(href(vaultId, n.id), { state: navState });
     } catch (e) {
       setError(describeError(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -140,7 +148,12 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
           <Markdown body={state.bodies[index.id]} ready={ready} vaultId={vaultId} />
         ) : (
           <p className="preview-hint">
-            <button type="button" className="linkish" onClick={() => void run(() => store.addDescription(vaultId, folderId))}>
+            <button
+              type="button"
+              className="linkish"
+              disabled={busy}
+              onClick={() => void run(() => store.addDescription(vaultId, folderId), { mode: 'edit' })}
+            >
               Add description
             </button>
           </p>
@@ -171,7 +184,12 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
             Open Index
           </Link>
         )}
-        <button type="button" className="btn btn-sm" onClick={() => void run(() => store.createNote(vaultId, folderId, uniqueTitle(tree)))}>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={busy}
+          onClick={() => void run(() => store.createNote(vaultId, folderId, uniqueTitle(tree)), { fresh: true })}
+        >
           New note here
         </button>
         <button type="button" className="btn btn-sm" onClick={() => onZoom(selection)}>

@@ -186,6 +186,6 @@ describe('creating a folder', () => {
     });
     await act(async () => void input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(loc.pathname).toBe('/v/v1/n/newidx');
-    expect(loc.state).toEqual({ fresh: true });
+    expect(loc.state).toEqual({ mode: 'edit' });
   });
 });

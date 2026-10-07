@@ -28,7 +28,7 @@ import {
   type KdfParams,
 } from '../crypto';
 import { argon2InWorker } from '../lib/argon2Worker';
-import { INDEX_TITLE, indexBody } from '../lib/indexNote';
+import { INDEX_TITLE, indexBody, indexNoteOf } from '../lib/indexNote';
 import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
 import { sendPending, type DropReason, type PendingSave } from './pending';
 import { TabLink } from './tabs';
@@ -303,6 +303,8 @@ export class AppStore {
   private lastUserId: string | null = null;
   /** Queue notices produced while the keys were going (or gone), per account; shown when it signs in again. Memory only. */
   private deferredNotices = new Map<string, string>();
+  /** In-flight `addDescription` calls by `vaultId/folderId`, so a repeat call joins instead of making a second Index. */
+  private addingIndex = new Map<string, Promise<NoteView>>();
   /** Another tab signed out while this tab's own lock was running: that lock forgets the username too. */
   private forgetOnEnd = false;
 
@@ -1034,10 +1036,23 @@ export class AppStore {
     return view;
   }
 
-  /** Creates the Index note for a folder (`null` = vault root), named after the folder or vault. */
-  async addDescription(vaultId: string, folderId: string | null): Promise<NoteView> {
-    const name = folderId ? this.state.trees[vaultId]?.folders[folderId]?.name : this.state.vaults[vaultId]?.name;
-    return this.createNote(vaultId, folderId, INDEX_TITLE, indexBody(name ?? ''));
+  /**
+   * Creates the Index note for a folder (`null` = vault root), named after the folder or vault.
+   * Returns the folder's existing Index instead when it has one, and joins a call already in flight.
+   */
+  addDescription(vaultId: string, folderId: string | null): Promise<NoteView> {
+    const tree = this.state.trees[vaultId];
+    const existing = tree && indexNoteOf(tree, folderId);
+    if (existing) return Promise.resolve(existing);
+    const key = `${vaultId}/${folderId ?? ''}`;
+    const pending = this.addingIndex.get(key);
+    if (pending) return pending;
+    const name = folderId ? tree?.folders[folderId]?.name : this.state.vaults[vaultId]?.name;
+    const job = this.createNote(vaultId, folderId, INDEX_TITLE, indexBody(name ?? '')).finally(() => {
+      this.addingIndex.delete(key);
+    });
+    this.addingIndex.set(key, job);
+    return job;
   }
 
   async renameFolder(vaultId: string, folderId: string, name: string): Promise<void> {

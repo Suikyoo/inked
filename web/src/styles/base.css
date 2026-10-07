@@ -248,8 +248,12 @@ kbd {
   text-underline-offset: 3px;
   cursor: pointer;
 }
-.linkish:hover {
+.linkish:hover:not(:disabled) {
   color: var(--ink-lighter);
+}
+.linkish:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 /* ---- Inputs ------------------------------------------------------------------------------ */

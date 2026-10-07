@@ -1793,5 +1793,23 @@ describe('describeError', () => {
       expect(s.getState().bodies[root.id]).toBe(`# ${s.getState().vaults[vaultId].name}\n\nDescribe what lives in this folder.\n`);
       expect(indexNoteOf(s.getState().trees[vaultId], null)?.id).toBe(root.id);
     });
+
+    it('addDescription returns the existing Index instead of making a second one', async () => {
+      const { s, vaultId } = await withTree();
+      const folder = await s.createFolder(vaultId, null, 'Work');
+      const existing = indexNoteOf(s.getState().trees[vaultId], folder.id)!;
+      api.createNote.mockClear();
+      expect(await s.addDescription(vaultId, folder.id)).toBe(existing);
+      expect(api.createNote).not.toHaveBeenCalled();
+    });
+
+    it('two rapid addDescription calls give one Index note', async () => {
+      const { s, vaultId } = await withTree();
+      const [a, b] = await Promise.all([s.addDescription(vaultId, null), s.addDescription(vaultId, null)]);
+      expect(a.id).toBe(b.id);
+      expect(api.createNote).toHaveBeenCalledTimes(1);
+      const indexes = Object.values(s.getState().trees[vaultId].notes).filter((n) => n.folderId === null && n.title === 'Index');
+      expect(indexes).toHaveLength(1);
+    });
   });
 });

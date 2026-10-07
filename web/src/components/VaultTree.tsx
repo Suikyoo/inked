@@ -478,7 +478,7 @@ export function VaultTree({
             const index = created && indexNoteOf(created, f.id);
             if (index) {
               toggle(f.id, true);
-              navigate(`/v/${vault.id}/n/${index.id}`, { state: { fresh: true } });
+              navigate(`/v/${vault.id}/n/${index.id}`, { state: { mode: 'edit' } });
             } else focusRow(f.id);
           } catch (e) {
             throw new Error(describeError(e));

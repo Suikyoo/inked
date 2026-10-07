@@ -132,12 +132,41 @@ describe('NodePreview', () => {
     expect(onZoom).toHaveBeenCalledWith({ kind: 'folder', vaultId: 'v1', id: 'f1' });
   });
 
-  it('folder without Index: Add description calls the store', () => {
+  it('folder without Index: Add description calls the store and opens the Index in edit mode', async () => {
     const addDescription = vi.fn().mockResolvedValue(note('nx', 'f3', 'Index'));
     mount(makeState(), { kind: 'folder', vaultId: 'v1', id: 'f3' }, { addDescription } as unknown as Partial<AppStore>);
     expect(link('Open Index')).toBeUndefined();
-    click(button('Add description'));
+    await act(async () => void click(button('Add description')));
     expect(addDescription).toHaveBeenCalledWith('v1', 'f3');
+    expect(where()?.textContent).toBe('/v/v1/n/nx');
+    expect(where()?.getAttribute('data-state')).toBe('{"mode":"edit"}');
+  });
+
+  it('Add description is disabled while the call is in flight, so a double click makes one call', async () => {
+    let resolve!: (n: unknown) => void;
+    const addDescription = vi.fn(() => new Promise((r) => (resolve = r)));
+    mount(makeState(), { kind: 'folder', vaultId: 'v1', id: 'f3' }, { addDescription } as unknown as Partial<AppStore>);
+    click(button('Add description'));
+    expect(button('Add description')?.disabled).toBe(true);
+    click(button('Add description'));
+    expect(addDescription).toHaveBeenCalledTimes(1);
+    await act(async () => resolve(note('nx', 'f3', 'Index')));
+    expect(where()?.textContent).toBe('/v/v1/n/nx');
+  });
+
+  it('Add description is enabled again after a failed call', async () => {
+    const addDescription = vi.fn().mockRejectedValue(new Error('nope'));
+    mount(makeState(), { kind: 'folder', vaultId: 'v1', id: 'f3' }, { addDescription } as unknown as Partial<AppStore>);
+    await act(async () => void click(button('Add description')));
+    expect(host!.querySelector('[role=alert]')).not.toBeNull();
+    expect(button('Add description')?.disabled).toBe(false);
+  });
+
+  it('New note here still opens with the title selected (fresh)', async () => {
+    const createNote = vi.fn().mockResolvedValue(note('nz', 'f1', 'Untitled'));
+    mount(makeState(), { kind: 'folder', vaultId: 'v1', id: 'f1' }, { createNote } as unknown as Partial<AppStore>);
+    await act(async () => void click(button('New note here')));
+    expect(where()?.getAttribute('data-state')).toBe('{"fresh":true}');
   });
 
   it('New note here creates a note in the folder and opens it', async () => {

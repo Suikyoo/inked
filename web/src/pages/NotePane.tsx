@@ -78,7 +78,10 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
   const head = tree?.notes[noteId];
   const navState = location.state as { fresh?: boolean; mode?: string } | null;
   const fresh = navState?.fresh === true;
-  /** Opened with Edit from the Home preview: edit mode, caret in the body, title left alone. */
+  /**
+   * Opened with Edit from the Home preview, or a just-made Index: edit mode, caret in the body,
+   * title left alone (a selected "Index" title would be renamed by the first keystroke).
+   */
   const editBody = navState?.mode === 'edit';
 
   const [mode, setMode] = useState<'edit' | 'view'>('view');

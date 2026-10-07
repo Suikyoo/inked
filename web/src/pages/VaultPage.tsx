@@ -129,7 +129,7 @@ function VaultOverview({ vaultId }: { vaultId: string }) {
             const f = await store.createFolder(vaultId, null, name);
             const created = store.getState().trees[vaultId];
             const index = created && indexNoteOf(created, f.id);
-            if (index) navigate(`/v/${vaultId}/n/${index.id}`, { state: { fresh: true } });
+            if (index) navigate(`/v/${vaultId}/n/${index.id}`, { state: { mode: 'edit' } });
           } catch (e) {
             throw new Error(describeError(e));
           }
