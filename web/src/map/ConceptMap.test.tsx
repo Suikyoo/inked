@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NoteView, TreeView } from '../state/store';
 import { ConceptMap, type ConceptMapProps } from './ConceptMap';
 import { folder, note, tree, vault } from './fixtures';
@@ -48,7 +48,11 @@ function render(p: Partial<ConceptMapProps> & { entries: MapEntry[] }) {
   act(() => root!.render(ui(p)));
   return { rerender: (q: Partial<ConceptMapProps> & { entries: MapEntry[] }) => act(() => root!.render(ui(q))) };
 }
+beforeEach(() => {
+  vi.useFakeTimers();
+});
 afterEach(() => {
+  vi.useRealTimers();
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -177,6 +181,68 @@ describe('ConceptMap', () => {
     fire(node('n1'), plain);
     expect(plain.defaultPrevented).toBe(true);
     expect(node('n1').getAttribute('transform')).not.toBe(before);
+  });
+
+  it('Ctrl, Meta or Alt + Arrow on a dot passes through and does not move the roving focus (M2)', () => {
+    const ring = tree([], Array.from({ length: 8 }, (_, i) => note(`r${i}`, null, `r${i}`)) as NoteView[]);
+    render({ entries: [entry(ring)] });
+    const rovingIds = () => nodes().filter((n) => n.getAttribute('tabindex') === '0').map((n) => n.dataset.note);
+    const before = rovingIds();
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey'] as const) {
+      for (const k of ['ArrowRight', 'ArrowLeft']) {
+        const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, [mod]: true });
+        fire(node(before[0]!), ev);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(rovingIds()).toEqual(before);
+      }
+    }
+    const plain = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+    fire(node(before[0]!), plain);
+    expect(plain.defaultPrevented).toBe(true);
+  });
+
+  describe('folder labels (M1)', () => {
+    const folderLabels = () => [...host!.querySelectorAll('.cmap-folders text')].map((t) => t.textContent);
+    const wide = () =>
+      tree([folder('f1', null, 'Ops'), folder('f2', 'f1', 'Runbooks'), folder('f3', null, 'Other')], [note('n1', 'f2', 'Alpha'), note('n2', 'f3', 'Beta'), note('n3', null, 'Gamma')]);
+    const props = (p: Partial<ConceptMapProps> = {}) => ({ entries: [entry(wide())], ...p });
+    /** Renders in a frame this narrow, so the fitted map is well below the folder-label scale. */
+    const renderNarrow = (p: Partial<ConceptMapProps> = {}) => {
+      const real = HTMLElement.prototype.getBoundingClientRect;
+      HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+        return this.classList.contains('cmap') ? new DOMRect(0, 0, 160, 100) : real.call(this);
+      };
+      try {
+        return render(props(p));
+      } finally {
+        HTMLElement.prototype.getBoundingClientRect = real;
+      }
+    };
+
+    it('hides every folder label when the fitted map is small', () => {
+      renderNarrow();
+      expect(folderLabels()).toEqual([]);
+    });
+    it('shows only the labels on the path of a selected note, parents included', () => {
+      renderNarrow();
+      click(node('n1'));
+      expect(folderLabels().sort()).toEqual(['Ops', 'Runbooks']);
+    });
+    it('shows the labels on the path of a search hit or a hot result', () => {
+      const r = renderNarrow({ hits: new Set(['n2']) });
+      expect(folderLabels()).toEqual(['Other']);
+      r.rerender(props({ hot: 'n1' }));
+      expect(folderLabels().sort()).toEqual(['Ops', 'Runbooks']);
+    });
+    it('shows every label once zoomed in past the threshold', () => {
+      renderNarrow();
+      const zoomIn = host!.querySelector<HTMLButtonElement>('button[aria-label="Zoom in"]')!;
+      for (let i = 0; i < 12 && folderLabels().length < 3; i++) {
+        fire(zoomIn, new MouseEvent('click', { bubbles: true }));
+        act(() => void vi.advanceTimersByTime(1000));
+      }
+      expect(folderLabels().sort()).toEqual(['Ops', 'Other', 'Runbooks']);
+    });
   });
 
   it('a mouse press released outside the map does not leave the pan armed (F4)', () => {

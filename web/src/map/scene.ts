@@ -14,6 +14,8 @@ export interface SceneDot {
   y: number;
   title: string;
   folderPath: string;
+  /** Ids of the folders above this note, top-down. */
+  folderIds: string[];
   updatedAt: string;
   links: number;
 }
@@ -138,6 +140,7 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
         x: w.x,
         y: w.y,
         title: displayTitle(n.title),
+        folderIds: chainIds,
         folderPath: chainIds.map((id) => folderById.get(id)!.name).join(' / '),
         updatedAt: n.updatedAt,
         links: neighbours.get(n.id)?.size ?? 0,

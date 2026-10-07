@@ -89,4 +89,23 @@ describe('LocalMap', () => {
     expect(host!.querySelector('.lmap-msg')?.textContent).toBe('No neighbours yet');
     expect(host!.querySelector('svg.lmap-svg')?.nextElementSibling?.className).toBe('lmap-msg');
   });
+
+  it('Ctrl, Meta or Alt + Arrow passes through; a plain Arrow still moves focus (M2)', () => {
+    render(graph());
+    const svgEl = host!.querySelector('svg.lmap-svg')!;
+    const roving = () => [...host!.querySelectorAll<SVGGElement>('g.cmap-node')].filter((n) => n.getAttribute('tabindex') === '0').map((n) => n.dataset.note);
+    const before = roving();
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey'] as const) {
+      for (const k of ['ArrowLeft', 'ArrowRight']) {
+        const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, [mod]: true });
+        act(() => void svgEl.dispatchEvent(ev));
+        expect(ev.defaultPrevented).toBe(false);
+        expect(roving()).toEqual(before);
+      }
+    }
+    const plain = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+    act(() => void svgEl.dispatchEvent(plain));
+    expect(plain.defaultPrevented).toBe(true);
+    expect(roving()).not.toEqual(before);
+  });
 });

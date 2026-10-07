@@ -12,6 +12,8 @@ import type { MapEntry } from './useVaultGraphs';
 const FALLBACK: Size = { w: 800, h: 480 };
 const DRAG_PX = 4;
 const LABEL_SCALE = 1.6;
+/** Below this zoom, folder labels crowd the dots, so only those on an inked path are drawn. */
+const FOLDER_LABEL_SCALE = 0.9;
 const STEP = 1.25;
 const EDGE = 16;
 
@@ -204,9 +206,9 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
 
   const onKeyDown = (e: KeyboardEvent<SVGSVGElement>) => {
     const dir = arrowDir(e.key);
-    // Ctrl/Meta/Alt with + - 0 is browser zoom; leave it alone.
+    // Ctrl/Meta/Alt with + - 0 is browser zoom and Alt+Arrow is browser history; leave them alone.
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
-    if (dir) {
+    if (dir && plain) {
       e.preventDefault();
       const from = shown.find((s) => s.dot.id === rovingId);
       if (!from) return;
@@ -260,6 +262,9 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
   for (const id of hits) if (dotById.has(id)) inked.add(id);
   if (sel) inked.add(sel);
   if (hot && dotById.has(hot)) inked.add(hot);
+  const inkedFolders = new Set<string>();
+  for (const id of inked) for (const fid of dotById.get(id)!.folderIds) inkedFolders.add(fid);
+  const allFolderLabels = view.scale >= FOLDER_LABEL_SCALE;
   const searching = hits.size > 0;
   const line = (s: { x1: number; y1: number; x2: number; y2: number }, i: number) => {
     const a = toScreen(view, { x: s.x1, y: s.y1 });
@@ -301,6 +306,7 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
         </g>
         <g className="cmap-folders" aria-hidden="true">
           {scene.folders.map((f) => {
+            if (!allFolderLabels && !inkedFolders.has(f.id)) return null;
             const s = toScreen(view, f);
             return (
               <text key={f.id} x={f1(s.x)} y={f1(s.y + 3.5)} textAnchor="middle">

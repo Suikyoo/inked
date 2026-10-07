@@ -67,6 +67,7 @@ export function LocalMap({
   const open = (id: string) => navigate(`/v/${graph.vaultId}/n/${id}`);
 
   const onKeyDown = (e: KeyboardEvent<SVGSVGElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return; // Alt+Arrow is browser history
     const dir = arrowDir(e.key);
     const from = spots.find((s) => s.note.id === rovingId);
     if (!dir || !from) return;

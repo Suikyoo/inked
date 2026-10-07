@@ -14,6 +14,14 @@ function input(vaultId: string, bodies: Record<string, string> = {}, ready = tru
 }
 
 describe('buildScene', () => {
+  it('gives each dot its top-down folder chain (M1)', () => {
+    const s = buildScene([input('v1')]);
+    const ids = (id: string) => s.dots.find((d) => d.id === id)!.folderIds;
+    expect(ids('v1-b')).toEqual(['f1', 'f2']);
+    expect(ids('v1-a')).toEqual(['f1']);
+    expect(ids('v1-c')).toEqual([]);
+  });
+
   it('puts each hub at its world centre and offsets every dot from it', () => {
     const a = input('v1');
     const b = input('v2');

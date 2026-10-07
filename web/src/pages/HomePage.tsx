@@ -9,6 +9,7 @@ import { useVaultGraphs } from '../map/useVaultGraphs';
 import { highlightSegments } from '../search/fuzzy';
 import { searchBodies, searchTitles, type SearchEntry } from '../search/search';
 import { describeError, relativeTime } from '../lib/util';
+import { homePending } from './homeStatus';
 import { useAppState, useSearchEntries, useStore, vaultStats } from '../state/StoreContext';
 import type { AppState } from '../state/store';
 
@@ -70,7 +71,7 @@ export function HomePage() {
   const recent = useMemo(() => [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10), [entries]);
 
   const bodiesPending = state.vaultOrder.some((id) => !state.vaults[id]?.broken && !state.bodiesReady[id]);
-  const treesPending = state.vaultsStatus !== 'ready' || state.vaultOrder.some((id) => state.trees[id]?.status === 'loading');
+  const treesPending = homePending(state);
   const vaults = state.vaultOrder.map((id) => state.vaults[id]).filter((v) => v && !v.broken);
 
   const hrefFor = (e: SearchEntry) => `/v/${e.vaultId}/n/${e.noteId}`;
@@ -167,7 +168,7 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending && state.vaultsStatus !== 'error'} />
+            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} />
             <MapLegend linksPending={mapEntries.some((e) => !e.graph.linksReady)} />
           </section>
         )}
@@ -183,7 +184,11 @@ export function HomePage() {
           onFocus={(e) => setHot(hotFrom(e.target))}
           onBlur={() => setHot(null)}
         >
-          {state.vaultsStatus === 'ready' && vaults.length === 0 ? (
+          {state.vaultsStatus === 'error' ? (
+            <div className="empty">
+              <p>Couldn’t load your vaults. Use Try again in the sidebar.</p>
+            </div>
+          ) : state.vaultsStatus === 'ready' && vaults.length === 0 ? (
             <div className="empty">
               <p>You don’t have any vaults yet. A vault holds folders and notes, each encrypted with its own key.</p>
               <p>Use the + next to “Vaults” in the sidebar to create one.</p>
