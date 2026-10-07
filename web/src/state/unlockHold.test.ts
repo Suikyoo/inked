@@ -30,6 +30,29 @@ describe('unlock notification hold', () => {
     expect(seen).toHaveLength(2);
   });
 
+  it('releases the hold at once when the session ends mid-hold', () => {
+    const { s, seen, set } = setup();
+    s.unlockTransition = () => undefined;
+    set({ phase: 'unlocked' });
+    set({ phase: 'locked' });
+    expect(seen).toHaveLength(1);
+    expect(s.getState().phase).toBe('locked');
+    set({ vaultsStatus: 'ready' });
+    expect(seen).toHaveLength(2);
+  });
+
+  it('a throwing hook does not abort and does not leave a hold', () => {
+    const { s, seen, set } = setup();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    s.unlockTransition = () => {
+      throw new Error('boom');
+    };
+    expect(() => set({ phase: 'unlocked' })).not.toThrow();
+    expect(seen).toHaveLength(1);
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+  });
+
   it('flushes after the safety timeout if the hook never calls back', () => {
     vi.useFakeTimers();
     const { s, seen, set } = setup();

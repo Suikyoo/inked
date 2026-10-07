@@ -35,11 +35,20 @@ export function LoginPage() {
 
   // The store is already unlocked when it notifies; only the screen swap is animated, as an ink wipe.
   useEffect(() => {
+    // If the session ended before the swap landed, the unlock is moot: make the form usable again.
+    const recover = () => {
+      if (store.getState().phase === 'unlocked') return;
+      setBusy(false);
+      setUnlocked(false);
+    };
     const hook = (notify: () => void) => {
       const swap = () => {
         const root = document.documentElement;
         root.classList.add('is-unlocking');
-        const t = withViewTransition(() => flushSync(notify));
+        const t = withViewTransition(() => {
+          flushSync(notify);
+          recover();
+        });
         const clear = () => root.classList.remove('is-unlocking');
         if (t?.finished) void t.finished.then(clear, clear);
         else clear();
@@ -91,6 +100,10 @@ export function LoginPage() {
     store.clearNotice();
     try {
       await store.unlock(u, password);
+      if (store.getState().phase !== 'unlocked') {
+        setBusy(false);
+        return;
+      }
       setUnlocked(true);
       setFailures(0);
       // The route guard redirects once the store is unlocked.

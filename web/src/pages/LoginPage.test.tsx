@@ -70,6 +70,7 @@ afterEach(() => {
   Reflect.deleteProperty(window, 'matchMedia');
   Reflect.deleteProperty(document, 'startViewTransition');
   document.documentElement.removeAttribute('style');
+  document.documentElement.classList.remove('is-unlocking');
 });
 
 describe('LoginPage motion', () => {
@@ -121,6 +122,25 @@ describe('LoginPage motion', () => {
       el.querySelector('input')!.dispatchEvent(new Event('animationend', { bubbles: true }));
     });
     expect(wrap.classList.contains('nudge')).toBe(true);
+  });
+
+  it('swaps at once under reduced motion', async () => {
+    window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener: () => undefined, removeEventListener: () => undefined })) as unknown as typeof window.matchMedia;
+    const store = fakeStore(vi.fn(() => new Promise<void>(() => undefined)));
+    render(store);
+    const notify = vi.fn();
+    act(() => store.unlockTransition!(notify));
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enables the form when the session ended before the unlock landed', async () => {
+    const store = fakeStore(vi.fn().mockResolvedValue(undefined));
+    const locked = { phase: 'locked', lastUsername: 'ada', notice: null } as unknown as AppState;
+    store.getState = () => locked;
+    const el = render(store);
+    await submitWith(el, 'right-pass');
+    expect(el.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
+    expect(el.querySelector<HTMLInputElement>('input[name="password"]')!.disabled).toBe(false);
   });
 
   it('removes its transition hook on unmount', () => {

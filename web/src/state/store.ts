@@ -271,6 +271,7 @@ export class AppStore {
    */
   unlockTransition: ((notify: () => void) => void) | null = null;
   private notifyHeld = false;
+  private releaseHold: (() => void) | null = null;
   private userKey: CryptoKey | null = null;
   private vaultKeys = new Map<string, CryptoKey>();
   /** Bumped on every lock/unlock so late async results from an old session are dropped. */
@@ -337,7 +338,11 @@ export class AppStore {
       for (const l of this.listeners) l();
     };
     // While an unlock notification is deferred, later ones are held: the deferred call reads the latest state.
-    if (this.notifyHeld) return;
+    if (this.notifyHeld) {
+      // The session ended mid-hold (peer lock, 401, ...): there is no unlock to animate, so deliver now.
+      if (patch.phase && patch.phase !== 'unlocked') this.releaseHold?.();
+      return;
+    }
     // The state is already final; only the moment subscribers re-render may be handed to the UI.
     if (unlocking && this.unlockTransition) {
       this.notifyHeld = true;
@@ -347,14 +352,17 @@ export class AppStore {
         flushed = true;
         clearTimeout(timer);
         this.notifyHeld = false;
+        this.releaseHold = null;
         notify();
       };
+      this.releaseHold = flush;
       const timer = setTimeout(flush, UNLOCK_TRANSITION_MAX_MS);
       try {
         this.unlockTransition(flush);
       } catch (e) {
+        // A broken animation hook must not abort the unlock.
         flush();
-        throw e;
+        console.error(e);
       }
     } else notify();
   }
