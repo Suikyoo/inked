@@ -22,7 +22,7 @@ export class NonApiResponse extends Error {
 /** The saved credential no longer signs in, typically after a password change. */
 export class CredentialStale extends Error {
   constructor() {
-    super('Inked credential is stale (password changed?). Run `inked-mcp login`.');
+    super('Inked credential is stale (password changed?). Run `inked-mcp login`, then restart the AI client.');
     this.name = 'CredentialStale';
   }
 }

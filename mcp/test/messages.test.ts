@@ -6,7 +6,7 @@ import { auditCode, toToolMessage } from '../src/messages';
 describe('toToolMessage', () => {
   it.each([
     [new ToolError('denied', 'Not permitted by the Inked MCP config: note.update.'), 'Not permitted by the Inked MCP config: note.update.'],
-    [new CredentialStale(), 'Inked credential is stale (password changed?). Run `inked-mcp login`.'],
+    [new CredentialStale(), 'Inked credential is stale (password changed?). Run `inked-mcp login`, then restart the AI client.'],
     [new NonApiResponse(403), 'Server returned a non-API response (Cloudflare challenge or proxy page?). See docs/mcp.md#cloudflare.'],
     [new ApiError(429, 'locked', undefined, 60), 'Inked is refusing sign-ins for now. Try again in 60 s.'],
     [new ApiError(413, 'too_large'), 'Note is too large (about 1.5 MB of text is the limit).'],

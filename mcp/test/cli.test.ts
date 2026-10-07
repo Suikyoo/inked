@@ -69,8 +69,28 @@ describe('inked-mcp CLI', () => {
     await changePassword(srv.baseUrl, 'jude', PW, 'another password here');
     const v = fakeIO([], '');
     expect(await main(['serve'], v.io, { connect: async () => undefined })).toBe(1);
-    expect(v.err.join('\n')).toContain('Inked credential is stale (password changed?). Run `inked-mcp login`.');
+    expect(v.err.join('\n')).toContain('Inked credential is stale (password changed?). Run `inked-mcp login`, then restart the AI client.');
     await changePassword(srv.baseUrl, 'jude', 'another password here', PW);
+  });
+
+  it('serve closes the session and exits 1 when connect throws', async () => {
+    await main(['login'], fakeIO([srv.baseUrl, 'jude'], PW).io);
+    const logouts: string[] = [];
+    const spy: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/api/auth/logout')) logouts.push(url);
+      return fetch(input, init);
+    };
+    const v = fakeIO([], '');
+    const code = await main(['serve'], v.io, {
+      fetch: spy,
+      connect: async () => {
+        throw new Error('transport boom');
+      },
+    });
+    expect(code).toBe(1);
+    expect(v.err.join('\n')).toContain('transport boom');
+    expect(logouts.length).toBe(1);
   });
 
   it('logout deletes the credential and explains revocation', async () => {

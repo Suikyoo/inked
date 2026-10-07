@@ -154,20 +154,36 @@ export async function main(
       const ops = new Ops(session, new VaultModel(session, policy), policy);
       const { server, registered } = createInkedServer({ ops, policy, audit: new Audit(), version: VERSION });
       io.err(`inked-mcp ${VERSION}: ${session.username} at ${session.baseUrl}; tools: ${registered.join(', ')}`);
+      // Close the session, but never wait more than a few seconds: a hung logout must not keep the key in memory.
+      const closeSession = () =>
+        Promise.race([session.close().catch(() => undefined), new Promise<void>((r) => setTimeout(r, 3000))]);
+      let closing = false;
       const shutdown = async () => {
-        await session.close();
+        if (closing) process.exit(0); // a second signal while closing: leave at once
+        closing = true;
+        await closeSession();
         process.exit(0);
       };
-      if (deps.connect) {
-        await deps.connect(server);
-        await session.close();
+      const signals = ['SIGINT', 'SIGTERM'] as const;
+      const removeHandlers = () => {
+        for (const sig of signals) process.off(sig, shutdown);
+        process.stdin.off('end', shutdown);
+      };
+      try {
+        if (deps.connect) {
+          await deps.connect(server);
+          await session.close();
+          return 0;
+        }
+        for (const sig of signals) process.on(sig, shutdown);
+        process.stdin.on('end', shutdown);
+        await server.connect(new StdioServerTransport());
         return 0;
+      } catch (e) {
+        removeHandlers();
+        await closeSession();
+        throw e;
       }
-      process.once('SIGINT', shutdown);
-      process.once('SIGTERM', shutdown);
-      process.stdin.once('end', shutdown);
-      await server.connect(new StdioServerTransport());
-      return 0;
     }
 
     io.err(USAGE);
