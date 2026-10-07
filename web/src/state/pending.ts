@@ -48,12 +48,17 @@ type PendingIO = {
   createNote: (vaultId: string, b: PendingSave['copy']) => Promise<unknown>;
   /** Reads the note as stored now, to tell our own landed write from a real conflict. */
   getNote?: (id: string) => Promise<{ note: { encBody: string } }>;
+  /**
+   * True when the stored ciphertext holds the same text as the item (a racing save of the same text
+   * landed with its own IV). Decrypts in memory only; false (or a rejection) when it cannot compare.
+   */
+  sameText?: (p: PendingSave, storedEncBody: string) => Promise<boolean>;
 };
 
 /**
  * Sends one queued save. A conflict (409) or a note deleted elsewhere (404) becomes a copy note,
- * so the text is never lost. A 409 whose stored body is exactly this ciphertext (an earlier attempt
- * that timed out but landed) counts as saved; network, 5xx, 401 and user_mismatch errors leave the item for a later retry.
+ * so the text is never lost. A 409 whose stored body is this ciphertext, or the same text (an earlier
+ * attempt or a racing save that timed out but landed) counts as saved; network, 5xx, 401 and user_mismatch errors leave the item for a later retry.
  * Other client errors can never succeed, so the item is dropped (and the user told why).
  */
 export async function sendPending(p: PendingSave, io: PendingIO): Promise<PendingResult> {
@@ -64,7 +69,7 @@ export async function sendPending(p: PendingSave, io: PendingIO): Promise<Pendin
     if (transient(e)) return { outcome: 'retry' };
     if (e instanceof ApiError && e.status !== 409 && e.status !== 404) return refused(e);
     if (e instanceof ApiError && e.status === 409 && io.getNote) {
-      const landed = await alreadyStored(p, io.getNote);
+      const landed = await alreadyStored(p, io);
       if (landed !== false) return landed;
     }
   }
@@ -78,17 +83,21 @@ export async function sendPending(p: PendingSave, io: PendingIO): Promise<Pendin
 }
 
 /**
- * After a 409: `saved` when the server already holds exactly this ciphertext (its IV is random, so an
- * equal body can only be our own write), `retry` on a transient read error, and false (make the copy)
- * for anything else: another body, or a note that is gone or unreadable.
+ * After a 409: `saved` when the server already holds this text. Equal ciphertext needs no key (its IV is
+ * random, so an equal body can only be our own write); other ciphertext is compared as text when
+ * `io.sameText` can. `retry` on a transient read error, and false (make the copy) for anything else:
+ * other text, text that cannot be compared, or a note that is gone or unreadable.
  */
-async function alreadyStored(p: PendingSave, getNote: NonNullable<PendingIO['getNote']>): Promise<PendingResult | false> {
+async function alreadyStored(p: PendingSave, io: PendingIO): Promise<PendingResult | false> {
+  let stored: string;
   try {
-    const { note } = await getNote(p.noteId);
-    return note.encBody === p.encBody ? { outcome: 'saved' } : false;
+    stored = (await io.getNote!(p.noteId)).note.encBody;
   } catch (e) {
     return transient(e) ? { outcome: 'retry' } : false;
   }
+  if (stored === p.encBody) return { outcome: 'saved' };
+  const same = io.sameText ? await io.sameText(p, stored).catch(() => false) : false;
+  return same ? { outcome: 'saved' } : false;
 }
 
 async function createCopy(vaultId: string, copy: PendingSave['copy'], io: PendingIO): Promise<PendingResult | 'folderGone'> {

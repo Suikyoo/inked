@@ -374,6 +374,78 @@ describe('AppStore', () => {
     expect(api.getNote.mock.calls[0]).toEqual([created.id, { timeoutMs: QUEUE_REQUEST_TIMEOUT_MS, asUser: s.getState().user!.id }]);
   });
 
+  /**
+   * The editor's save reaches the server (which keeps its ciphertext) but its answer never arrives,
+   * so it times out client-side. Returns the stored ciphertext; later updates answer 409.
+   */
+  async function saveLandsButTimesOut(s: AppStore, vaultId: string, noteId: string, text: string, sent: NoteBody) {
+    let stored = '';
+    api.updateNote.mockImplementationOnce((_id: string, b: { encBody: string }) => {
+      stored = b.encBody;
+      return new Promise(() => undefined);
+    });
+    void s.saveNoteBody(vaultId, noteId, text, 't1');
+    await vi.waitFor(() => expect(stored).not.toBe(''));
+    api.updateNote.mockRejectedValue(new ApiError(409, 'conflict'));
+    api.getNote.mockImplementation(async () => ({ note: { ...headFor(sent, 't2').note, encBody: stored } }));
+    return stored;
+  }
+
+  it('a racing save of the same text that timed out but landed: the queued 409 counts as saved, no copy (D4a)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Plan', '');
+    const sent: NoteBody = api.createNote.mock.calls[0][1];
+    const stored = await saveLandsButTimesOut(s, vaultId, created.id, 'my plan text', sent);
+    let timeOut!: (e: unknown) => void;
+    const racing = new Promise<{ updatedAt: string }>((_r, j) => (timeOut = j));
+    const stash = s.stashUnsaved(vaultId, created.id, 'my plan text', 't1', { racing: { save: racing, sameText: true } });
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(1)); // queued, held by the racing save
+    timeOut(new ApiError(0, 'network')); // the racing save times out client-side
+    await stash;
+    await vi.waitFor(() => expect(s.getState().pendingCount).toBe(0));
+    const queued: string = api.updateNote.mock.calls.at(-1)![1].encBody;
+    expect(queued).not.toBe(stored); // re-encrypted with a fresh IV
+    expect(api.createNote).toHaveBeenCalledTimes(1); // the note itself, no copy
+    expect(s.getState().notice).toBeNull();
+  });
+
+  it('a racing save of other text that landed: the queued 409 is still copied (D4a)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Plan', '');
+    const sent: NoteBody = api.createNote.mock.calls[0][1];
+    await saveLandsButTimesOut(s, vaultId, created.id, 'older plan text', sent);
+    api.listVaults.mockResolvedValue({ vaults: [] });
+    await s.stashUnsaved(vaultId, created.id, 'my plan text', 't1');
+    expect(s.getState().pendingCount).toBe(0);
+    expect(api.createNote).toHaveBeenCalledTimes(2); // the copy
+    expect(s.getState().notice).toBe('Saved your changes as “Plan (unsaved copy)” because the note changed elsewhere.');
+  });
+
+  it('without the vault key, a queued 409 falls back to ciphertext equality (D4a)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+    const created = await s.createNote(vaultId, null, 'Plan', '');
+    const sent: NoteBody = api.createNote.mock.calls[0][1];
+    // Two items queued offline: one the server will hold exactly, one only as the same text.
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, created.id, 'my plan text', 't1');
+    await s.stashUnsaved(vaultId, created.id, 'my plan text', 't1');
+    const [first, second] = [...new Set(api.updateNote.mock.calls.map((c) => c[1].encBody as string))];
+    expect(second).toBeDefined();
+    (s as unknown as { vaultKeys: Map<string, CryptoKey> }).vaultKeys.delete(vaultId);
+    api.updateNote.mockRejectedValue(new ApiError(409, 'conflict'));
+    api.getNote.mockResolvedValue({ note: { ...headFor(sent, 't2').note, encBody: first } });
+    await s.retryPending();
+    expect(s.getState().pendingCount).toBe(0);
+    // The exact ciphertext is saved; the other cannot be compared without the key, so it is copied.
+    expect(api.createNote).toHaveBeenCalledTimes(2);
+  });
+
   it('drops a queued edit once a slow save of the same text lands (I4)', async () => {
     const s = await registeredStore();
     const vaultId = Object.keys(s.getState().vaults)[0];

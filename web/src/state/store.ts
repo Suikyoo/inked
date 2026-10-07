@@ -1274,6 +1274,7 @@ export class AppStore {
       updateNote: (id: string, b: { encBody: string; baseUpdatedAt?: string }) => guard(() => QUEUE_IO.updateNote(owner, id, b)),
       createNote: (vaultId: string, b: PendingSave['copy']) => guard(() => QUEUE_IO.createNote(owner, vaultId, b)),
       getNote: (id: string) => guard(() => QUEUE_IO.getNote(owner, id)),
+      sameText: (item: PendingSave, storedEncBody: string) => this.sameQueuedText(item, storedEncBody, sameSession),
     });
     const copied: QueueEntry[] = [];
     let atRoot = 0;
@@ -1311,6 +1312,26 @@ export class AppStore {
       else this.deferNotice(userId, notice);
     }
     if ((copied.length || atRoot) && live) void this.loadAll().catch(() => undefined);
+  }
+
+  /**
+   * After a queued save's 409: does the server's body hold the same text as the item? Both are
+   * decrypted with the note's own AAD and compared in memory; nothing is kept. False when it cannot
+   * tell (the keys are gone or the session changed, or either body does not decrypt), so the queue
+   * falls back to comparing ciphertext.
+   */
+  private async sameQueuedText(item: PendingSave, storedEncBody: string, sameSession: () => boolean): Promise<boolean> {
+    const key = this.vaultKeys.get(item.vaultId);
+    if (!key || !sameSession()) return false;
+    try {
+      const [stored, queued] = await Promise.all([
+        decryptNoteBody(key, item.vaultId, item.noteId, storedEncBody),
+        decryptNoteBody(key, item.vaultId, item.noteId, item.encBody),
+      ]);
+      return stored === queued;
+    } catch {
+      return false;
+    }
   }
 
   /** Shows a queue notice after any notice already showing, so neither is lost. */

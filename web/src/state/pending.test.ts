@@ -72,6 +72,45 @@ describe('sendPending', () => {
     };
     expect(await sendPending(item(), io)).toEqual({ outcome: 'copied' });
   });
+  it('counts a 409 as saved when the stored body is other ciphertext of the same text (D4a)', async () => {
+    // A racing save landed with its own IV; the queued item was encrypted separately.
+    const io = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn(),
+      getNote: vi.fn().mockResolvedValue({ note: { encBody: 'v1.same-text-other-iv' } }),
+      sameText: vi.fn().mockResolvedValue(true),
+    };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'saved' });
+    expect(io.sameText).toHaveBeenCalledWith(item(), 'v1.same-text-other-iv');
+    expect(io.createNote).not.toHaveBeenCalled();
+  });
+  it('copies on a 409 when the stored text differs (D4a)', async () => {
+    const io = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn().mockResolvedValue({}),
+      getNote: vi.fn().mockResolvedValue({ note: { encBody: 'v1.other' } }),
+      sameText: vi.fn().mockResolvedValue(false),
+    };
+    expect(await sendPending(item(), io)).toEqual({ outcome: 'copied' });
+  });
+  it('falls back to ciphertext equality when the text cannot be compared (locked, or a decrypt failure) (D4a)', async () => {
+    const failing = () => vi.fn().mockRejectedValue(new Error('decrypt'));
+    const equal = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn(),
+      getNote: vi.fn().mockResolvedValue({ note: { encBody: 'v1.body' } }),
+      sameText: failing(),
+    };
+    expect(await sendPending(item(), equal)).toEqual({ outcome: 'saved' });
+    expect(equal.sameText).not.toHaveBeenCalled(); // equal ciphertext needs no key
+    const other = {
+      updateNote: vi.fn().mockRejectedValue(new ApiError(409, 'conflict')),
+      createNote: vi.fn().mockResolvedValue({}),
+      getNote: vi.fn().mockResolvedValue({ note: { encBody: 'v1.other' } }),
+      sameText: failing(),
+    };
+    expect(await sendPending(item(), other)).toEqual({ outcome: 'copied' });
+  });
   it('never checks the stored body on a 404 (D4a)', async () => {
     const io = {
       updateNote: vi.fn().mockRejectedValue(new ApiError(404, 'not_found')),
