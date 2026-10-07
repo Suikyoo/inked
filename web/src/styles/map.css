@@ -91,7 +91,8 @@
   cursor: pointer;
 }
 .cmap-node:focus,
-.cmap-folder:focus {
+.cmap-folder:focus,
+.cmap-hub:focus {
   outline: none;
 }
 .cmap-node {
@@ -104,7 +105,8 @@
   fill: transparent;
 }
 .cmap-node:focus-visible .cmap-hit,
-.cmap-folder:focus-visible .cmap-hit {
+.cmap-folder:focus-visible .cmap-hit,
+.cmap-hub:focus-visible .cmap-hit {
   stroke: var(--map-sel);
   stroke-width: 1.5;
 }
@@ -204,8 +206,15 @@
   fill: var(--muted);
   stroke-width: 4px;
 }
+/* Single click selects the vault; double-click fits it. */
 .cmap-hub {
-  cursor: zoom-in;
+  cursor: pointer;
+}
+/* Lit when its root Index is a search hit or selected. */
+.cmap-hub-ink {
+  fill: var(--selection);
+  stroke: var(--map-ink);
+  stroke-width: 1.5;
 }
 .cmap-hub-name {
   font: italic 500 13px var(--font-serif);

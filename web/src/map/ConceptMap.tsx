@@ -18,8 +18,8 @@ const STEP = 1.25;
 const EDGE = 16;
 /** Write-on: each level of edges starts this much after the one above it. */
 const WRITE_STEP_MS = 140;
-/** Write-on: a folder square or dot fades in this long after its edge starts drawing. */
-const NODE_LAG_MS = 260;
+/** Write-on: a folder square or dot fades in once its edge has finished drawing (--dur-ink). */
+const NODE_LAG_MS = 520;
 /** The pending-links caption fades out over --dur-2. */
 const CAPTION_EXIT_MS = 140;
 
@@ -50,6 +50,8 @@ export interface ConceptMapProps {
 
 const f1 = (n: number) => n.toFixed(1);
 const ms = (n: number) => `${n}ms`;
+/** Roving/focus id of a vault hub, namespaced so it can never collide with a note or folder id. */
+const hubKey = (vaultId: string) => `hub:${vaultId}`;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, now = Date.now() }: ConceptMapProps) {
@@ -73,7 +75,8 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
   const entryById = useMemo(() => new Map(entries.map((e) => [e.vaultId, e])), [entries]);
   const dotById = useMemo(() => new Map(scene.dots.map((d) => [d.id, d])), [scene]);
   const folderById = useMemo(() => new Map(scene.folders.map((f) => [f.id, f])), [scene]);
-  const isNode = (id: string | null): id is string => !!id && (dotById.has(id) || folderById.has(id));
+  const hubByKey = useMemo(() => new Map(scene.hubs.map((h) => [hubKey(h.vaultId), h])), [scene]);
+  const isNode = (id: string | null): id is string => !!id && (dotById.has(id) || folderById.has(id) || hubByKey.has(id));
   const selNote = selected?.kind === 'note' && dotById.has(selected.id) ? selected.id : null;
   const selFolder = selected?.kind === 'folder' && folderById.has(selected.id) ? selected.id : null;
   const selHub = selected?.kind === 'hub' && entryById.has(selected.vaultId) ? selected.vaultId : null;
@@ -222,9 +225,13 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
   };
 
   const shown = useMemo(() => scene.dots.map((dot) => ({ dot, ...toScreen(view, dot) })), [scene, view]);
-  /** Every focusable node (notes and folders) in screen space, for arrow-key roving. */
+  /** Every focusable node (notes, folders and hubs) in screen space, for arrow-key roving. */
   const targets = useMemo(
-    () => [...shown.map((s) => ({ id: s.dot.id, x: s.x, y: s.y })), ...scene.folders.map((f) => ({ id: f.id, ...toScreen(view, f) }))],
+    () => [
+      ...shown.map((s) => ({ id: s.dot.id, x: s.x, y: s.y })),
+      ...scene.folders.map((f) => ({ id: f.id, ...toScreen(view, f) })),
+      ...scene.hubs.map((h) => ({ id: hubKey(h.vaultId), ...toScreen(view, h) })),
+    ],
     [shown, scene, view],
   );
   const firstHit = useMemo(() => {
@@ -235,11 +242,19 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
     () => scene.dots.reduce<string | null>((best, d) => (best === null || d.updatedAt > dotById.get(best)!.updatedAt ? d.id : best), null),
     [scene, dotById],
   );
-  const rovingId = (isNode(focusId) ? focusId : null) ?? selNote ?? selFolder ?? firstHit ?? recentId ?? scene.folders[0]?.id ?? null;
+  const rovingId =
+    (isNode(focusId) ? focusId : null) ??
+    selNote ??
+    selFolder ??
+    (selHub ? hubKey(selHub) : null) ??
+    firstHit ??
+    recentId ??
+    scene.folders[0]?.id ??
+    (scene.hubs[0] ? hubKey(scene.hubs[0].vaultId) : null);
 
   /** Pans a node that lies outside the view to the centre. Asking twice for the same node is harmless. */
   const revealNode = (id: string) => {
-    const p = dotById.get(id) ?? folderById.get(id);
+    const p = dotById.get(id) ?? folderById.get(id) ?? hubByKey.get(id);
     if (!p) return;
     const s = toScreen(view, p);
     if (s.x < EDGE || s.y < EDGE || s.x > size.w - EDGE || s.y > size.h - EDGE) {
@@ -264,7 +279,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
     },
     onBlur: (e: { relatedTarget: EventTarget | null }) => {
       const next = e.relatedTarget;
-      if (!(next instanceof Element && next.closest('g.cmap-node, g.cmap-folder') && svgRef.current?.contains(next))) setFocusId(null);
+      if (!(next instanceof Element && next.closest('g.cmap-node, g.cmap-folder, g.cmap-hub') && svgRef.current?.contains(next))) setFocusId(null);
     },
   });
 
@@ -314,24 +329,27 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
     e.stopPropagation();
     if (consumeDrag()) return;
     onSelect({ kind: 'hub', vaultId });
+    setFocusId(hubKey(vaultId));
   };
   const onBackgroundClick = () => {
     if (consumeDrag()) return;
     if (selected) onSelect(null);
   };
 
-  // Ink: search hits (an Index hit inks its folder's path), the selected note or folder, and the hot result.
+  // Ink: search hits, the selected note or folder, and the hot result. An Index note inks its folder's
+  // path (a diamond); a root Index has no path and lights its hub instead.
   const inked: string[] = [];
   const inkOnce = (id: string | null) => {
     if (id && scene.chains[id] && !inked.includes(id)) inked.push(id);
   };
   for (const id of hits) inkOnce(id);
-  inkOnce(selNote);
+  inkOnce(selected?.kind === 'note' ? selected.id : null);
   inkOnce(selFolder);
   inkOnce(hot);
   const inkedNotes = new Set(inked.filter((id) => dotById.has(id)));
   const inkedFolders = new Set<string>();
   for (const id of inked) for (const fid of scene.chainFolders[id] ?? []) inkedFolders.add(fid);
+  const inkedHubs = new Set(inked.map((id) => scene.rootIndexes[id]).filter((v): v is string => !!v));
 
   // Ink present on the first render is drawn as is; ids inked later draw in. An id that leaves and returns draws again.
   const settledInk = useRef<Set<string> | null>(null);
@@ -440,16 +458,26 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
             return (
               <g
                 key={h.vaultId}
-                className="cmap-hub"
+                ref={nodeRef(hubKey(h.vaultId))}
+                className={`cmap-hub${inkedHubs.has(h.vaultId) ? ' on' : ''}`}
+                data-hub={h.vaultId}
                 transform={`translate(${f1(s.x)} ${f1(s.y)})`}
+                role="button"
+                aria-label={`vault ${e.vault.name}`}
+                {...nodeFocusProps(hubKey(h.vaultId))}
                 onClick={(ev) => onHubClick(ev, h.vaultId)}
                 onDoubleClick={(ev) => {
                   ev.stopPropagation();
                   fitTo(scene.vaultBounds[h.vaultId]);
                 }}
-                aria-hidden="true"
+                onKeyDown={(ev) => {
+                  if (activates(ev)) onSelect({ kind: 'hub', vaultId: h.vaultId });
+                }}
               >
-                {h.vaultId === selHub && <circle className="cmap-sel" r={11} />}
+                <circle className="cmap-hit" r={12} />
+                {/* The hub stands for the root Index: a hit on it lights the hub, as a diamond does for a folder. */}
+                {inkedHubs.has(h.vaultId) && <circle className="cmap-hub-ink" r={9.5} />}
+                {h.vaultId === selHub && <circle className="cmap-sel" r={12.5} />}
                 <g transform="translate(-7 -7)">
                   <VaultIcon color={e.vault.color} level={e.level} size={14} />
                 </g>
@@ -535,7 +563,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, no
           </p>
         ))}
       <p id={`${uid}-help`} className="sr-only">
-        Arrow keys move between folders and notes. Enter opens a note or selects a folder. Plus and minus zoom, 0 fits the map, Escape clears the
+        Arrow keys move between vaults, folders and notes. Enter opens a note or selects a folder or vault. Plus and minus zoom, 0 fits the map, Escape clears the
         selection.
       </p>
     </div>

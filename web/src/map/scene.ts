@@ -67,11 +67,13 @@ export interface Scene {
   folderBounds: Record<string, Bounds>;
   /**
    * Node id -> [hub, folders top-down, node], for ink strokes. Covers notes, folders and Index notes;
-   * an Index note's chain ends at its folder (just the hub at the vault root).
+   * an Index note's chain ends at its folder (just the hub at the vault root, see rootIndexes).
    */
   chains: Record<string, Pt[]>;
   /** Node id -> the folders its ink chain passes through, top-down (a folder includes itself). */
   chainFolders: Record<string, string[]>;
+  /** Root Index note id -> its vault: the hub stands for it. */
+  rootIndexes: Record<string, string>;
 }
 
 export const UNTITLED = 'Untitled';
@@ -135,6 +137,7 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
     folderBounds: {},
     chains: {},
     chainFolders: {},
+    rootIndexes: {},
   };
   let first = true;
 
@@ -227,6 +230,7 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
       if (n.index) {
         // No dot: a hit on the Index inks the way to the folder that stands for it.
         ink(n.id, chainIds, null);
+        if (chainIds.length === 0) scene.rootIndexes[n.id] = vaultId;
         continue;
       }
       const p = layout.notes[n.id];

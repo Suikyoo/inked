@@ -142,14 +142,16 @@ describe('ConceptMap', () => {
     const ring = tree([], Array.from({ length: 8 }, (_, i) => note(`r${i}`, null, `r${i}`)) as NoteView[]);
     const e = entry(ring);
     render({ entries: [e] });
-    const dots = buildScene([e]).dots;
+    const s = buildScene([e]);
+    const dots = s.dots;
     const leftmost = dots.reduce((a, b) => (b.x < a.x ? b : a));
-    const expected = nearestInDirection(leftmost, dots, 'right');
+    const expected = nearestInDirection(leftmost, [...dots, { id: 'hub:v1', x: s.hubs[0].x, y: s.hubs[0].y }], 'right');
     expect(expected).not.toBeNull();
+    expect(expected).not.toBe('hub:v1');
     fire(node(leftmost.id), new FocusEvent('focusin', { bubbles: true }));
     key(node(leftmost.id), 'ArrowRight');
     expect(node(expected!).getAttribute('tabindex')).toBe('0');
-    expect(nodes().filter((n) => n.getAttribute('tabindex') === '0')).toHaveLength(1);
+    expect(svg().querySelectorAll('[tabindex="0"]')).toHaveLength(1);
   });
 
   it('a drag pans the map and does not select the dot it ends on (Review Focus 4)', () => {
@@ -384,6 +386,53 @@ describe('ConceptMap', () => {
       expect(host!.querySelector('g.cmap-hub .cmap-sel')).not.toBeNull();
     });
 
+    it('the hub is a keyboard node: a named button that Enter or Space selects', () => {
+      render({ entries: [entry(folders())] });
+      const hub = host!.querySelector<SVGGElement>('g.cmap-hub')!;
+      expect(hub.getAttribute('role')).toBe('button');
+      expect(hub.getAttribute('aria-label')).toBe('vault Vault v1');
+      expect(hub.hasAttribute('aria-hidden')).toBe(false);
+      key(hub, 'Enter');
+      key(hub, ' ');
+      expect(onSelect.mock.calls).toEqual([[{ kind: 'hub', vaultId: 'v1' }], [{ kind: 'hub', vaultId: 'v1' }]]);
+    });
+
+    it('keeps exactly one tab stop across notes, folders and hubs, and arrows can reach the hub', () => {
+      const e = entry(folders());
+      render({ entries: [e], selected: { kind: 'hub', vaultId: 'v1' } });
+      const stops = () => [...svg().querySelectorAll('[tabindex="0"]')];
+      expect(stops()).toHaveLength(1);
+      expect(stops()[0].getAttribute('data-hub')).toBe('v1');
+      expect(svg().querySelectorAll('g.cmap-node[tabindex], g.cmap-folder[tabindex], g.cmap-hub[tabindex]')).toHaveLength(4 + 2 + 1);
+      // From the hub, an arrow moves to the nearest node in that direction and the hub stops being the tab stop.
+      const s = buildScene([e]);
+      const hub = { x: s.hubs[0].x, y: s.hubs[0].y };
+      const all = [...s.dots, ...s.folders];
+      const dir = (['left', 'right', 'up', 'down'] as const).find((d) => nearestInDirection(hub, all, d))!;
+      const keyOf = { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown' };
+      key(stops()[0], keyOf[dir]);
+      expect(stops()).toHaveLength(1);
+      expect(stops()[0].getAttribute('data-hub')).toBeNull();
+      expect(stops()[0].getAttribute('data-note') ?? stops()[0].getAttribute('data-folder')).toBe(nearestInDirection(hub, all, dir));
+    });
+
+    it('a hit on the root Index lights the hub instead of drawing an empty stroke', () => {
+      const t = folders();
+      t.notes.rix = note('rix', null, 'Index');
+      render({ entries: [entry(t)], hits: new Set(['rix']) });
+      expect(host!.querySelector('g.cmap-hub')!.classList.contains('on')).toBe(true);
+      expect(host!.querySelector('g.cmap-hub .cmap-hub-ink')).not.toBeNull();
+      expect(host!.querySelector('.cmap-ink path')).toBeNull();
+      expect(nodes().map((n) => n.dataset.note)).not.toContain('rix');
+    });
+
+    it('selecting the root Index note lights the hub too', () => {
+      const t = folders();
+      t.notes.rix = note('rix', null, 'Index');
+      render({ entries: [entry(t)], selected: { kind: 'note', vaultId: 'v1', id: 'rix' } });
+      expect(host!.querySelector('g.cmap-hub')!.classList.contains('on')).toBe(true);
+    });
+
     it('double-clicking a folder fits the view to its subtree', () => {
       render({ entries: [entry(folders())] });
       const gap = () => {
@@ -449,6 +498,11 @@ describe('ConceptMap', () => {
       expect(edge('f2').style.animationDelay).toBe('140ms');
       expect(edge('n2').style.animationDelay).toBe('280ms');
       expect(edge('n2').getAttribute('pathLength')).toBe('1');
+      // Squares and dots fade in once their edge has finished drawing (edge delay + --dur-ink).
+      expect(host!.querySelector<SVGGElement>('g.cmap-folder[data-folder="f1"]')!.style.animationDelay).toBe('520ms');
+      expect(host!.querySelector<SVGGElement>('g.cmap-folder[data-folder="f2"]')!.style.animationDelay).toBe('660ms');
+      expect(node('n3').style.animationDelay).toBe('520ms');
+      expect(node('n2').style.animationDelay).toBe('800ms');
       unmount();
       render({ entries: [entry(base())] });
       expect(svg().classList.contains('is-writing')).toBe(false);
