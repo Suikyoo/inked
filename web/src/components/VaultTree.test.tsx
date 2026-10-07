@@ -152,9 +152,9 @@ describe('nested collapse', () => {
   it('a closed ancestor wraps an open descendant; only closed wrappers set visibility', async () => {
     const fs = await import('node:fs');
     const css = fs.readFileSync('src/styles/shell.css', 'utf8');
-    const open = css.match(/.tree-collapse[data-open='true']s*{[^}]*}/)![0];
-    expect(open).not.toMatch(/visibility/);
-    expect(css.match(/.tree-collapse[data-open='false']s*{[^}]*}/)![0]).toMatch(/visibility:s*hidden/);
+    const rule = (sel: string) => css.slice(css.indexOf(sel), css.indexOf('}', css.indexOf(sel)));
+    expect(rule(".tree-collapse[data-open='true']")).not.toContain('visibility');
+    expect(rule(".tree-collapse[data-open='false']")).toContain('visibility: hidden');
 
     mount(
       treeOf([folder('a', 'A'), folder('b', 'B', 'a')], [note('bn', 'Deep', 'b')]),
