@@ -145,3 +145,10 @@ export const ClockIcon = (p: P) => (
     <path d="M12 7.5V12l3 2" />
   </Svg>
 );
+
+/** The Index row's glyph: a small filled diamond. */
+export const IndexIcon = ({ size = 9, className }: P) => (
+  <svg className={className ? `index-icon ${className}` : 'index-icon'} width={size} height={size} viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
+    <path d="M5 .5 9.5 5 5 9.5.5 5z" />
+  </svg>
+);

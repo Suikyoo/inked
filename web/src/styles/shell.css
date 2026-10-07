@@ -400,3 +400,34 @@
     opacity: 1;
   }
 }
+
+/* ---- Tree: Index row and animated expand/collapse ------------------------------------------ */
+.tree-index {
+  color: var(--muted-2);
+}
+.tree-index .tree-chev {
+  color: var(--ink-light);
+}
+.tree-chev svg {
+  transition: transform var(--dur-2) var(--ease-std);
+}
+.tree-chev.is-open svg {
+  transform: rotate(90deg);
+}
+.tree-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--dur-2) var(--ease-std),
+    visibility 0s linear var(--dur-2);
+}
+.tree-collapse[data-open='true'] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows var(--dur-2) var(--ease-std);
+}
+.tree-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}

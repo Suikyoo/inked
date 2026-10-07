@@ -4,6 +4,7 @@ import { inkLevelLabel, VaultIcon } from '../brand/VaultIcon';
 import { PromptDialog } from '../components/Dialog';
 import { FolderIcon, PlusIcon } from '../components/Icons';
 import { uniqueTitle } from '../components/VaultTree';
+import { indexNoteOf } from '../lib/indexNote';
 import { describeError, relativeTime } from '../lib/util';
 import { folderPath, useAppState, useStore, vaultStats } from '../state/StoreContext';
 import { NotePane } from './NotePane';
@@ -125,7 +126,10 @@ function VaultOverview({ vaultId }: { vaultId: string }) {
         onClose={() => setFolderOpen(false)}
         onSubmit={async (name) => {
           try {
-            await store.createFolder(vaultId, null, name);
+            const f = await store.createFolder(vaultId, null, name);
+            const created = store.getState().trees[vaultId];
+            const index = created && indexNoteOf(created, f.id);
+            if (index) navigate(`/v/${vaultId}/n/${index.id}`, { state: { fresh: true } });
           } catch (e) {
             throw new Error(describeError(e));
           }

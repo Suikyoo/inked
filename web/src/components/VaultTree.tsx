@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { indexNoteOf } from '../lib/indexNote';
 import { prefs } from '../lib/prefs';
 import { describeError } from '../lib/util';
 import { folderPath, useStore } from '../state/StoreContext';
 import type { FolderView, NoteView, TreeView, VaultView } from '../state/store';
 import { ConfirmDialog, PromptDialog, SelectDialog } from './Dialog';
-import { ChevronDown, ChevronRight, MoreIcon, PlusIcon } from './Icons';
+import { ChevronRight, IndexIcon, MoreIcon, PlusIcon } from './Icons';
 import { Menu, type MenuItem } from './Menu';
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -13,6 +14,8 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
 interface Children {
   folders: FolderView[];
   notes: NoteView[];
+  /** The folder's Index note, which leads `notes`. */
+  indexId?: string;
 }
 
 function indexChildren(tree: TreeView): Map<string | null, Children> {
@@ -27,9 +30,12 @@ function indexChildren(tree: TreeView): Map<string | null, Children> {
     get(f.parentId && tree.folders[f.parentId] ? f.parentId : null).folders.push(f);
   }
   for (const n of Object.values(tree.notes)) get(n.folderId && tree.folders[n.folderId] ? n.folderId : null).notes.push(n);
-  for (const c of map.values()) {
+  for (const [folderId, c] of map) {
+    const indexId = indexNoteOf(tree, folderId)?.id;
+    c.indexId = indexId;
     c.folders.sort((a, b) => collator.compare(a.name, b.name));
-    c.notes.sort((a, b) => collator.compare(a.title, b.title));
+    // The folder's Index leads its notes.
+    c.notes.sort((a, b) => Number(b.id === indexId) - Number(a.id === indexId) || collator.compare(a.title, b.title));
   }
   return map;
 }
@@ -139,6 +145,19 @@ export function VaultTree({
       return next;
     });
 
+  // User-initiated expand/collapse. Expanding a folder opens its Index, unless the open note is
+  // already inside it (so browsing within a folder never yanks you back to the Index).
+  const toggleFolder = (id: string, open?: boolean) => {
+    const want = open ?? !expanded.has(id);
+    toggle(id, want);
+    if (!want || expanded.has(id) || !tree) return;
+    const index = indexNoteOf(tree, id);
+    if (!index) return;
+    const active = activeNoteId ? tree.notes[activeNoteId] : undefined;
+    if (active && folderPath(tree, active.folderId).some((f) => f.id === id)) return;
+    navigate(`/v/${vault.id}/n/${index.id}`);
+  };
+
   const openNote = (id: string) => navigate(`/v/${vault.id}/n/${id}`);
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -241,7 +260,7 @@ export function VaultTree({
       case 'ArrowRight':
         handled();
         if (item.kind === 'folder' && item.expandable) {
-          if (!expanded.has(item.id)) toggle(item.id, true);
+          if (!expanded.has(item.id)) toggleFolder(item.id, true);
           else focusRow(flat[i + 1]?.id);
         }
         break;
@@ -253,7 +272,7 @@ export function VaultTree({
       case 'Enter':
       case ' ':
         handled();
-        if (item.kind === 'folder') toggle(item.id);
+        if (item.kind === 'folder') toggleFolder(item.id);
         else openNote(item.id);
         break;
       case 'F2':
@@ -315,12 +334,12 @@ export function VaultTree({
               <div
                 className="tree-row"
                 onClick={() => {
-                  toggle(f.id);
+                  toggleFolder(f.id);
                   focusRow(f.id);
                 }}
               >
-                <span className="tree-chev" aria-hidden="true">
-                  {hasKids ? isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} /> : null}
+                <span className={isOpen ? 'tree-chev is-open' : 'tree-chev'} aria-hidden="true">
+                  {hasKids ? <ChevronRight size={10} /> : null}
                 </span>
                 {renaming === f.id ? (
                   <RenameInput
@@ -357,16 +376,22 @@ export function VaultTree({
                   </Menu>
                 </span>
               </div>
-              {hasKids && isOpen && (
-                <ul role="group" className="tree-group">
-                  {renderLevel(f.id, depth + 1)}
-                </ul>
+              {hasKids && (
+                // Stays mounted so collapse can animate; closed rows are visibility:hidden (see shell.css).
+                <div className="tree-collapse" data-open={isOpen}>
+                  <div className="tree-collapse-inner">
+                    <ul role="group" className="tree-group">
+                      {renderLevel(f.id, depth + 1)}
+                    </ul>
+                  </div>
+                </div>
               )}
             </li>
           );
         })}
         {c.notes.map((n) => {
           const active = n.id === activeNoteId;
+          const isIndex = n.id === c.indexId;
           return (
             <li
               key={n.id}
@@ -380,8 +405,10 @@ export function VaultTree({
               onFocus={(e) => e.target === e.currentTarget && setFocusId(n.id)}
               className="tree-li"
             >
-              <div className={active ? 'tree-row is-active' : 'tree-row'} onClick={() => openNote(n.id)}>
-                <span className="tree-chev" aria-hidden="true" />
+              <div className={`tree-row${active ? ' is-active' : ''}${isIndex ? ' tree-index' : ''}`} onClick={() => openNote(n.id)}>
+                <span className="tree-chev" aria-hidden="true">
+                  {isIndex && <IndexIcon />}
+                </span>
                 {renaming === n.id ? (
                   <RenameInput
                     initial={n.title}
@@ -447,7 +474,12 @@ export function VaultTree({
           try {
             const f = await store.createFolder(vault.id, dialog.parentId, name);
             if (dialog.parentId) toggle(dialog.parentId, true);
-            focusRow(f.id);
+            const created = store.getState().trees[vault.id];
+            const index = created && indexNoteOf(created, f.id);
+            if (index) {
+              toggle(f.id, true);
+              navigate(`/v/${vault.id}/n/${index.id}`, { state: { fresh: true } });
+            } else focusRow(f.id);
           } catch (e) {
             throw new Error(describeError(e));
           }
