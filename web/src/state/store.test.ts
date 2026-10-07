@@ -38,6 +38,7 @@ import { ApiError } from '../api/client';
 import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
 import { adoptOwnHead, newSaveState, settle } from '../pages/useNoteEditor';
 import { AppStore, LockedError, LOGOUT_TIMEOUT_MS, QUEUE_REQUEST_TIMEOUT_MS, type NoteView } from './store';
+import { indexNoteOf } from '../lib/indexNote';
 import { LOCK_WAIT_MS } from './tabs';
 
 /** Captured before any test fakes timers: lets real async work (WebCrypto, argon2) run while fake time stands still. */
@@ -1752,5 +1753,45 @@ describe('describeError', () => {
     const sentence = 'This note is too large to save (about 1.5 MB of text is the limit).';
     expect(describeError(new NoteTooLargeError())).toBe(sentence);
     expect(describeError(new ApiError(413, 'too_large'))).toBe(sentence);
+  });
+
+  describe('Index notes', () => {
+    async function withTree() {
+      const s = await registeredStore();
+      const vaultId = Object.keys(s.getState().vaults)[0];
+      api.tree.mockResolvedValue({ folders: [], notes: [] });
+      api.bodies.mockResolvedValue({ notes: [] });
+      await s.loadTree(vaultId);
+      api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, 't1'));
+      api.createFolder.mockImplementation(async (_v: string, b: { id: string; parentId: null }) => ({ folder: { ...b, createdAt: 'x', updatedAt: 'x' } }));
+      return { s, vaultId };
+    }
+
+    it('createFolder adds an Index note with the default body', async () => {
+      const { s, vaultId } = await withTree();
+      const folder = await s.createFolder(vaultId, null, 'Work');
+      const idx = indexNoteOf(s.getState().trees[vaultId], folder.id);
+      expect(idx?.title).toBe('Index');
+      expect(s.getState().bodies[idx!.id]).toBe('# Work\n\nDescribe what lives in this folder.\n');
+    });
+
+    it('createFolder still resolves when the Index note cannot be created', async () => {
+      const { s, vaultId } = await withTree();
+      api.createNote.mockRejectedValueOnce(new ApiError(500, 'boom'));
+      const folder = await s.createFolder(vaultId, null, 'Work');
+      expect(s.getState().trees[vaultId].folders[folder.id]).toBeDefined();
+      expect(indexNoteOf(s.getState().trees[vaultId], folder.id)).toBeNull();
+    });
+
+    it('addDescription creates an Index at the root and in a folder', async () => {
+      const { s, vaultId } = await withTree();
+      const folder = await s.createFolder(vaultId, null, 'Work');
+      const inFolder = await s.addDescription(vaultId, folder.id);
+      expect(inFolder).toMatchObject({ title: 'Index', folderId: folder.id });
+      const root = await s.addDescription(vaultId, null);
+      expect(root).toMatchObject({ title: 'Index', folderId: null });
+      expect(s.getState().bodies[root.id]).toBe(`# ${s.getState().vaults[vaultId].name}\n\nDescribe what lives in this folder.\n`);
+      expect(indexNoteOf(s.getState().trees[vaultId], null)?.id).toBe(root.id);
+    });
   });
 });

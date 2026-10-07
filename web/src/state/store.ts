@@ -28,6 +28,7 @@ import {
   type KdfParams,
 } from '../crypto';
 import { argon2InWorker } from '../lib/argon2Worker';
+import { INDEX_TITLE, indexBody } from '../lib/indexNote';
 import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
 import { sendPending, type DropReason, type PendingSave } from './pending';
 import { TabLink } from './tabs';
@@ -983,7 +984,19 @@ export class AppStore {
     const { folder } = await api.createFolder(vaultId, { id, parentId, encMeta });
     const view: FolderView = { id, vaultId, parentId, name, createdAt: folder.createdAt, updatedAt: folder.updatedAt };
     this.patchTree(vaultId, (t) => ({ folders: { ...t.folders, [id]: view } }));
+    // Best effort: without an Index the folder's preview offers "Add description".
+    try {
+      await this.createNote(vaultId, id, INDEX_TITLE, indexBody(name));
+    } catch {
+      /* the folder exists; the Index can be added later */
+    }
     return view;
+  }
+
+  /** Creates the Index note for a folder (`null` = vault root), named after the folder or vault. */
+  async addDescription(vaultId: string, folderId: string | null): Promise<NoteView> {
+    const name = folderId ? this.state.trees[vaultId]?.folders[folderId]?.name : this.state.vaults[vaultId]?.name;
+    return this.createNote(vaultId, folderId, INDEX_TITLE, indexBody(name ?? ''));
   }
 
   async renameFolder(vaultId: string, folderId: string, name: string): Promise<void> {
