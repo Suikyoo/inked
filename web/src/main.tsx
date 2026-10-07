@@ -18,11 +18,13 @@ import './styles/note.css';
 import './styles/settings.css';
 import { App } from './App';
 import { AppStore } from './state/store';
+import { SemanticStore } from './semantic/semanticStore';
 
 const store = new AppStore();
+const semantic = new SemanticStore(store);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App store={store} />
+    <App store={store} semantic={semantic} />
   </StrictMode>,
 );

@@ -7,6 +7,7 @@ import {
   decryptFolderMeta,
   decryptNoteBody,
   decryptNoteMeta,
+  decryptNoteVector,
   decryptVaultMeta,
   DEFAULT_KDF_PARAMS,
   deriveFromPassword,
@@ -14,6 +15,7 @@ import {
   encryptFolderMeta,
   encryptNoteBody,
   encryptNoteMeta,
+  encryptNoteVector,
   encryptVaultMeta,
   formatRecoveryKey,
   generateKdfSalt,
@@ -307,6 +309,10 @@ export class AppStore {
   private addingIndex = new Map<string, Promise<NoteView>>();
   /** Another tab signed out while this tab's own lock was running: that lock forgets the username too. */
   private forgetOnEnd = false;
+  /** Listeners for notes whose stored version moved forward (see emitSaved). */
+  private savedListeners = new Set<(ids: string[]) => void>();
+  /** Notes saved since the last consumeUnseenSaves; ids only, dropped with the keys. */
+  private unseenSaves = new Set<string>();
 
   constructor() {
     setUnauthorizedHandler(() => this.sessionEnded());
@@ -367,6 +373,48 @@ export class AppStore {
         console.error(e);
       }
     } else notify();
+  }
+
+  // ---- Notes saved ---------------------------------------------------------------------------
+
+  /** Called with the ids of notes whose `updatedAt` moved forward here: a save, a new note, or a tree reload. */
+  onNotesSaved(fn: (ids: string[]) => void): () => void {
+    this.savedListeners.add(fn);
+    return () => this.savedListeners.delete(fn);
+  }
+
+  /** Ids saved since the last call (or since unlock). */
+  consumeUnseenSaves(): string[] {
+    const ids = [...this.unseenSaves];
+    this.unseenSaves.clear();
+    return ids;
+  }
+
+  private emitSaved(ids: string[]) {
+    if (!ids.length) return;
+    for (const id of ids) this.unseenSaves.add(id);
+    for (const fn of this.savedListeners) {
+      try {
+        fn(ids);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
+  /** A note's head from whichever loaded tree holds it. */
+  noteHead(noteId: string): NoteView | undefined {
+    for (const t of Object.values(this.state.trees)) if (t.notes[noteId]) return t.notes[noteId];
+    return undefined;
+  }
+
+  /** Encrypts a note's quantized embedding under its vault key, bound to the note and model. */
+  encryptVector(vaultId: string, noteId: string, model: string, chunks: Int8Array[]): Promise<string> {
+    return encryptNoteVector(this.vaultKey(vaultId), vaultId, noteId, model, chunks);
+  }
+
+  decryptVector(vaultId: string, noteId: string, model: string, ct: string): Promise<Int8Array[]> {
+    return decryptNoteVector(this.vaultKey(vaultId), vaultId, noteId, model, ct);
   }
 
   clearNotice() {
@@ -466,6 +514,7 @@ export class AppStore {
     this.userKey = userKey;
     this.vaultKeys.clear();
     this.ownStamps.clear();
+    this.unseenSaves.clear();
     this.lastUserId = user.id;
     setRequestUser(user.id);
     const deferred = this.deferredNotices.get(user.id) ?? null;
@@ -481,6 +530,7 @@ export class AppStore {
     this.userKey = null;
     this.vaultKeys.clear();
     this.ownStamps.clear();
+    this.unseenSaves.clear();
     for (const e of this.pending) e.copyTitle = null;
     // Every signed-out transition passes here: data requests name nobody until the next sign-in.
     setRequestUser(null);
@@ -888,6 +938,7 @@ export class AppStore {
   async loadTree(vaultId: string): Promise<void> {
     const ep = this.epoch;
     const key = this.vaultKey(vaultId);
+    const before = this.state.trees[vaultId];
     this.set((s) => ({
       trees: { ...s.trees, [vaultId]: { ...(s.trees[vaultId] ?? { folders: {}, notes: {} }), status: 'loading' } },
     }));
@@ -900,6 +951,10 @@ export class AppStore {
       for (const f of fViews) tree.folders[f.id] = f;
       for (const n of nViews) tree.notes[n.id] = n;
       this.set((s) => ({ trees: { ...s.trees, [vaultId]: tree } }));
+      // A reload (not the vault's first load this session): new or newer notes were saved elsewhere.
+      if (before?.status === 'ready') {
+        this.emitSaved(nViews.filter((n) => !before.notes[n.id] || before.notes[n.id].updatedAt < n.updatedAt).map((n) => n.id));
+      }
     } catch (e) {
       if (ep === this.epoch) {
         this.set((s) => ({
@@ -1110,6 +1165,8 @@ export class AppStore {
     const prev = this.state.trees[vaultId]?.notes[head.id];
     if (prev && prev.updatedAt > head.updatedAt) return false;
     this.patchTree(vaultId, (t) => ({ notes: { ...t.notes, [head.id]: head } }));
+    // Stored only when the tree is loaded; a new note or a newer version counts as saved.
+    if (this.state.trees[vaultId] && (!prev || prev.updatedAt < head.updatedAt)) this.emitSaved([head.id]);
     return true;
   }
 
