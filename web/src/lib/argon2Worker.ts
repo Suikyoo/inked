@@ -1,4 +1,4 @@
-import { argon2Direct, type Argon2Fn } from '../crypto';
+import { argon2Direct, type Argon2Fn } from 'inked-core';
 
 /**
  * Argon2id in a short-lived Web Worker (terminated afterwards, which also frees the 64 MiB
@@ -8,7 +8,7 @@ export const argon2InWorker: Argon2Fn = (password, salt, params) =>
   new Promise((resolve, reject) => {
     let worker: Worker;
     try {
-      worker = new Worker(new URL('../crypto/argon2.worker.ts', import.meta.url), { type: 'module' });
+      worker = new Worker(new URL('./argon2.worker.ts', import.meta.url), { type: 'module' });
     } catch {
       argon2Direct(password, salt, params).then(resolve, reject);
       return;

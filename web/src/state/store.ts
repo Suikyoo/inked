@@ -1,5 +1,5 @@
 import { api, ApiError, setRequestUser, setUnauthorizedHandler, setUserMismatchHandler } from '../api/client';
-import type { FolderDTO, NoteHeadDTO, User, VaultDTO } from '../api/types';
+import type { FolderDTO, NoteHeadDTO, User, VaultDTO } from 'inked-core';
 import {
   aad,
   assertKdfParams,
@@ -26,9 +26,9 @@ import {
   unwrapVaultKey,
   wipe,
   type KdfParams,
-} from '../crypto';
+} from 'inked-core';
 import { argon2InWorker } from '../lib/argon2Worker';
-import { INDEX_TITLE, indexBody, indexNoteOf } from '../lib/indexNote';
+import { INDEX_TITLE, indexBody, indexNoteOf } from 'inked-core';
 import { NOTE_TOO_LARGE_MESSAGE, uuid } from '../lib/util';
 import { sendPending, type DropReason, type PendingSave } from './pending';
 import { TabLink } from './tabs';

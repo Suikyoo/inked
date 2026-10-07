@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { titleIndex } from '../lib/titles';
-import { buildEntry, type SearchEntry } from '../search/search';
+import { buildEntry, type SearchEntry } from 'inked-core';
 import { AppStore, type AppState, type FolderView, type TreeView, type VaultView } from './store';
 
 const StoreCtx = createContext<AppStore | null>(null);

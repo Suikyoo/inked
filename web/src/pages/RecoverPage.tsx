@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { isApiError } from '../api/client';
 import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
 import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
-import { isCryptoError } from '../crypto';
+import { isCryptoError } from 'inked-core';
 import { describeError, MIN_PASSWORD, ROTATION_NOT_SAVED, rotationCommitError } from '../lib/util';
 import type { PreparedRecoveryKey } from '../state/store';
 import { useAppState, useStore } from '../state/StoreContext';

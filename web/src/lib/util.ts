@@ -1,5 +1,5 @@
 import { isApiError } from '../api/client';
-import { isCryptoError } from '../crypto';
+import { isCryptoError } from 'inked-core';
 
 export const VAULT_COLORS = ['#45A89E', '#D19C3C', '#6F95D6', '#D9768F'] as const;
 

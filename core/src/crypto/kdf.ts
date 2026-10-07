@@ -93,27 +93,49 @@ export interface PasswordKeys {
   passwordKEK: CryptoKey;
 }
 
+/** Argon2id over the NFC password: the 32-byte master secret every password key is derived from. */
+export async function deriveMasterSecret(
+  password: string,
+  kdfSalt: string,
+  params: KdfParams,
+  opts: { argon2?: Argon2Fn } = {},
+): Promise<Bytes> {
+  const salt = fromBase64Url(kdfSalt);
+  if (salt.length < 16) throw new CryptoError('params', 'Salt too short');
+  const pw = encodePassword(password);
+  try {
+    const master = await (opts.argon2 ?? argon2Direct)(pw, salt, params);
+    if (master.length !== 32) {
+      wipe(master);
+      throw new CryptoError('params', 'Argon2 output must be 32 bytes');
+    }
+    return master;
+  } finally {
+    wipe(pw);
+  }
+}
+
+/** authKey and passwordKEK from a master secret. The caller owns (and wipes) `master`. */
+export async function deriveFromMasterSecret(master: Bytes): Promise<PasswordKeys> {
+  if (master.length !== 32) throw new CryptoError('params', 'Master secret must be 32 bytes');
+  const base = await importHkdfBase(master);
+  const authBytes = await hkdfBytes(base, HKDF_INFO.auth);
+  const authKey = toBase64Url(authBytes);
+  wipe(authBytes);
+  const passwordKEK = await hkdfKek(base, HKDF_INFO.wrap);
+  return { authKey, passwordKEK };
+}
+
 export async function deriveFromPassword(
   password: string,
   kdfSalt: string,
   params: KdfParams,
   opts: { argon2?: Argon2Fn } = {},
 ): Promise<PasswordKeys> {
-  const salt = fromBase64Url(kdfSalt);
-  if (salt.length < 16) throw new CryptoError('params', 'Salt too short');
-  const pw = encodePassword(password);
-  let master: Bytes | null = null;
+  const master = await deriveMasterSecret(password, kdfSalt, params, opts);
   try {
-    master = await (opts.argon2 ?? argon2Direct)(pw, salt, params);
-    if (master.length !== 32) throw new CryptoError('params', 'Argon2 output must be 32 bytes');
-    const base = await importHkdfBase(master);
-    const authBytes = await hkdfBytes(base, HKDF_INFO.auth);
-    const authKey = toBase64Url(authBytes);
-    wipe(authBytes);
-    const passwordKEK = await hkdfKek(base, HKDF_INFO.wrap);
-    return { authKey, passwordKEK };
+    return await deriveFromMasterSecret(master);
   } finally {
-    wipe(pw);
     wipe(master);
   }
 }

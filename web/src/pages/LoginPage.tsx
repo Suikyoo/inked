@@ -6,7 +6,7 @@ import { prefersReducedMotion, setWipeOrigin, withViewTransition } from '../moti
 import { isApiError } from '../api/client';
 import { FormError, PasswordField, TextField } from '../components/Fields';
 import { UnlockIcon } from '../components/Icons';
-import { isCryptoError } from '../crypto';
+import { isCryptoError } from 'inked-core';
 import { describeError } from '../lib/util';
 import { useAppState, useStore } from '../state/StoreContext';
 import { AuthLayout } from './AuthLayout';

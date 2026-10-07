@@ -14,7 +14,9 @@ import {
   decryptVaultMeta,
   DEFAULT_KDF_PARAMS,
   MIN_KDF_PARAMS,
+  deriveFromMasterSecret,
   deriveFromPassword,
+  deriveMasterSecret,
   deriveRecoveryKeys,
   encryptFolderMeta,
   encryptJSON,
@@ -373,5 +375,21 @@ describe('kdf floor', () => {
     expect(() => assertKdfParams({ alg: 'argon2id', m: 65536, t: 3, p: 1 })).not.toThrow();
     expect(() => assertKdfParams({ alg: 'argon2id', m: 32768, t: 3, p: 1 })).toThrow();
     expect(() => assertKdfParams({ alg: 'argon2id', m: 131072, t: 4, p: 2 })).not.toThrow();
+  });
+});
+
+describe('deriveMasterSecret + deriveFromMasterSecret', () => {
+  it('derives the same authKey as deriveFromPassword', async () => {
+    const salt = generateKdfSalt();
+    const params = { alg: 'argon2id' as const, m: 65536, t: 3, p: 1 };
+    const direct = await deriveFromPassword('correct horse battery', salt, params);
+    const master = await deriveMasterSecret('correct horse battery', salt, params);
+    expect(master.length).toBe(32);
+    const split = await deriveFromMasterSecret(master);
+    expect(split.authKey).toBe(direct.authKey);
+  });
+
+  it('refuses a master secret that is not 32 bytes', async () => {
+    await expect(deriveFromMasterSecret(new Uint8Array(16))).rejects.toMatchObject({ code: 'params' });
   });
 });

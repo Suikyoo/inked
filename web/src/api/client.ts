@@ -1,5 +1,5 @@
-import type { KdfParams } from '../crypto';
-import type { FolderDTO, InviteDTO, NoteDTO, NoteHeadDTO, RegisterBody, SetupBody, User, VaultDTO } from './types';
+import type { KdfParams } from 'inked-core';
+import type { FolderDTO, InviteDTO, NoteDTO, NoteHeadDTO, RegisterBody, SetupBody, User, VaultDTO } from 'inked-core';
 
 export class ApiError extends Error {
   readonly status: number;

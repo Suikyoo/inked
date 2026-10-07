@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { NoteView, TreeView } from '../state/store';
+import type { IndexCandidate, IndexTree } from './indexNote';
 import { INDEX_TITLE, indexBody, indexNoteOf, isIndexNote } from './indexNote';
+type NoteView = IndexCandidate & { vaultId: string; size: number; updatedAt: string };
+type TreeView = IndexTree<NoteView> & { status: 'ready'; folders: Record<string, never> };
 
 const note = (id: string, o: Partial<NoteView> = {}): NoteView => ({
   id, vaultId: 'v', folderId: null, title: INDEX_TITLE, size: 0, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', ...o,

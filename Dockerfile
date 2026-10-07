@@ -4,9 +4,11 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
 RUN npm ci
+COPY core core
 COPY server server
 COPY web web
 RUN npm run build -w web && npm run build -w server
@@ -15,6 +17,7 @@ RUN npm run build -w web && npm run build -w server
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
 RUN npm ci --omit=dev -w server && npm cache clean --force

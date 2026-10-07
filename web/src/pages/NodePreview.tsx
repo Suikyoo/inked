@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { uniqueTitle } from '../components/VaultTree';
 import { describeError, relativeTime } from '../lib/util';
-import { indexNoteOf } from '../lib/indexNote';
+import { indexNoteOf } from 'inked-core';
 import { titleIndex } from '../lib/titles';
 import { incomingLinks } from '../map/graph';
 import type { MapSelection } from '../map/ConceptMap';

@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 // Runs Argon2id off the main thread so the UI stays responsive while unlocking.
-import { argon2Direct, type KdfParams } from './kdf';
+import { argon2Direct, type KdfParams } from 'inked-core';
 
 interface Req {
   password: Uint8Array<ArrayBuffer>;

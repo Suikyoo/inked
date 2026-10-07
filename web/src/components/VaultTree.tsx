@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { indexNoteOf } from '../lib/indexNote';
+import { indexNoteOf } from 'inked-core';
 import { prefs } from '../lib/prefs';
 import { describeError } from '../lib/util';
 import { folderPath, useStore } from '../state/StoreContext';

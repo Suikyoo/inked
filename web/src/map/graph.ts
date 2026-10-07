@@ -1,4 +1,4 @@
-import { indexNoteOf, INDEX_TITLE } from '../lib/indexNote';
+import { indexNoteOf, INDEX_TITLE } from 'inked-core';
 import { titleIndex } from '../lib/titles';
 import { wikiLinkTargets } from '../markdown/plugins';
 import type { TreeView } from '../state/store';

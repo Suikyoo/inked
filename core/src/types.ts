@@ -1,4 +1,4 @@
-import type { KdfParams } from '../crypto';
+import type { KdfParams } from './crypto';
 
 export interface User {
   id: string;

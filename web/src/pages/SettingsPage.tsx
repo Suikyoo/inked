@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api, isApiError } from '../api/client';
-import type { InviteDTO } from '../api/types';
+import type { InviteDTO } from 'inked-core';
 import { VaultIcon } from '../brand/VaultIcon';
 import { ConfirmDialog } from '../components/Dialog';
 import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
 import { CheckIcon, CopyIcon } from '../components/Icons';
 import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
-import { isCryptoError } from '../crypto';
+import { isCryptoError } from 'inked-core';
 import { prefs } from '../lib/prefs';
 import { copyText, describeError, formatDateTime, MIN_PASSWORD, nextVaultColor, rotationCommitError, VAULT_COLORS } from '../lib/util';
 import { useAppState, useStore, vaultStats } from '../state/StoreContext';

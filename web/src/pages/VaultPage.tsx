@@ -4,7 +4,7 @@ import { inkLevelLabel, VaultIcon } from '../brand/VaultIcon';
 import { PromptDialog } from '../components/Dialog';
 import { FolderIcon, PlusIcon } from '../components/Icons';
 import { uniqueTitle } from '../components/VaultTree';
-import { indexNoteOf } from '../lib/indexNote';
+import { indexNoteOf } from 'inked-core';
 import { describeError, relativeTime } from '../lib/util';
 import { folderPath, useAppState, useStore, vaultStats } from '../state/StoreContext';
 import { NotePane } from './NotePane';

@@ -18,8 +18,8 @@ vi.mock('../api/client', async (orig) => ({
   setUserMismatchHandler: (fn: () => unknown) => { mismatch.handler = fn; },
   setRequestUser: (id: string | null) => { mismatch.requestUser = id; },
 }));
-vi.mock('../crypto/kdf', async (orig) => {
-  const m = await orig<typeof import('../crypto/kdf')>();
+vi.mock('inked-core', async (orig) => {
+  const m = await orig<typeof import('inked-core')>();
   const fast = { alg: 'argon2id' as const, m: 1024, t: 1, p: 1 };
   return { ...m, DEFAULT_KDF_PARAMS: fast, MIN_KDF_PARAMS: fast, assertKdfParams: (p: unknown) => p };
 });
@@ -35,10 +35,10 @@ vi.mock('../lib/argon2Worker', async () => {
 });
 
 import { ApiError } from '../api/client';
-import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
+import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from 'inked-core';
 import { adoptOwnHead, newSaveState, settle } from '../pages/useNoteEditor';
 import { AppStore, LockedError, LOGOUT_TIMEOUT_MS, QUEUE_REQUEST_TIMEOUT_MS, type NoteView } from './store';
-import { indexNoteOf } from '../lib/indexNote';
+import { indexNoteOf } from 'inked-core';
 import { LOCK_WAIT_MS } from './tabs';
 
 /** Captured before any test fakes timers: lets real async work (WebCrypto, argon2) run while fake time stands still. */
