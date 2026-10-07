@@ -116,6 +116,21 @@ describe('ConceptMap', () => {
     expect(host!.querySelector('[data-testid="where"]')?.textContent).toBe('/v/v1/n/n2');
   });
 
+  it('Space on a dot selects the note for the preview and does not open it', () => {
+    render({ entries: [entry(base())] });
+    key(node('n2'), ' ');
+    expect(onSelect.mock.calls).toEqual([[{ kind: 'note', vaultId: 'v1', id: 'n2' }]]);
+    expect(node('n2').querySelector('.cmap-sel')).not.toBeNull();
+    expect(host!.querySelector('[data-testid="where"]')).toBeNull();
+  });
+
+  it('the keyboard help says Enter opens a note and Space selects it', () => {
+    render({ entries: [entry(base())] });
+    const help = document.getElementById(svg().getAttribute('aria-describedby')!)?.textContent ?? '';
+    expect(help).toContain('Enter opens a note and Space selects it');
+    expect(help).toContain('Enter or Space selects a folder or vault');
+  });
+
   it('Escape clears the selection through onSelect(null)', () => {
     render({ entries: [entry(base())] });
     click(node('n1'));
@@ -340,14 +355,21 @@ describe('ConceptMap', () => {
         [note('a', 'f1', 'Alpha'), note('b', 'f1', 'Bravo'), note('ix', 'f1', 'Index'), note('c', 'f2', 'Charlie'), note('r', null, 'Root')],
       );
 
-    it('renders folders as focusable squares named with their note count', () => {
+    it('renders folders as focusable squares named with their note and subfolder counts', () => {
       render({ entries: [entry(folders())] });
       const f1 = folderNode('f1');
       expect(f1.getAttribute('role')).toBe('button');
-      expect(f1.getAttribute('aria-label')).toBe('folder Ops, 2 notes');
+      expect(f1.getAttribute('aria-label')).toBe('folder Ops, 2 notes, 1 subfolder');
       expect(folderNode('f2').getAttribute('aria-label')).toBe('folder Runbooks, 1 note');
       expect(f1.querySelector('rect.cmap-sq')).not.toBeNull();
       expect(f1.getAttribute('tabindex')).toBe('-1');
+    });
+
+    it('names a folder with several subfolders in the plural', () => {
+      const t = tree([folder('p', null, 'Parent'), folder('k1', 'p', 'Kid one'), folder('k2', 'p', 'Kid two')], [note('a', 'p', 'Alpha')]);
+      render({ entries: [entry(t)] });
+      expect(folderNode('p').getAttribute('aria-label')).toBe('folder Parent, 1 note, 2 subfolders');
+      expect(folderNode('k1').getAttribute('aria-label')).toBe('folder Kid one, 0 notes');
     });
 
     it('gives an Index note no dot', () => {

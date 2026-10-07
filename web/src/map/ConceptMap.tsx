@@ -442,7 +442,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
                 transform={`translate(${f1(s.x)} ${f1(s.y)})`}
                 style={writing ? { animationDelay: ms(f.depth * WRITE_STEP_MS + NODE_LAG_MS) } : undefined}
                 role="button"
-                aria-label={`folder ${f.name}, ${plural(f.noteCount, 'note')}`}
+                aria-label={`folder ${f.name}, ${plural(f.noteCount, 'note')}${f.folderCount > 0 ? `, ${plural(f.folderCount, 'subfolder')}` : ''}`}
                 {...nodeFocusProps(f.id)}
                 onClick={(e) => onFolderClick(e, f.vaultId, f.id)}
                 onDoubleClick={(e) => {
@@ -528,7 +528,11 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
                 {...nodeFocusProps(dot.id)}
                 onClick={(e) => onDotClick(e, dot.vaultId, dot.id)}
                 onKeyDown={(e) => {
-                  if (activates(e)) navigate(noteHref(dot.vaultId, dot.id));
+                  // Enter opens the note; Space selects it, as a click does, for the preview.
+                  const open = e.key === 'Enter';
+                  if (!activates(e)) return;
+                  if (open) navigate(noteHref(dot.vaultId, dot.id));
+                  else onSelect({ kind: 'note', vaultId: dot.vaultId, id: dot.id });
                 }}
                 onPointerEnter={() => setHover(dot.id)}
                 onPointerLeave={() => setHover((h) => (h === dot.id ? null : h))}
@@ -576,8 +580,8 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
           </p>
         ))}
       <p id={`${uid}-help`} className="sr-only">
-        Arrow keys move between vaults, folders and notes. Enter opens a note or selects a folder or vault. Plus and minus zoom, 0 fits the map, Escape clears the
-        selection.
+        Arrow keys move between vaults, folders and notes. Enter opens a note and Space selects it; Enter or Space selects a folder or vault. Plus and minus
+        zoom, 0 fits the map, Escape clears the selection.
       </p>
     </div>
   );
