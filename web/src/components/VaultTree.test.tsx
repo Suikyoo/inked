@@ -5,9 +5,15 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StoreProvider } from '../state/StoreContext';
 import type { AppStore, FolderView, NoteView, TreeView, VaultView } from '../state/store';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { cssRules } from '../styles/cssRules';
 import { VaultTree } from './VaultTree';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// Resolved from this file, not the cwd. (A `?raw` import comes back empty: vitest stubs CSS.)
+const shellCss = readFileSync(join(import.meta.dirname, '../styles/shell.css'), 'utf8');
 
 const T = '2026-01-01T00:00:00.000Z';
 const vault = { id: 'v1', name: 'Vault', color: '', createdAt: T, updatedAt: T, noteCount: 0, activeNoteCount7d: 0 } as VaultView;
@@ -149,12 +155,13 @@ describe('expanding opens the Index', () => {
 });
 
 describe('nested collapse', () => {
-  it('a closed ancestor wraps an open descendant; only closed wrappers set visibility', async () => {
-    const fs = await import('node:fs');
-    const css = fs.readFileSync('src/styles/shell.css', 'utf8');
-    const rule = (sel: string) => css.slice(css.indexOf(sel), css.indexOf('}', css.indexOf(sel)));
-    expect(rule(".tree-collapse[data-open='true']")).not.toContain('visibility');
-    expect(rule(".tree-collapse[data-open='false']")).toContain('visibility: hidden');
+  it('a closed ancestor wraps an open descendant; only closed wrappers set visibility', () => {
+    const open = cssRules(shellCss, ".tree-collapse[data-open='true']");
+    const closed = cssRules(shellCss, ".tree-collapse[data-open='false']");
+    expect(open).toHaveLength(1);
+    expect(open[0]).not.toContain('visibility');
+    expect(closed).toHaveLength(1);
+    expect(closed[0]).toMatch(/(^|;)visibility:hidden(;|$)/);
 
     mount(
       treeOf([folder('a', 'A'), folder('b', 'B', 'a')], [note('bn', 'Deep', 'b')]),
