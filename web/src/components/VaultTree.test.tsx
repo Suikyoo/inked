@@ -148,6 +148,26 @@ describe('expanding opens the Index', () => {
   });
 });
 
+describe('nested collapse', () => {
+  it('a closed ancestor wraps an open descendant; only closed wrappers set visibility', async () => {
+    const fs = await import('node:fs');
+    const css = fs.readFileSync(new URL('../styles/shell.css', import.meta.url), 'utf8');
+    const open = css.match(/.tree-collapse[data-open='true']s*{[^}]*}/)![0];
+    expect(open).not.toMatch(/visibility/);
+    expect(css.match(/.tree-collapse[data-open='false']s*{[^}]*}/)![0]).toMatch(/visibility:s*hidden/);
+
+    mount(
+      treeOf([folder('a', 'A'), folder('b', 'B', 'a')], [note('bn', 'Deep', 'b')]),
+      { startOpen: ['b'] },
+    );
+    const outer = host.querySelector('[data-id="a"] > .tree-collapse')!;
+    const inner = host.querySelector('[data-id="b"] > .tree-collapse')!;
+    expect(outer.getAttribute('data-open')).toBe('false');
+    expect(inner.getAttribute('data-open')).toBe('true');
+    expect(outer.contains(inner)).toBe(true);
+  });
+});
+
 describe('creating a folder', () => {
   it('opens the new Index in edit mode', async () => {
     const created = folder('new', 'Fresh');

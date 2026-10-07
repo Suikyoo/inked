@@ -417,6 +417,11 @@
 .tree-collapse {
   display: grid;
   grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-2) var(--ease-std);
+}
+/* Only the closed state sets visibility; an open wrapper inherits, so a collapsed ancestor keeps
+   its whole subtree hidden (out of Tab order and the accessibility tree). */
+.tree-collapse[data-open='false'] {
   visibility: hidden;
   transition:
     grid-template-rows var(--dur-2) var(--ease-std),
@@ -424,8 +429,6 @@
 }
 .tree-collapse[data-open='true'] {
   grid-template-rows: 1fr;
-  visibility: visible;
-  transition: grid-template-rows var(--dur-2) var(--ease-std);
 }
 .tree-collapse-inner {
   min-height: 0;
