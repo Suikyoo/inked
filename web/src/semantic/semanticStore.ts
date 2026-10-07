@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import { prefs } from '../lib/prefs';
 import type { AppStore } from '../state/store';
 import type { Embedder } from './embedderClient';
-import { fetchManifest, type Manifest } from './manifest';
+import { fetchManifest, modelBytes, type Manifest } from './manifest';
 import { clearModelCache, requestPersist, verifyModelCache } from './modelCache';
 
 export const RESAVE_DEBOUNCE_MS = 2000;
@@ -28,6 +28,8 @@ export interface SemanticState {
   /** Bumped whenever the stored vectors change, so Related lists re-read them. */
   version: number;
   persistDenied: boolean;
+  /** Total size of the model files, from the manifest; null until it loads. */
+  downloadBytes: number | null;
 }
 
 export type EmbedderLike = Pick<Embedder, 'load' | 'embed' | 'terminate' | 'paused'>;
@@ -82,6 +84,7 @@ export class SemanticStore {
     error: null,
     version: 0,
     persistDenied: false,
+    downloadBytes: null,
   };
   private listeners = new Set<() => void>();
   private deps: SemanticDeps;
@@ -178,7 +181,7 @@ export class SemanticStore {
     }
     this.manifest = m;
     const enabled = this.deps.prefs.semantic();
-    this.set({ available: true, enabled, phase: 'off' });
+    this.set({ available: true, enabled, phase: 'off', downloadBytes: modelBytes(m) });
     this.onApp();
     if (enabled) await this.loadModel();
   }
@@ -201,7 +204,7 @@ export class SemanticStore {
     this.vectorsIn.clear();
     this.running = false;
     const phase = this.state.available === false ? 'unavailable' : 'off';
-    this.set({ phase, download: null, coverage: {}, error: null, version: this.state.version + 1 });
+    this.set({ phase, download: null, downloadBytes: null, coverage: {}, error: null, version: this.state.version + 1 });
   }
 
   // ---- Model -------------------------------------------------------------------------------

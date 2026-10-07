@@ -30,6 +30,7 @@ export const SEMANTIC_STATE: SemanticState = {
   error: null,
   version: 0,
   persistDenied: false,
+  downloadBytes: null,
 };
 
 /**

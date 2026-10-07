@@ -604,3 +604,27 @@ select.input-sm {
     animation: pulse 1.6s ease-in-out infinite !important;
   }
 }
+
+/* Progress bar (Settings: model download, per-vault embedding coverage) */
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.progress-label {
+  font-size: 11.5px;
+  color: var(--muted-2);
+}
+.bar {
+  height: 2px;
+  background: var(--border);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ink-fresh);
+  transition: width var(--dur-3) var(--ease-out);
+}

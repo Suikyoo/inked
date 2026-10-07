@@ -4,12 +4,14 @@ import { api, isApiError } from '../api/client';
 import type { InviteDTO } from 'inked-core';
 import { VaultIcon } from '../brand/VaultIcon';
 import { ConfirmDialog } from '../components/Dialog';
+import { ProgressBar } from '../components/ProgressBar';
 import { FormError, PasswordField, Spinner, TextField } from '../components/Fields';
 import { CheckIcon, CopyIcon } from '../components/Icons';
 import { RecoveryKeyPanel } from '../components/RecoveryKeyPanel';
 import { isCryptoError } from 'inked-core';
 import { prefs } from '../lib/prefs';
 import { copyText, describeError, formatDateTime, MIN_PASSWORD, nextVaultColor, rotationCommitError, VAULT_COLORS } from '../lib/util';
+import { useSemantic, useSemanticStore } from '../semantic/SemanticContext';
 import { useAppState, useStore, vaultStats } from '../state/StoreContext';
 import type { PreparedRecoveryKey, VaultView } from '../state/store';
 
@@ -45,6 +47,7 @@ export function SettingsPage() {
       </section>
 
       <Editing />
+      <SemanticSearch />
       <ChangePassword />
       <RecoveryKey />
       <Vaults />
@@ -75,6 +78,61 @@ function Editing() {
         Off by default. Some browsers send text to an online service for enhanced spell-check, which would expose note
         content and the names of your notes, folders and vaults.
       </p>
+    </section>
+  );
+}
+
+const toMB = (bytes: number) => Math.round(bytes / 1e6);
+
+function SemanticSearch() {
+  const sem = useSemantic();
+  const store = useSemanticStore();
+  const state = useAppState();
+  if (!sem.available) return null;
+  const mb = sem.downloadBytes === null ? null : toMB(sem.downloadBytes);
+  return (
+    <section className="card" aria-labelledby="semantic-h">
+      <h2 id="semantic-h" className="card-title">
+        Search by meaning
+      </h2>
+      <label className="check">
+        <input type="checkbox" checked={sem.enabled} onChange={(e) => void store.setEnabled(e.target.checked)} />
+        <span>Search by meaning</span>
+      </label>
+      <p className="field-hint">
+        Finds notes by what they're about, not just their words.
+        {mb !== null && ` Downloads about ${mb} MB once to this device; your notes never leave it.`}
+      </p>
+      {sem.phase === 'downloading' && sem.download && (
+        <ProgressBar
+          value={sem.download.loaded}
+          max={sem.download.total}
+          label={`Model ${toMB(sem.download.loaded)} / ${toMB(sem.download.total)} MB`}
+        />
+      )}
+      {sem.phase === 'loading' && <p className="field-hint">Preparing the search model…</p>}
+      {sem.phase === 'error' && (
+        <>
+          <p className="form-error">{sem.error}</p>
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm" onClick={() => store.retry()}>
+              Retry
+            </button>
+          </div>
+        </>
+      )}
+      {sem.phase === 'paused' && (
+        <p className="field-hint">Search by meaning stopped after a problem. It will try again next time you unlock.</p>
+      )}
+      {sem.enabled && sem.persistDenied && (
+        <p className="field-hint">This browser may clear the model when you close a private window or free up space.</p>
+      )}
+      {state.vaultOrder.map((id) => {
+        const cov = sem.coverage[id];
+        const name = state.vaults[id]?.name;
+        if (!cov || !name) return null;
+        return <ProgressBar key={id} value={cov.done} max={cov.total} label={`${name} · ${cov.done} / ${cov.total} notes`} />;
+      })}
     </section>
   );
 }
