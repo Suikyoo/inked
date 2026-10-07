@@ -530,7 +530,7 @@ select.input-sm {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
     transition-property: opacity, color, background-color, border-color !important;
-    transition-duration: var(--dur-2) !important;
+    transition-duration: 120ms !important;
   }
   /* The one allowed loop: a gentle opacity pulse instead of rotation. */
   .spinner {
