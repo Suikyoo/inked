@@ -41,6 +41,33 @@ export function followNoteLink(e: LinkClick, navigate: (to: string) => void): vo
   }
 }
 
+/** The edit/view switch. `data-mode` positions the sliding thumb. */
+export function ModeToggle({ mode, onChange }: { mode: 'edit' | 'view'; onChange: (m: 'edit' | 'view') => void }) {
+  return (
+    <div role="group" aria-label="Editor mode" className="segmented" data-mode={mode}>
+      <button type="button" aria-pressed={mode === 'edit'} onClick={() => onChange('edit')} title="Edit (Ctrl+E)">
+        Edit
+      </button>
+      <button type="button" aria-pressed={mode === 'view'} onClick={() => onChange('view')} title="View (Ctrl+E)">
+        View
+      </button>
+    </div>
+  );
+}
+
+/** The save status text. The inner span is keyed by its label, so a change remounts it and it fades in. */
+export function SaveIndicator({ status, ready }: { status: SaveStatus; ready: boolean }) {
+  const idleSaved = ready && status === 'idle';
+  const label = idleSaved ? 'Saved' : SAVE_LABEL[status];
+  return (
+    <span className={`save-status is-${status}`} data-save={idleSaved ? 'saved' : status} role="status" aria-live="polite">
+      <span key={label} className="save-text">
+        {label}
+      </span>
+    </span>
+  );
+}
+
 export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }) {
   const state = useAppState();
   const store = useStore();
@@ -193,17 +220,8 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
               readOnly={state.locking}
             />
           </nav>
-          <span className={`save-status is-${editor.save}`} role="status" aria-live="polite">
-            {editor.status === 'ready' && editor.save === 'idle' ? 'Saved' : SAVE_LABEL[editor.save]}
-          </span>
-          <div role="group" aria-label="Editor mode" className="segmented">
-            <button type="button" aria-pressed={mode === 'edit'} onClick={() => setMode('edit')} title="Edit (Ctrl+E)">
-              Edit
-            </button>
-            <button type="button" aria-pressed={mode === 'view'} onClick={() => setMode('view')} title="View (Ctrl+E)">
-              View
-            </button>
-          </div>
+          <SaveIndicator status={editor.save} ready={editor.status === 'ready'} />
+          <ModeToggle mode={mode} onChange={setMode} />
         </div>
 
         {titleError && (
@@ -242,7 +260,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
         ) : mode === 'edit' ? (
           <textarea
             ref={textRef}
-            className="editor"
+            key="edit" className="editor"
             aria-label={`Markdown source of ${head?.title ?? 'note'}`}
             value={editor.body}
             onChange={(e) => editor.setBody(e.target.value)}
@@ -259,7 +277,7 @@ export function NotePane({ vault, noteId }: { vault: VaultView; noteId: string }
           </div>
         ) : (
           // Sanitised by DOMPurify in renderMarkdown.
-          <article className="md" onClick={onArticleClick} dangerouslySetInnerHTML={{ __html: html }} />
+          <article key="view" className="md" onClick={onArticleClick} dangerouslySetInnerHTML={{ __html: html }} />
         )}
       </main>
 

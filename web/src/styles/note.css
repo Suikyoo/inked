@@ -86,19 +86,57 @@ a.crumb:hover {
   min-width: 5em;
   text-align: right;
 }
+.save-text {
+  display: inline-block;
+  animation: fade-in var(--dur-2) var(--ease-out) both;
+}
+/* "Saved" arrives, then settles to a dimmer tone. */
+.save-status[data-save='saved'] .save-text {
+  animation:
+    fade-in var(--dur-2) var(--ease-out) both,
+    save-dim var(--dur-4) var(--ease-std) 1.2s forwards;
+}
+@keyframes save-dim {
+  to {
+    opacity: 0.6;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
 .save-status.is-error,
 .save-status.is-conflict {
   color: var(--error);
 }
 
 .segmented {
+  position: relative;
   display: inline-flex;
   padding: 2px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
 }
+/* The highlight is a thumb under the buttons; data-mode slides it between the two halves. */
+.segmented::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 2);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  transition: transform var(--dur-2) var(--ease-std);
+}
+.segmented[data-mode='view']::before {
+  transform: translateX(100%);
+}
 .segmented button {
+  position: relative;
+  flex: 1 1 0;
   height: 24px;
   padding: 0 10px;
   border: 0;
@@ -113,7 +151,6 @@ a.crumb:hover {
   color: var(--text);
 }
 .segmented button[aria-pressed='true'] {
-  background: var(--ink);
   color: #fff;
 }
 
@@ -173,6 +210,11 @@ a.crumb:hover {
 }
 .editor:focus-visible {
   outline: none;
+}
+/* Switching mode remounts the article or textarea; the new one fades in over 120ms. */
+.editor,
+.md {
+  animation: fade-in 120ms var(--ease-out) both;
 }
 
 /* ---- Context panel --------------------------------------------------------------------- */

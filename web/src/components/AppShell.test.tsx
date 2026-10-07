@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StoreProvider } from '../state/StoreContext';
 import type { AppStore } from '../state/store';
@@ -80,5 +80,33 @@ describe('AppShell banner and sync bar', () => {
     expect(wrap('.sync-bar')?.textContent).toContain('2 changes');
     tick(300);
     expect(host.querySelector('.sync-bar')).toBeNull();
+  });
+});
+
+describe('AppShell route wrapper', () => {
+  it('re-keys on navigation so the new route fades in', () => {
+    let go!: (to: string) => void;
+    function Nav() {
+      go = useNavigate();
+      return null;
+    }
+    act(() => root.unmount());
+    root = createRoot(host);
+    act(() =>
+      root.render(
+        <MemoryRouter initialEntries={['/a']}>
+          <StoreProvider store={ctl.store}>
+            <Nav />
+            <AppShell />
+          </StoreProvider>
+        </MemoryRouter>,
+      ),
+    );
+    const first = host.querySelector('.route');
+    expect(first?.getAttribute('data-route')).toBe('/a');
+    act(() => go('/b'));
+    const second = host.querySelector('.route');
+    expect(second?.getAttribute('data-route')).toBe('/b');
+    expect(second).not.toBe(first);
   });
 });

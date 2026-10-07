@@ -132,7 +132,9 @@ export function AppShell() {
             </button>
           </div>
         </Collapse>
-        <Outlet />
+        <div key={location.pathname} className="route" data-route={location.pathname}>
+          <Outlet />
+        </div>
       </div>
     </div>
   );

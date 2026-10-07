@@ -153,7 +153,12 @@ kbd {
   transition:
     background-color var(--dur-1),
     border-color var(--dur-1),
-    color var(--dur-1);
+    color var(--dur-1),
+    transform var(--dur-1) var(--ease-out);
+}
+.btn:active:not(:disabled),
+.ibtn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .btn:hover:not(:disabled) {
   background: var(--panel-3);
@@ -215,6 +220,10 @@ kbd {
   background: transparent;
   color: var(--muted-2);
   cursor: pointer;
+  transition:
+    background-color var(--dur-1),
+    color var(--dur-1),
+    transform var(--dur-1) var(--ease-out);
 }
 .ibtn:hover {
   background: var(--panel-3);

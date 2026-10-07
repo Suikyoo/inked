@@ -190,7 +190,7 @@ Inked is a notebook written in ink on dark violet-black paper. Everything quiet 
 
 The density is that of a desk tool used daily: a 13px base, 28px rows, 30px controls, a 240px sidebar, and a 700px reading column. Chrome recedes into tonal steps of the same violet; hierarchy comes from text tone (strong, body, muted) and an italic serif voice reserved for names (the wordmark, vault names, vault titles, map hub labels). It is dark only; there is no light theme.
 
-The map is a drawn diagram, not a data-viz widget. Structure is pencil (thin gray-violet lines), explicit links are dashed pencil, and recency is ink.
+The map is a drawn diagram, not a data-viz widget. Structure is pencil (thin gray-violet quill curves), explicit links are dashed pencil, and recency is ink.
 
 **Key Characteristics:**
 - Dark only, tonal layering of violet-black surfaces; no light mode.
@@ -275,14 +275,14 @@ Tonal layering, not shadows. Depth is conveyed by stepping from ground to panel 
 
 ## Shapes
 
-Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kbd, inline controls), 5px (icon buttons, menu items), 6px (buttons, rows, nav), 7px (inputs, segmented), 8px (search, menu, banners, code blocks), 10px (cards, dialogs, recovery panel, map frame). Swatches and legend dots are circles. Borders are 1px in `border` / `side-border`; inputs on panel surfaces may render their border as a 1px box-shadow ring. Icons are stroked line SVGs (`currentColor`, round caps and joins, 1.8-2.6 stroke at 14px) in a single family; the nib logo and ink-drop vault icon are filled marks with a punched hole.
+Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kbd, inline controls), 5px (icon buttons, menu items), 6px (buttons, rows, nav), 7px (inputs, segmented), 8px (search, menu, banners, code blocks), 10px (cards, dialogs, recovery panel, map frame). Swatches are circles. Borders are 1px in `border` / `side-border`; inputs on panel surfaces may render their border as a 1px box-shadow ring. Icons are stroked line SVGs (`currentColor`, round caps and joins, 1.8-2.6 stroke at 14px) in a single family; the nib logo and ink-drop vault icon are filled marks with a punched hole.
 
 ## Components
 
 ### Buttons
 - **Shape:** 6px radius, 30px high (28px small, 34px block), 12.5px / 500.
 - **Default:** `panel` fill, 1px `border`, hover `panel-3`. **Primary:** ink fill and border, white text, hover ink-hover. **Danger:** `danger` (#8f3348) fill, `danger-hover` (#a33c54) on hover, white text; **quiet danger:** transparent, error text, `error-bg` on hover. Disabled is 55% opacity.
-- **Icon button:** 24px (22 / 20 small), transparent, 5px radius, `muted-2` text, hover `panel-3`. Transitions are 120ms on background, border and color.
+- **Icon button:** 24px (22 / 20 small), transparent, 5px radius, `muted-2` text, hover `panel-3`. Color changes take `--dur-1`; pressing scales a button to 0.98.
 
 ### Inputs / Fields
 - 36px high (30px small), 14px text, `panel` fill, 1px `border`, 7px radius; placeholder `placeholder`. Label 12px/500 `muted`, hint 11.5px `muted-3`, 6px label gap.
@@ -290,6 +290,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - Password fields carry a trailing 28px action button. Checkboxes use `accent-color: ink`.
 
 ### Navigation (sidebar and tree)
+- A folder's Index is the first row in its tree, marked with a lilac ◇ diamond in the chevron slot and `muted-2` text.
 - Nav items: 28px, `text-2`, 6px radius; hover `hover` fill; active/current `panel-3` with the icon turned lilac. Vault rows pair the ink-drop icon, the italic name, and a muted count that swaps for hover actions.
 - Tree rows: 26px, 12.5px, a 12px chevron, indentation 14px per level under a 1px `line` guide; active row `row-selected` with `text-strong`; keyboard focus shows a 2px lilac outline inset.
 
@@ -297,7 +298,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - 36px, 8px radius, `panel` fill, a leading icon, and a trailing `kbd` hint hidden on focus. Results are 6px 8px rows with title (13px), meta (11.5px `muted-2`) and a 2-line snippet (12px `muted`), with matches highlighted by `mark`.
 
 ### Segmented control
-- 2px inset on `panel` with a 1px `line` border; 24px options; the pressed option is ink fill with white text. Used for edit / view.
+- 2px inset on `panel` with a 1px `line` border; 24px options; the pressed option has white text over an ink thumb that slides between the options over `--dur-2` (the control carries `data-mode`). Used for edit / view; the article and textarea crossfade over 120ms.
 
 ### Menus and dialogs
 - Menu: 188px wide, `panel-3`, 1px `border-2`, 8px radius, 30px items, danger items in error rose. Dialog: native `<dialog>`, 400px max, `panel-2`, 10px radius, 18px padding, title 15px/600, right-aligned actions, 8px gap.
@@ -306,7 +307,28 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - Card: `panel`, 1px `side-border`, 10px radius, 18px padding, 12px internal gap. Banner / notice: `panel-2`, 8px or 6px radius, 12.5px text. Alert: `error-bg` with `error-text`, no border. Sync bar: 32px, `sync-bg` (#2b2029) with `error-text`.
 
 ### Concept map (signature)
-A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Folder structure draws as pencil lines, explicit links as dashed pencil, ink strokes as tapered paths. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. A slip card (220px, `panel-2`) shows title (2-line clamp), path, meta, and "Open note". A legend row beneath (11px `muted-3`) names the four recency steps. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
+A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px round markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Folders are rounded squares (`panel-3` fill, `muted-3` stroke) with an 11px hit target; on an inked path a folder turns into a diamond as the ink arrives. Every folder's `Index` note has no dot of its own: a hit on it inks the path to its folder (the diamond), and a vault's root Index lights the hub, which stands for it. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Edges are quill curves, not straight lines: folder structure draws as pencil curves (1.5px hub to top folder, 1.1px folder to subfolder, 0.8px to a note), explicit links as dashed pencil curves bowed more than the hierarchy so the two read apart, and ink strokes as the same curves joined end to end. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. There is no slip card and no legend: selecting a node shows it in the Home preview panel beside the map, which replaces "Recently edited" and holds the node's rendered Index or note, its notes, backlinks, "Open note" / "Open Index", and "Add description" where a folder or vault has no Index. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
+
+## Motion
+
+Motion is quiet and tied to the ink metaphor: it confirms a change of state and never blocks a click or shifts layout.
+
+### Tokens
+- **Durations:** `--dur-1` 90ms (hover, press), `--dur-2` 140ms (route, toggle, tree, banners), `--dur-3` 200ms (drawer, menus), `--dur-4` 320ms, `--dur-ink` 520ms (ink drawn along a path on the map).
+- **Easing:** `--ease-out` cubic-bezier(0.16, 1, 0.3, 1) for things arriving, `--ease-in` cubic-bezier(0.4, 0, 1, 1) for things leaving, `--ease-std` cubic-bezier(0.2, 0, 0, 1) for things that move between two places.
+
+### Rules
+- **Route change:** content fades in and rises 2px over `--dur-2`. Enter only; leaving never waits. The same fade plays when the app shell first mounts after unlock, which is also the fallback when View Transitions are unavailable.
+- **Sidebar tree:** folders expand and collapse over `--dur-2` and the chevron rotates.
+- **Edit / view:** the segmented thumb slides over `--dur-2`; the article and textarea crossfade over 120ms.
+- **Save status:** the text crossfades; "Saved" fades in, then dims.
+- **Hover and press:** color changes over `--dur-1`; buttons scale to 0.98 while pressed.
+- **Banners and notices:** collapse in and out, holding their last content while they close.
+- **Map:** edges write on once per session, ink draws along a path over `--dur-ink`, and a note that was just edited gives a brief drying pulse.
+- Animate only opacity and transform (plus color on hover); never width, height or position.
+
+### Reduced motion
+Under `prefers-reduced-motion: reduce`, every animation runs for 1ms with no delay and transitions are limited to opacity, color, background-color and border-color at 120ms. The only loop kept is the spinner's gentle opacity pulse. Nothing is conveyed by movement alone.
 
 ## Do's and Don'ts
 
@@ -316,7 +338,7 @@ A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px
 - **Do** keep controls at 30px (36px for fields) and rows at 26-28px, with 12.5-13px text.
 - **Do** set vault and app names in Spectral italic and everything else in Public Sans; set raw Markdown, keys and code in JetBrains Mono.
 - **Do** validate any new map color against `canvas`, keep the 24px hit target around each 8px marker, and give map text a canvas halo.
-- **Do** honor `prefers-reduced-motion`; transitions are 120ms for color, 200ms with `--ease-out` for the drawer.
+- **Do** honor `prefers-reduced-motion` and build motion from the `--dur-*` and `--ease-*` tokens (see Motion).
 - **Do** keep icon sets as stroked `currentColor` line SVGs.
 
 ### Don't:
