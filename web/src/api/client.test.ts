@@ -33,14 +33,17 @@ describe('api client abort (A3)', () => {
       ok: true,
       status: 200,
       headers: new Headers(),
-      text: () =>
-        new Promise<string>((_r, reject) =>
-          ac.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError'))),
-        ),
+      text: vi.fn(
+        () =>
+          new Promise<string>((_r, reject) =>
+            ac.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError'))),
+          ),
+      ),
     };
     vi.stubGlobal('fetch', vi.fn(async () => res));
     const p = api.logout(ac.signal).catch((e) => e);
-    await Promise.resolve();
+    // Abort only once the body read has begun, however many ticks fetch takes to get there.
+    await vi.waitFor(() => expect(res.text).toHaveBeenCalled());
     ac.abort();
     expect(await p).toMatchObject({ name: 'ApiError', status: 0, code: 'network' });
   });

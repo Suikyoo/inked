@@ -23,16 +23,22 @@ vi.mock('../crypto/kdf', async (orig) => {
   const fast = { alg: 'argon2id' as const, m: 1024, t: 1, p: 1 };
   return { ...m, DEFAULT_KDF_PARAMS: fast, MIN_KDF_PARAMS: fast, assertKdfParams: (p: unknown) => p };
 });
+/** While `hold` is set, every key derivation waits for it, so a test can act during a sign-in's KDF phase. */
+const kdfGate = vi.hoisted(() => ({ hold: null as null | Promise<void>, entered: 0 }));
 vi.mock('../lib/argon2Worker', async () => {
   const { argon2id } = await import('hash-wasm');
-  return { argon2InWorker: (pw: Uint8Array, salt: Uint8Array, p: { m: number; t: number; p: number }) =>
-    argon2id({ password: pw, salt, memorySize: p.m, iterations: p.t, parallelism: p.p, hashLength: 32, outputType: 'binary' }) };
+  return { argon2InWorker: async (pw: Uint8Array, salt: Uint8Array, p: { m: number; t: number; p: number }) => {
+    kdfGate.entered++;
+    if (kdfGate.hold) await kdfGate.hold;
+    return argon2id({ password: pw, salt, memorySize: p.m, iterations: p.t, parallelism: p.p, hashLength: 32, outputType: 'binary' });
+  } };
 });
 
 import { ApiError } from '../api/client';
 import { aad, deriveRecoveryKeys, generateVaultKey, parseRecoveryKey, unwrapKey, unwrapVaultKey } from '../crypto';
 import { adoptOwnHead, newSaveState, settle } from '../pages/useNoteEditor';
 import { AppStore, LockedError, LOGOUT_TIMEOUT_MS, QUEUE_REQUEST_TIMEOUT_MS, type NoteView } from './store';
+import { LOCK_WAIT_MS } from './tabs';
 
 /** Captured before any test fakes timers: lets real async work (WebCrypto, argon2) run while fake time stands still. */
 const realSetTimeout = globalThis.setTimeout;
@@ -89,7 +95,7 @@ const headFor = (b: NoteBody, updatedAt: string) => ({
 });
 
 describe('AppStore', () => {
-  beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); FakeChannel.bus = []; });
+  beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); FakeChannel.bus = []; kdfGate.hold = null; kdfGate.entered = 0; });
 
   it('lock ends the server session and remembers only the username (I3)', async () => {
     const s = await registeredStore();
@@ -110,6 +116,25 @@ describe('AppStore', () => {
     await s.boot();
     expect(s.getState().phase).toBe('signedOut');
     expect(s.getState().lastUsername).toBe('ann');
+  });
+
+  it('a sign-out from another tab during boot is not overwritten by boot’s result (D3b)', async () => {
+    localStorage.setItem('inked.lastUsername', 'ann');
+    api.status.mockResolvedValue({ needsSetup: false });
+    let release!: (v: unknown) => void;
+    api.me.mockReturnValue(new Promise((r) => (release = r)));
+    const s = new AppStore();
+    const booting = s.boot();
+    await vi.waitFor(() => expect(api.me).toHaveBeenCalled());
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'signout', tab: 'peer', id: 'S0' });
+    await vi.waitFor(() => expect(s.getState().phase).toBe('signedOut'));
+    release({ user: { id: 'u1', username: 'ann', isAdmin: true } });
+    await booting;
+    expect(s.getState().phase).toBe('signedOut');
+    expect(s.getState().user).toBeNull();
+    expect(s.getState().lastUsername).toBe('');
+    expect(localStorage.getItem('inked.lastUsername')).toBeNull();
   });
 
   it('signOut and forgetUsername clear the remembered username', async () => {
@@ -651,8 +676,97 @@ describe('AppStore', () => {
     expect(s.getState().lastUsername).toBe('');
     expect(localStorage.getItem('inked.lastUsername')).toBeNull();
     await expect(s.createVault('x', '#45A89E')).rejects.toBeInstanceOf(LockedError);
-    // The tab that signed out ends the session.
+    // This tab's earlier lock, then the session its sign-in just started: the peer's own logout may
+    // have run before that session existed (D3a).
+    expect(api.logout).toHaveBeenCalledTimes(2);
+  });
+
+  it('a sign-in that lands after a peer sign-out gave up waiting ends the session it started (D3a)', async () => {
+    const s = await registeredStore();
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    mockUnlock();
+    let release!: (v: unknown) => void;
+    api.login.mockReturnValue(new Promise((r) => (release = r)));
+    const unlocking = s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(api.login).toHaveBeenCalled()); // the KDF runs on real crypto
+    const order: string[] = [];
+    s.subscribe(() => {
+      if (s.getState().phase === 'signedOut' && !order.includes('signedOut')) order.push('signedOut');
+    });
+    api.logout.mockImplementation(async () => {
+      order.push('logout');
+      return { ok: true };
+    });
+    vi.useFakeTimers();
+    try {
+      const peer = new FakeChannel('inked');
+      peer.postMessage({ type: 'signout', tab: 'peer', id: 'S7' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(FakeChannel.bus[0].received).toContainEqual({ type: 'signout', tab: 'peer', id: 'S7' });
+      // The signing-out tab stops waiting for this one after LOCK_WAIT_MS and logs out: before this
+      // tab's login has even been answered, so that logout cannot end the session the login starts.
+      await vi.advanceTimersByTimeAsync(LOCK_WAIT_MS + 1000);
+      expect((peer.received as Msg[]).some((m) => m.type === 'lock-done')).toBe(false);
+      const setupBody = api.setup.mock.calls[0][0];
+      release({ user: { id: setupBody.userId, username: 'ann', isAdmin: true }, wrappedUserKey: setupBody.wrappedUserKey });
+      await unlocking;
+      await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'S7' }));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(s.getState().phase).toBe('signedOut');
+    expect(s.getState().lastUsername).toBe('');
+    expect(localStorage.getItem('inked.lastUsername')).toBeNull();
+    // One more logout than the earlier lock's, sent once the keys were gone.
+    expect(api.logout).toHaveBeenCalledTimes(2);
+    expect(order).toEqual(['signedOut', 'logout']);
+  });
+
+  it('a sign-out from another tab during the KDF phase holds the login until the peer’s session end (D3c)', async () => {
+    const s = await registeredStore();
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    mockUnlock();
+    let openKdf!: () => void;
+    kdfGate.hold = new Promise<void>((r) => (openKdf = r));
+    const unlocking = s.unlock('ann', 'pw-ann-123456');
+    await vi.waitFor(() => expect(kdfGate.entered).toBe(1));
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'signout', tab: 'peer', id: 'S8' });
+    // Signed out already: answered at once, and the username is forgotten.
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'S8' }));
+    expect(s.getState().lastUsername).toBe('');
+    openKdf();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(api.login).not.toHaveBeenCalled();
+    peer.postMessage({ type: 'lock-end', tab: 'peer', id: 'S8' });
+    await unlocking;
+    expect(api.login).toHaveBeenCalledTimes(1);
+    expect(s.getState().phase).toBe('unlocked');
+    expect(s.getState().lastUsername).toBe('ann');
+    // The sign-in started after the peer's sign-out was applied, so it keeps its session.
     expect(api.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it('a sign-out from another tab reaching a signed-out tab forgets the remembered account (D3c)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.updateNote.mockRejectedValue(new ApiError(0, 'network'));
+    await s.stashUnsaved(vaultId, crypto.randomUUID(), 'text', 't0');
+    api.logout.mockResolvedValue({ ok: true });
+    await s.lock();
+    expect(s.getState().lastUsername).toBe('ann');
+    expect(s.getState().pendingCount).toBe(1);
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'signout', tab: 'peer', id: 'S6' });
+    await vi.waitFor(() => expect(peer.received).toContainEqual({ type: 'lock-done', tab: expect.any(String), id: 'S6' }));
+    expect(s.getState().phase).toBe('signedOut');
+    expect(s.getState().lastUsername).toBe('');
+    expect(localStorage.getItem('inked.lastUsername')).toBeNull();
+    expect(s.getState().pendingCount).toBe(0);
+    expect(s.hasUnsavedWork()).toBe(true); // still queued, only no longer counted
+    expect(api.logout).toHaveBeenCalledTimes(1); // this tab's own lock only
   });
 
   it('a hanging logout is aborted after LOGOUT_TIMEOUT_MS; lock completes and sign-in proceeds (A3)', async () => {
@@ -752,8 +866,9 @@ describe('AppStore', () => {
     expect(s.getState().lastUsername).toBe('ann');
     expect(s.getState().vaults).toEqual({});
     await expect(s.createVault('x', '#45A89E')).rejects.toBeInstanceOf(LockedError);
-    // Only this tab's own earlier lock logged out; the tab that started this lock ends the session.
-    expect(api.logout).toHaveBeenCalledTimes(1);
+    // This tab's own earlier lock, then the session its sign-in just started (D3a): the tab that
+    // started this lock may have logged out before that session existed.
+    expect(api.logout).toHaveBeenCalledTimes(2);
   });
 
   it('shares activity across tabs, at most one ping per 15 s (C1)', async () => {
@@ -1373,6 +1488,13 @@ describe('AppStore', () => {
     const t = await registeredStore();
     unauthorized.handler!();
     await vi.waitFor(() => expect(t.getState().phase).toBe('signedOut'));
+    expect(mismatch.requestUser).toBeNull();
+    // A sign-out from another tab (D5f).
+    const u = await registeredStore();
+    expect(mismatch.requestUser).toBe(u.getState().user!.id);
+    const peer = new FakeChannel('inked');
+    peer.postMessage({ type: 'signout', tab: 'peer', id: 'S5' });
+    await vi.waitFor(() => expect(u.getState().phase).toBe('signedOut'));
     expect(mismatch.requestUser).toBeNull();
   });
 

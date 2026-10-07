@@ -277,7 +277,7 @@ export class AppStore {
   /** Other tabs of this browser share the session: lock together, sign out together, idle together. */
   private tabs = new TabLink({
     onPeerLock: (notice) => this.afterSignIn(() => this.lock(notice, { fromPeer: true })),
-    onPeerSignOut: () => this.afterSignIn(() => this.endFromPeer({ remember: false })),
+    onPeerSignOut: () => this.afterSignIn(() => this.endFromPeer()),
   });
   /** The logout of the last lock or sign-out; a new sign-in waits for it so it cannot end the new session. */
   private sessionEnd: Promise<void> = Promise.resolve();
@@ -336,21 +336,26 @@ export class AppStore {
 
   async boot(): Promise<void> {
     this.set({ phase: 'booting' });
+    // A sign-out from another tab may land while a request is out: its result then stands, not boot's.
     try {
       const { needsSetup } = await api.status();
+      if (this.state.phase !== 'booting') return;
       if (needsSetup) {
         this.set({ phase: 'setup' });
         return;
       }
       try {
         const { user } = await api.me();
+        if (this.state.phase !== 'booting') return;
         this.set({ phase: 'locked', user, lastUsername: user.username });
       } catch (e) {
+        if (this.state.phase !== 'booting') return;
         if (e instanceof ApiError && e.status === 401) {
           this.set({ phase: 'signedOut', user: null, lastUsername: recallUsername() });
         } else throw e;
       }
     } catch {
+      if (this.state.phase !== 'booting') return;
       this.set({ phase: 'offline' });
     }
   }
@@ -395,10 +400,20 @@ export class AppStore {
     }
   }
 
-  /** Applies another tab's lock or sign-out once a sign-in in progress here has landed (or failed). */
+  /**
+   * Applies another tab's lock or sign-out once a sign-in in progress here has landed (or failed).
+   * If that sign-in started a session, this tab then ends it itself: the peer gives up waiting after
+   * LOCK_WAIT_MS, so its own logout may have run before that session existed. A second logout is harmless.
+   */
   private async afterSignIn(apply: () => Promise<void>): Promise<void> {
-    if (this.unlocking) await this.unlocking;
+    const signIn = this.unlocking;
+    if (signIn) await signIn;
+    const startedSession = signIn !== null && this.state.phase === 'unlocked';
     await apply();
+    if (startedSession) {
+      this.sessionEnd = this.logoutBounded();
+      await this.sessionEnd;
+    }
   }
 
   private enterUnlocked(user: User, userKey: CryptoKey) {
@@ -558,39 +573,35 @@ export class AppStore {
   }
 
   /**
-   * Another tab signed out (`remember: false`): flush this tab's edits while the keys are still
-   * here, then drop them and forget the username. The tab that signed out ends the session; this
-   * one never calls logout. Skipped while a lock, sign-out or session end is already running here.
+   * Another tab signed out: flush this tab's edits while the keys are still here, then drop them
+   * and forget the username. The tab that signed out ends the session; this one only logs out a
+   * session its own sign-in started meanwhile (see afterSignIn). Skipped while a lock, sign-out or
+   * session end is already running here.
    */
-  private async endFromPeer(opts: { remember: boolean }): Promise<void> {
+  private async endFromPeer(): Promise<void> {
     const { phase } = this.state;
     if (phase === 'signedOut' || phase === 'setup') {
       // No keys here; still stop showing the name the user chose to forget.
-      if (!opts.remember) {
-        if (this.state.lastUsername) {
-          forgetRememberedUsername();
-          this.set({ lastUsername: '' });
-        }
-        this.lastUserId = null;
-        this.syncPendingCount();
+      if (this.state.lastUsername) {
+        forgetRememberedUsername();
+        this.set({ lastUsername: '' });
       }
+      this.lastUserId = null;
+      this.syncPendingCount();
       return;
     }
     if (this.state.locking) {
       // This tab's own lock (or session end) is flushing: let it forget the username when it finishes.
-      if (!opts.remember) this.forgetOnEnd = true;
+      this.forgetOnEnd = true;
       return;
     }
     this.set({ locking: true });
     try {
       await this.flushAll(true);
-      const forget = this.takeForgetOnEnd();
-      const remember = opts.remember && !forget;
-      const lastUsername = remember ? (this.state.user?.username ?? this.state.lastUsername) : '';
+      this.takeForgetOnEnd(); // forgetting anyway
       this.dropKeys();
-      if (remember) rememberUsername(lastUsername);
-      else this.forgetAccount();
-      this.set({ phase: 'signedOut', user: null, lastUsername, notice: null, locking: false, ...EMPTY_DATA });
+      this.forgetAccount();
+      this.set({ phase: 'signedOut', user: null, lastUsername: '', notice: null, locking: false, ...EMPTY_DATA });
       this.syncPendingCount();
     } finally {
       if (this.state.locking) this.set({ locking: false });
