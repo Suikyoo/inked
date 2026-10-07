@@ -60,7 +60,8 @@ export function layoutVault(graph: VaultGraph): VaultLayout {
   for (const f of graph.folders) kids.set(f.parentId, [...(kids.get(f.parentId) ?? []), f]);
   for (const list of kids.values()) list.sort(byName);
   const notesIn = new Map<string | null, GraphNote[]>();
-  for (const n of graph.notes) notesIn.set(n.folderId, [...(notesIn.get(n.folderId) ?? []), n]);
+  // An Index note has no dot: its folder (or the hub) stands for it.
+  for (const n of graph.notes) if (!n.index) notesIn.set(n.folderId, [...(notesIn.get(n.folderId) ?? []), n]);
   for (const list of notesIn.values()) list.sort(byTitle);
 
   // Folders only, so a new note never resizes another folder's slice.

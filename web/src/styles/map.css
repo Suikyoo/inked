@@ -33,25 +33,69 @@
   outline: none;
 }
 
-.cmap-pencil line {
-  stroke: var(--map-pencil);
-  stroke-width: 1;
+/* Quill curves. Widths are screen pixels (the svg is drawn in screen space); pencil widths come
+   from the stroke-width attribute, by depth. */
+.cmap-pencil path,
+.cmap-links path,
+.cmap-ink path {
+  fill: none;
+  stroke-linecap: round;
 }
-.cmap-links line {
+.cmap-pencil path {
+  stroke: var(--map-pencil);
+}
+.cmap-links path {
   stroke: var(--map-pencil);
   stroke-width: 1;
-  stroke-dasharray: 3 3;
+  stroke-dasharray: 2 4;
 }
 .cmap-ink path {
-  fill: var(--map-ink);
-  opacity: 0.9;
+  stroke: var(--map-ink);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+/* pathLength="1": a dash as long as the path, slid in from offset 1. */
+.cmap-ink path.ink-draw {
+  stroke-dasharray: 1;
+  animation: cmap-draw var(--dur-ink) var(--ease-out) backwards;
 }
 
-.cmap-node {
+/* Write-on (first map paint of a session): edges draw outward, delayed by depth from the style prop;
+   folder squares, dots and links fade in after their edge. `backwards` only, so afterwards the
+   normal styles (search fading) apply again. Reduced motion never gets .is-writing. */
+.cmap-svg.is-writing .cmap-pencil path {
+  stroke-dasharray: 1;
+  animation: cmap-draw var(--dur-ink) var(--ease-out) backwards;
+}
+.cmap-svg.is-writing .cmap-folder,
+.cmap-svg.is-writing .cmap-node,
+.cmap-svg.is-writing .cmap-links {
+  animation: cmap-fade var(--dur-3) var(--ease-out) backwards;
+}
+@keyframes cmap-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes cmap-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.cmap-node,
+.cmap-folder {
   cursor: pointer;
 }
-.cmap-node:focus {
+.cmap-node:focus,
+.cmap-folder:focus {
   outline: none;
+}
+.cmap-node {
+  transition: opacity var(--dur-3) var(--ease-std);
 }
 .cmap-node.is-faded {
   opacity: 0.3;
@@ -59,9 +103,56 @@
 .cmap-hit {
   fill: transparent;
 }
-.cmap-node:focus-visible .cmap-hit {
+.cmap-node:focus-visible .cmap-hit,
+.cmap-folder:focus-visible .cmap-hit {
   stroke: var(--map-sel);
   stroke-width: 1.5;
+}
+
+/* Folder: a rounded square; on an inked path it turns into a diamond as the ink arrives. */
+.cmap-sq,
+.lmap-folder {
+  fill: var(--panel-3);
+  stroke: var(--muted-3);
+  stroke-width: 1.5;
+}
+.cmap-sq {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    stroke var(--dur-3) var(--ease-std),
+    fill var(--dur-3) var(--ease-std) var(--dur-3),
+    transform var(--dur-3) var(--ease-std) var(--dur-3);
+}
+.cmap-folder.on .cmap-sq {
+  fill: var(--selection);
+  stroke: var(--map-ink);
+  transform: rotate(45deg);
+}
+.cmap-folder-label {
+  transition: opacity var(--dur-2) var(--ease-std);
+}
+.cmap-folder-label.is-hidden {
+  opacity: 0;
+}
+
+/* Drying pulse: one soft glow when a dot's edit time changes while the map is open. */
+.cmap-pulse {
+  fill: var(--ink-wet);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cmap-pulse 600ms var(--ease-out);
+  pointer-events: none;
+}
+@keyframes cmap-pulse {
+  30% {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.8);
+  }
 }
 /* 2px surface ring keeps dots legible where they cross lines. */
 .cmap-dot {
@@ -96,7 +187,7 @@
 }
 
 .cmap-label,
-.cmap-folders text,
+.cmap-folder-label,
 .cmap-hub-name {
   paint-order: stroke;
   stroke: var(--canvas);
@@ -108,7 +199,7 @@
   fill: var(--text);
   stroke-width: 3px;
 }
-.cmap-folders text {
+.cmap-folder-label {
   font: 500 10.5px var(--font-ui);
   fill: var(--muted);
   stroke-width: 4px;
@@ -163,100 +254,24 @@
   color: var(--muted-3);
   pointer-events: none;
 }
-
-.cmap-slip {
+/* Shown only while some vault's links are still being decrypted. */
+.cmap-pending {
   position: absolute;
-  width: 220px;
-  box-sizing: border-box;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
-}
-/* Clamped so "Open note →" always fits inside the frame. */
-.cmap-slip-title,
-.cmap-slip-path {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
-.cmap-slip-title {
-  -webkit-line-clamp: 2;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-.cmap-slip-path {
-  -webkit-line-clamp: 1;
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.cmap-slip-meta {
-  font-size: 11.5px;
-  color: var(--muted-2);
-}
-.cmap-slip-open {
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--ink-light);
-  text-decoration: none;
-}
-.cmap-slip-open:hover {
-  text-decoration: underline;
-}
-
-.cmap-legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 16px;
+  left: 10px;
+  bottom: 8px;
+  margin: 0;
   font-size: 11px;
   color: var(--muted-3);
+  pointer-events: none;
+  animation: cmap-fade var(--dur-2) var(--ease-out);
 }
-.cmap-legend > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+.cmap-pending[data-state='exit'] {
+  animation: cmap-fade-out var(--dur-2) var(--ease-in) forwards;
 }
-.lg-pencil,
-.lg-link {
-  width: 18px;
-  border-top: 1px solid var(--map-pencil);
-}
-.lg-link {
-  border-top-style: dashed;
-}
-.lg-ink {
-  width: 18px;
-  height: 3px;
-  background: var(--map-ink);
-  clip-path: polygon(0 0, 100% 38%, 100% 62%, 0 100%);
-}
-.lg-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.lg-dot.tier-wet {
-  background: var(--ink-wet);
-}
-.lg-dot.tier-fresh {
-  background: var(--ink-fresh);
-}
-.lg-dot.tier-drying {
-  background: var(--ink-drying);
-}
-.lg-dot.tier-dry {
-  background: var(--ink-dry);
-}
-.lg-note {
-  color: var(--muted-2);
+@keyframes cmap-fade-out {
+  to {
+    opacity: 0;
+  }
 }
 
 /* Local map (note page) */

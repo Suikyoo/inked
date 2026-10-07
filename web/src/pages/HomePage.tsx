@@ -4,7 +4,7 @@ import { VaultIcon } from '../brand/VaultIcon';
 import { FOCUS_SEARCH_EVENT } from '../components/AppShell';
 import { PlusIcon, SearchIcon } from '../components/Icons';
 import { uniqueTitle } from '../components/VaultTree';
-import { ConceptMap, MapLegend } from '../map/ConceptMap';
+import { ConceptMap, type MapSelection } from '../map/ConceptMap';
 import { useVaultGraphs } from '../map/useVaultGraphs';
 import { highlightSegments } from '../search/fuzzy';
 import { searchBodies, searchTitles, type SearchEntry } from '../search/search';
@@ -67,6 +67,8 @@ export function HomePage() {
   const mapEntries = useVaultGraphs(state);
   const hitIds = useMemo(() => new Set([...titleHits, ...bodyHits].map((h) => h.entry.noteId)), [titleHits, bodyHits]);
   const [hot, setHot] = useState<string | null>(null);
+  // The map rings and inks the selected node; the right column does not show it yet.
+  const [selected, setSelected] = useState<MapSelection | null>(null);
   const hotFrom = (t: EventTarget) => (t instanceof Element ? t.closest('a.res')?.getAttribute('data-note') ?? null : null);
   const recent = useMemo(() => [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10), [entries]);
 
@@ -168,8 +170,7 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} />
-            <MapLegend linksPending={mapEntries.some((e) => !e.graph.linksReady)} />
+            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} />
           </section>
         )}
 

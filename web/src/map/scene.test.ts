@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { folder, note, tree } from './fixtures';
 import { buildVaultGraph } from './graph';
 import { layoutVault, layoutWorld } from './layout';
-import { arrowDir, buildScene, displayTitle, nearestInDirection, taperPath, type SceneInput } from './scene';
+import { arrowDir, buildScene, chainPath, curvePath, displayTitle, edgeWidth, linkPath, nearestInDirection, type SceneInput } from './scene';
 
 function input(vaultId: string, bodies: Record<string, string> = {}, ready = true): SceneInput {
   const t = tree(
@@ -67,6 +67,48 @@ describe('buildScene', () => {
     expect(displayTitle(' x ')).toBe('x');
   });
 
+  it('gives pencil edges a depth and a kind, and widths by depth', () => {
+    const s = buildScene([input('v1')]);
+    const by = (id: string) => s.pencil.find((p) => p.id === id)!;
+    expect(by('f1')).toMatchObject({ depth: 0, kind: 'folder' });
+    expect(by('f2')).toMatchObject({ depth: 1, kind: 'folder' });
+    expect(by('v1-c')).toMatchObject({ depth: 0, kind: 'note' });
+    expect(by('v1-a')).toMatchObject({ depth: 1, kind: 'note' });
+    expect(by('v1-b')).toMatchObject({ depth: 2, kind: 'note' });
+    expect([by('f1'), by('f2'), by('v1-b')].map(edgeWidth)).toEqual([1.5, 1.1, 0.8]);
+  });
+
+  it('folder nodes carry depth and their direct note and subfolder counts', () => {
+    const s = buildScene([input('v1')]);
+    const f1 = s.folders.find((f) => f.id === 'f1')!;
+    const f2 = s.folders.find((f) => f.id === 'f2')!;
+    expect(f1).toMatchObject({ id: 'f1', vaultId: 'v1', name: 'Ops', depth: 0, noteCount: 1, folderCount: 1 });
+    expect(f2).toMatchObject({ name: 'Runbooks', depth: 1, noteCount: 1, folderCount: 0 });
+    expect(s.chains.f2).toEqual([{ x: s.hubs[0].x, y: s.hubs[0].y }, { x: f1.x, y: f1.y }, { x: f2.x, y: f2.y }]);
+    expect(s.chainFolders.f2).toEqual(['f1', 'f2']);
+    const b = s.folderBounds.f1;
+    const b2 = s.chains['v1-b'][3];
+    expect(b.minX).toBeLessThanOrEqual(Math.min(f1.x, f2.x, b2.x));
+    expect(b.maxX).toBeGreaterThanOrEqual(Math.max(f1.x, f2.x, b2.x));
+    expect(b.minY).toBeLessThanOrEqual(Math.min(f1.y, f2.y, b2.y));
+    expect(b.maxY).toBeGreaterThanOrEqual(Math.max(f1.y, f2.y, b2.y));
+  });
+
+  it('gives an Index note no dot, but a hit on it inks the path to its folder', () => {
+    const t = tree(
+      [folder('f1', null, 'Ops'), folder('f2', 'f1', 'Runbooks')],
+      [note('a', 'f2', 'Alpha'), note('ix', 'f2', 'Index'), note('rootix', null, 'Index')],
+    );
+    const graph = buildVaultGraph('v1', t, {}, true);
+    const s = buildScene([{ vaultId: 'v1', graph, layout: layoutVault(graph) }]);
+    expect(s.dots.map((d) => d.id)).toEqual(['a']);
+    expect(s.pencil.map((p) => p.id).sort()).toEqual(['a', 'f1', 'f2']);
+    expect(s.chains.ix).toEqual(s.chains.f2);
+    expect(s.chainFolders.ix).toEqual(['f1', 'f2']);
+    expect(s.chains.rootix).toEqual([{ x: s.hubs[0].x, y: s.hubs[0].y }]);
+    expect(s.folders.find((f) => f.id === 'f2')!.noteCount).toBe(1);
+  });
+
   it('bounds cover every vault circle', () => {
     const s = buildScene([input('v1'), input('v2')]);
     for (const h of s.hubs) {
@@ -78,17 +120,26 @@ describe('buildScene', () => {
   });
 });
 
-describe('taperPath', () => {
-  it('returns a closed outline with two points per vertex', () => {
-    const d = taperPath([{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 80, y: 40 }]);
-    expect(d.startsWith('M')).toBe(true);
-    expect(d.endsWith('Z')).toBe(true);
-    expect(d.match(/L/g)).toHaveLength(5);
+describe('quill curves', () => {
+  it('curvePath is one quadratic bowed perpendicular to the segment by bend × length', () => {
+    expect(curvePath({ x: 0, y: 0 }, { x: 100, y: 0 }, 0.12)).toBe('M0.0 0.0 Q50.0 12.0 100.0 0.0');
+    expect(curvePath({ x: 0, y: 0 }, { x: 0, y: 50 }, 0.2)).toBe('M0.0 0.0 Q-10.0 25.0 0.0 50.0');
   });
 
-  it('returns an empty path for fewer than two distinct points', () => {
-    expect(taperPath([{ x: 1, y: 1 }])).toBe('');
-    expect(taperPath([{ x: 1, y: 1 }, { x: 1, y: 1 }])).toBe('');
+  it('linkPath bows by 0.25', () => {
+    expect(linkPath({ x: 0, y: 0 }, { x: 100, y: 0 })).toBe('M0.0 0.0 Q50.0 25.0 100.0 0.0');
+  });
+
+  it('chainPath joins the segments into one path with a single M', () => {
+    const d = chainPath([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }], 0.12);
+    expect(d).toBe('M0.0 0.0 Q50.0 12.0 100.0 0.0 Q94.0 25.0 100.0 50.0');
+    expect(d.match(/M/g)).toHaveLength(1);
+    expect(d.match(/Q/g)).toHaveLength(2);
+  });
+
+  it('chainPath is empty for fewer than two points', () => {
+    expect(chainPath([{ x: 1, y: 1 }], 0.12)).toBe('');
+    expect(chainPath([], 0.12)).toBe('');
   });
 });
 

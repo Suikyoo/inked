@@ -1,3 +1,4 @@
+import { indexNoteOf, INDEX_TITLE } from '../lib/indexNote';
 import { titleIndex } from '../lib/titles';
 import { wikiLinkTargets } from '../markdown/plugins';
 import type { TreeView } from '../state/store';
@@ -13,6 +14,8 @@ export interface GraphNote {
   folderId: string | null;
   title: string;
   updatedAt: string;
+  /** The Index note of its folder (or of the vault root): it has no dot, its folder stands for it. */
+  index: boolean;
 }
 export interface GraphLink {
   from: string;
@@ -80,13 +83,17 @@ export function buildVaultGraph(
     .sort(byId);
 
   const liveNotes = Object.values(tree.notes).filter((n) => !n.broken);
+  const indexIds = new Set<string>();
+  for (const folderId of new Set(liveNotes.filter((n) => n.title === INDEX_TITLE).map((n) => n.folderId))) {
+    const ix = indexNoteOf(tree, folderId);
+    if (ix) indexIds.add(ix.id);
+  }
   const notes: GraphNote[] = liveNotes
-    .map((n) => ({
-      id: n.id,
-      folderId: n.folderId && live.has(n.folderId) ? n.folderId : null,
-      title: n.title,
-      updatedAt: n.updatedAt,
-    }))
+    .map((n) => {
+      const folderId = n.folderId && live.has(n.folderId) ? n.folderId : null;
+      // An Index left in a broken folder sits at the root, where it is not the root's Index.
+      return { id: n.id, folderId, title: n.title, updatedAt: n.updatedAt, index: indexIds.has(n.id) && folderId === n.folderId };
+    })
     .sort(byId);
 
   const ids = new Set(notes.map((n) => n.id));

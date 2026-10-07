@@ -5,7 +5,7 @@ import { relativeTime } from '../lib/util';
 import type { GraphNote, VaultGraph } from './graph';
 import { localGraph } from './localGraph';
 import { inkTier } from './recency';
-import { arrowDir, displayTitle, nearestInDirection } from './scene';
+import { arrowDir, curvePath, displayTitle, HIERARCHY_BEND, linkPath, nearestInDirection } from './scene';
 
 /** Sized to the ~220 px context panel so text renders at about its CSS size. */
 const W = 220;
@@ -18,6 +18,8 @@ const CAPTIONS = { incoming: 'links in', siblings: 'same folder', outgoing: 'lin
 const CAPTION_Y = 74;
 const ROW0 = 88;
 const ROW = 12.5;
+/** Stroke width of an edge that ends at a note, as on the concept map. */
+const NOTE_EDGE = 0.8;
 
 type Kind = keyof typeof COLS;
 interface Spot {
@@ -91,27 +93,29 @@ export function LocalMap({
     <div className="lmap">
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="lmap-svg" role="group" aria-label={`Notes near ${centerTitle}`} onKeyDown={onKeyDown}>
         <g className="cmap-pencil">
-          <line x1={PARENT.x} y1={PARENT.y} x2={CENTER.x} y2={CENTER.y} />
+          <path d={curvePath(PARENT, CENTER, HIERARCHY_BEND)} strokeWidth={NOTE_EDGE} />
           {spots
             .filter((s) => s.kind === 'siblings')
             .map((s) => (
-              <line key={s.note.id} x1={PARENT.x} y1={PARENT.y} x2={s.x} y2={s.y} />
+              <path key={s.note.id} d={curvePath(PARENT, s, HIERARCHY_BEND)} strokeWidth={NOTE_EDGE} />
             ))}
         </g>
         <g className="cmap-links">
           {spots
             .filter((s) => s.kind !== 'siblings')
             .map((s) => (
-              <line key={s.note.id} x1={CENTER.x} y1={CENTER.y} x2={s.x} y2={s.y} />
+              <path key={s.note.id} d={linkPath(CENTER, s)} />
             ))}
         </g>
         <g transform={`translate(${PARENT.x} ${PARENT.y})`}>
-          {hub && (
+          {hub ? (
             <g transform="translate(-7 -7)">
               <VaultIcon color={vaultColor} level={level} size={14} />
             </g>
+          ) : (
+            <rect className="lmap-folder" x={-4.75} y={-4.75} width={9.5} height={9.5} rx={2.25} />
           )}
-          <text className="lmap-parent-name" x={hub ? 10 : 0} y={4} textAnchor={hub ? 'start' : 'middle'}>
+          <text className="lmap-parent-name" x={10} y={4}>
             {clip(parentName, 20)}
           </text>
         </g>

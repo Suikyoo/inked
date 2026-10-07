@@ -30,7 +30,21 @@ describe('buildVaultGraph', () => {
     const t = tree([folder('f1', null, 'Bad', { broken: true })], [note('n1', 'f1'), note('n2', null, 'x', { broken: true })]);
     const g = buildVaultGraph('v1', t, {}, true);
     expect(g.folders).toEqual([]);
-    expect(g.notes).toEqual([{ id: 'n1', folderId: null, title: 'n1', updatedAt: expect.any(String) }]);
+    expect(g.notes).toEqual([{ id: 'n1', folderId: null, title: 'n1', updatedAt: expect.any(String), index: false }]);
+  });
+
+  it('marks each folder’s Index note (the oldest exact "Index"), and the vault root’s', () => {
+    const t = tree(
+      [folder('f1', null)],
+      [
+        note('old', 'f1', 'Index', { createdAt: '2026-09-01T00:00:00.000Z' }),
+        note('new', 'f1', 'Index', { createdAt: '2026-09-02T00:00:00.000Z' }),
+        note('lower', 'f1', 'index'),
+        note('root', null, 'Index'),
+      ],
+    );
+    const g = buildVaultGraph('v1', t, {}, true);
+    expect(g.notes.filter((n) => n.index).map((n) => n.id).sort()).toEqual(['old', 'root']);
   });
 
   it('survives folder cycles and missing parents (Review Focus 1)', () => {

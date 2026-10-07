@@ -25,6 +25,12 @@ export interface SceneFolder {
   x: number;
   y: number;
   name: string;
+  /** 0 for a top-level folder. */
+  depth: number;
+  /** Notes directly inside, the Index excluded. */
+  noteCount: number;
+  /** Folders directly inside. */
+  folderCount: number;
 }
 export interface SceneHub {
   vaultId: string;
@@ -33,30 +39,84 @@ export interface SceneHub {
   radius: number;
 }
 export interface Seg {
+  /** Stable key: the child's id for a pencil edge, the two note ids for a link. */
+  id: string;
   x1: number;
   y1: number;
   x2: number;
   y2: number;
+}
+/** A hierarchy edge from a parent (hub or folder) to a child. */
+export interface PencilSeg extends Seg {
+  /** Depth of the parent: 0 for the hub, 1 for a top-level folder, and so on. */
+  depth: number;
+  kind: 'folder' | 'note';
 }
 /** World-space geometry for every vault on the map. */
 export interface Scene {
   dots: SceneDot[];
   folders: SceneFolder[];
   hubs: SceneHub[];
-  pencil: Seg[];
+  pencil: PencilSeg[];
   links: Seg[];
   /** Some vault's note text is still decrypting, so its links are not drawn yet. */
   linksPending: boolean;
   bounds: Bounds;
   vaultBounds: Record<string, Bounds>;
-  /** Note id -> [hub, folders top-down, note], for ink strokes. */
+  /** World bounds of each folder and everything below it. */
+  folderBounds: Record<string, Bounds>;
+  /**
+   * Node id -> [hub, folders top-down, node], for ink strokes. Covers notes, folders and Index notes;
+   * an Index note's chain ends at its folder (just the hub at the vault root).
+   */
   chains: Record<string, Pt[]>;
+  /** Node id -> the folders its ink chain passes through, top-down (a folder includes itself). */
+  chainFolders: Record<string, string[]>;
 }
 
 export const UNTITLED = 'Untitled';
 export const displayTitle = (title: string) => title.trim() || UNTITLED;
 
-const seg = (a: Pt, b: Pt): Seg => ({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+/** Bend of the hierarchy curves, as a share of their length. */
+export const HIERARCHY_BEND = 0.12;
+/** Bend of the dotted [[link]] curves. */
+export const LINK_BEND = 0.25;
+
+const f1 = (n: number) => n.toFixed(1);
+
+/** The control point bowed perpendicular to a → b by `bend` × its length. */
+function control(a: Pt, b: Pt, bend: number): Pt {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return { x: (a.x + b.x) / 2 - dy * bend, y: (a.y + b.y) / 2 + dx * bend };
+}
+const q = (a: Pt, b: Pt, bend: number) => {
+  const c = control(a, b, bend);
+  return `Q${f1(c.x)} ${f1(c.y)} ${f1(b.x)} ${f1(b.y)}`;
+};
+
+/** One quill curve from a to b. */
+export const curvePath = (a: Pt, b: Pt, bend: number) => `M${f1(a.x)} ${f1(a.y)} ${q(a, b, bend)}`;
+
+/** The same curves joined end to end into one path, for an ink stroke. */
+export function chainPath(points: Pt[], bend: number): string {
+  if (points.length < 2) return '';
+  let d = `M${f1(points[0].x)} ${f1(points[0].y)}`;
+  for (let i = 1; i < points.length; i++) d += ' ' + q(points[i - 1], points[i], bend);
+  return d;
+}
+
+/** A [[link]] curve, bowed more than the hierarchy so the two read apart. */
+export const linkPath = (a: Pt, b: Pt) => curvePath(a, b, LINK_BEND);
+
+/** Screen-pixel stroke width: hub → top folder 1.5, folder → subfolder 1.1, → note 0.8. */
+export const edgeWidth = (s: PencilSeg) => (s.kind === 'note' ? 0.8 : s.depth === 0 ? 1.5 : 1.1);
+
+const seg = (id: string, a: Pt, b: Pt): Seg => ({ id, x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+const grow = (b: Bounds | undefined, p: Pt): Bounds =>
+  b
+    ? { minX: Math.min(b.minX, p.x), minY: Math.min(b.minY, p.y), maxX: Math.max(b.maxX, p.x), maxY: Math.max(b.maxY, p.y) }
+    : { minX: p.x, minY: p.y, maxX: p.x, maxY: p.y };
 
 export function buildScene(inputs: SceneInput[], gap = 48): Scene {
   const centres = layoutWorld(
@@ -72,12 +132,15 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
     linksPending: false,
     bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
     vaultBounds: {},
+    folderBounds: {},
     chains: {},
+    chainFolders: {},
   };
   let first = true;
 
   for (const { vaultId, graph, layout } of inputs) {
     const c = centres[vaultId] ?? { x: 0, y: 0 };
+    const hub = { x: c.x, y: c.y };
     const at = (p: Pt): Pt => ({ x: c.x + p.x, y: c.y + p.y });
     const r = layout.radius;
     scene.hubs.push({ vaultId, x: c.x, y: c.y, radius: r });
@@ -95,18 +158,48 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
 
     const folderById = new Map(graph.folders.map((f) => [f.id, f]));
     const pos = (id: string | null): Pt =>
-      id === null ? { x: c.x, y: c.y } : at(layout.folders[id] ?? layout.notes[id] ?? { x: 0, y: 0 });
+      id === null ? hub : at(layout.folders[id] ?? layout.notes[id] ?? { x: 0, y: 0 });
     const folderChain = (folderId: string | null): string[] => {
       const ids: string[] = [];
       for (let id = folderId; id && folderById.has(id); id = folderById.get(id)!.parentId) ids.unshift(id);
       return ids;
     };
+    const ink = (id: string, folderIds: string[], end: Pt | null) => {
+      scene.chains[id] = [hub, ...folderIds.map((f) => pos(f)), ...(end ? [end] : [])];
+      scene.chainFolders[id] = folderIds;
+    };
+    /** Widens the subtree bounds of every folder in `folderIds` to take in `p`. */
+    const cover = (folderIds: string[], p: Pt) => {
+      for (const f of folderIds) scene.folderBounds[f] = grow(scene.folderBounds[f], p);
+    };
+
+    const notesIn = new Map<string | null, number>();
+    for (const n of graph.notes) if (!n.index && layout.notes[n.id]) notesIn.set(n.folderId, (notesIn.get(n.folderId) ?? 0) + 1);
+    const foldersIn = new Map<string | null, number>();
+    for (const f of graph.folders) if (layout.folders[f.id]) foldersIn.set(f.parentId, (foldersIn.get(f.parentId) ?? 0) + 1);
 
     for (const f of graph.folders) {
       const p = layout.folders[f.id];
-      if (p) scene.folders.push({ id: f.id, vaultId, ...at(p), name: f.name });
+      if (!p) continue;
+      const w = at(p);
+      scene.folders.push({
+        id: f.id,
+        vaultId,
+        ...w,
+        name: f.name,
+        depth: f.depth,
+        noteCount: notesIn.get(f.id) ?? 0,
+        folderCount: foldersIn.get(f.id) ?? 0,
+      });
+      const ids = folderChain(f.id);
+      ink(f.id, ids, null);
+      cover(ids, w);
     }
-    for (const [id, parent] of Object.entries(layout.parent)) scene.pencil.push(seg(pos(parent), pos(id)));
+    for (const [id, parent] of Object.entries(layout.parent)) {
+      const kind = layout.folders[id] ? 'folder' : 'note';
+      const depth = parent === null ? 0 : (folderById.get(parent)?.depth ?? 0) + 1;
+      scene.pencil.push({ ...seg(id, pos(parent), pos(id)), depth, kind });
+    }
 
     const neighbours = new Map<string, Set<string>>();
     if (graph.linksReady) {
@@ -123,17 +216,22 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
         const key = l.from < l.to ? `${l.from}|${l.to}` : `${l.to}|${l.from}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        scene.links.push(seg(pos(l.from), pos(l.to)));
+        scene.links.push(seg(key, pos(l.from), pos(l.to)));
       }
     } else {
       scene.linksPending = true;
     }
 
     for (const n of graph.notes) {
+      const chainIds = folderChain(n.folderId);
+      if (n.index) {
+        // No dot: a hit on the Index inks the way to the folder that stands for it.
+        ink(n.id, chainIds, null);
+        continue;
+      }
       const p = layout.notes[n.id];
       if (!p) continue;
       const w = at(p);
-      const chainIds = folderChain(n.folderId);
       scene.dots.push({
         id: n.id,
         vaultId,
@@ -145,36 +243,11 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
         updatedAt: n.updatedAt,
         links: neighbours.get(n.id)?.size ?? 0,
       });
-      scene.chains[n.id] = [{ x: c.x, y: c.y }, ...chainIds.map((id) => pos(id)), w];
+      ink(n.id, chainIds, w);
+      cover(chainIds, w);
     }
   }
   return scene;
-}
-
-/** Closed outline of a stroke along `points`, `w0` wide at the start tapering to `w1`. */
-export function taperPath(points: Pt[], w0 = 3, w1 = 0.8): string {
-  const pts: Pt[] = [];
-  for (const p of points) {
-    const last = pts[pts.length - 1];
-    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 1e-6) pts.push(p);
-  }
-  if (pts.length < 2) return '';
-  const cum = [0];
-  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
-  const total = cum[cum.length - 1];
-  const left: Pt[] = [];
-  const right: Pt[] = [];
-  pts.forEach((p, i) => {
-    const a = pts[Math.max(0, i - 1)];
-    const b = pts[Math.min(pts.length - 1, i + 1)];
-    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-    const nx = -(b.y - a.y) / len;
-    const ny = (b.x - a.x) / len;
-    const half = (w0 + (w1 - w0) * (cum[i] / total)) / 2;
-    left.push({ x: p.x + nx * half, y: p.y + ny * half });
-    right.push({ x: p.x - nx * half, y: p.y - ny * half });
-  });
-  return [...left, ...right.reverse()].map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('') + 'Z';
 }
 
 export type Dir = 'left' | 'right' | 'up' | 'down';

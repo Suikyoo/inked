@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { VaultIcon } from '../brand/VaultIcon';
 import { FitIcon, MinusIcon, PlusIcon } from '../components/Icons';
 import { relativeTime } from '../lib/util';
-import { MapSlip } from './MapSlip';
+import { prefersReducedMotion, usePresence } from '../motion';
 import { inkTier } from './recency';
-import { arrowDir, buildScene, nearestInDirection, taperPath } from './scene';
-import { fit, panBy, toScreen, useViewport, zoomAt, type Size } from './useViewport';
+import { arrowDir, buildScene, chainPath, curvePath, edgeWidth, HIERARCHY_BEND, linkPath, nearestInDirection } from './scene';
+import { fit, panBy, toScreen, useViewport, zoomAt, type Bounds, type Size } from './useViewport';
 import type { MapEntry } from './useVaultGraphs';
 
 const FALLBACK: Size = { w: 800, h: 480 };
@@ -16,8 +16,24 @@ const LABEL_SCALE = 1.6;
 const FOLDER_LABEL_SCALE = 0.9;
 const STEP = 1.25;
 const EDGE = 16;
+/** Write-on: each level of edges starts this much after the one above it. */
+const WRITE_STEP_MS = 140;
+/** Write-on: a folder square or dot fades in this long after its edge starts drawing. */
+const NODE_LAG_MS = 260;
+/** The pending-links caption fades out over --dur-2. */
+const CAPTION_EXIT_MS = 140;
 
 export const noteHref = (vaultId: string, noteId: string) => `/v/${vaultId}/n/${noteId}`;
+
+/** What is selected on the map. The parent owns it (Home shows it in the preview panel). */
+export type MapSelection = { kind: 'note'; vaultId: string; id: string } | { kind: 'folder'; vaultId: string; id: string } | { kind: 'hub'; vaultId: string };
+
+/** The write-on plays on the first map paint of a session only: an in-memory flag, never storage. */
+let wroteOn = false;
+/** Lets a test see the write-on again. Not for app code. */
+export function resetWriteOnForTests(): void {
+  wroteOn = false;
+}
 
 export interface ConceptMapProps {
   entries: MapEntry[];
@@ -26,21 +42,25 @@ export interface ConceptMapProps {
   /** Note under the pointer or focus in the results list. */
   hot: string | null;
   loading: boolean;
+  selected: MapSelection | null;
+  /** Called with the clicked node, or null when Escape or a background click clears the selection. */
+  onSelect: (s: MapSelection | null) => void;
   now?: number;
 }
 
 const f1 = (n: number) => n.toFixed(1);
+const ms = (n: number) => `${n}ms`;
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: ConceptMapProps) {
+export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, now = Date.now() }: ConceptMapProps) {
   const navigate = useNavigate();
   const uid = 'cm' + useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const frameRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const dotRefs = useRef(new Map<string, SVGGElement>());
+  const nodeRefs = useRef(new Map<string, SVGGElement>());
   const [size, setSize] = useState<Size>(FALLBACK);
   const scene = useMemo(() => buildScene(entries), [entries]);
   const { view, setView, animateTo } = useViewport(() => fit(scene.bounds, FALLBACK));
-  const [selected, setSelected] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -52,7 +72,26 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
 
   const entryById = useMemo(() => new Map(entries.map((e) => [e.vaultId, e])), [entries]);
   const dotById = useMemo(() => new Map(scene.dots.map((d) => [d.id, d])), [scene]);
-  const sel = selected && dotById.has(selected) ? selected : null;
+  const folderById = useMemo(() => new Map(scene.folders.map((f) => [f.id, f])), [scene]);
+  const isNode = (id: string | null): id is string => !!id && (dotById.has(id) || folderById.has(id));
+  const selNote = selected?.kind === 'note' && dotById.has(selected.id) ? selected.id : null;
+  const selFolder = selected?.kind === 'folder' && folderById.has(selected.id) ? selected.id : null;
+  const selHub = selected?.kind === 'hub' && entryById.has(selected.vaultId) ? selected.vaultId : null;
+
+  // Write-on: decided at the first paint that has edges to draw, so a map that opens on
+  // "Decrypting…" still writes on when the notes arrive. Reduced motion skips it.
+  const writeOn = useRef<boolean | null>(null);
+  if (writeOn.current === null && scene.pencil.length > 0) writeOn.current = !wroteOn && !prefersReducedMotion();
+  const writing = writeOn.current === true;
+  useEffect(() => {
+    if (writeOn.current !== null) wroteOn = true;
+  });
+
+  // Drying pulse: the updatedAt each dot first rendered with. A later change pulses the dot once.
+  const firstSeen = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const d of scene.dots) if (!firstSeen.current.has(d.id)) firstSeen.current.set(d.id, d.updatedAt);
+  }, [scene]);
 
   // The svg is absolutely positioned, so the frame alone decides the size: measure it now, then follow it.
   useLayoutEffect(() => {
@@ -176,8 +215,18 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
     touched.current = false;
     animateTo(fit(scene.bounds, size));
   };
+  const fitTo = (b: Bounds | undefined) => {
+    if (!b) return;
+    touched.current = true;
+    animateTo(fit(b, size));
+  };
 
   const shown = useMemo(() => scene.dots.map((dot) => ({ dot, ...toScreen(view, dot) })), [scene, view]);
+  /** Every focusable node (notes and folders) in screen space, for arrow-key roving. */
+  const targets = useMemo(
+    () => [...shown.map((s) => ({ id: s.dot.id, x: s.x, y: s.y })), ...scene.folders.map((f) => ({ id: f.id, ...toScreen(view, f) }))],
+    [shown, scene, view],
+  );
   const firstHit = useMemo(() => {
     for (const id of hits) if (dotById.has(id)) return id;
     return null;
@@ -186,23 +235,38 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
     () => scene.dots.reduce<string | null>((best, d) => (best === null || d.updatedAt > dotById.get(best)!.updatedAt ? d.id : best), null),
     [scene, dotById],
   );
-  const rovingId = (focusId && dotById.has(focusId) ? focusId : null) ?? sel ?? firstHit ?? recentId;
+  const rovingId = (isNode(focusId) ? focusId : null) ?? selNote ?? selFolder ?? firstHit ?? recentId ?? scene.folders[0]?.id ?? null;
 
-  /** Pans a dot that lies outside the view to the centre. Asking twice for the same dot is harmless. */
-  const revealDot = (id: string) => {
-    const d = dotById.get(id);
-    if (!d) return;
-    const s = toScreen(view, d);
+  /** Pans a node that lies outside the view to the centre. Asking twice for the same node is harmless. */
+  const revealNode = (id: string) => {
+    const p = dotById.get(id) ?? folderById.get(id);
+    if (!p) return;
+    const s = toScreen(view, p);
     if (s.x < EDGE || s.y < EDGE || s.x > size.w - EDGE || s.y > size.h - EDGE) {
       touched.current = true;
       animateTo(panBy(view, size.w / 2 - s.x, size.h / 2 - s.y));
     }
   };
-  const focusDot = (id: string) => {
+  const focusNode = (id: string) => {
     setFocusId(id);
-    revealDot(id);
-    dotRefs.current.get(id)?.focus({ preventScroll: true });
+    revealNode(id);
+    nodeRefs.current.get(id)?.focus({ preventScroll: true });
   };
+  const nodeRef = (id: string) => (el: SVGGElement | null) => {
+    if (el) nodeRefs.current.set(id, el);
+    else nodeRefs.current.delete(id);
+  };
+  const nodeFocusProps = (id: string) => ({
+    tabIndex: id === rovingId ? 0 : -1,
+    onFocus: () => {
+      setFocusId(id);
+      revealNode(id);
+    },
+    onBlur: (e: { relatedTarget: EventTarget | null }) => {
+      const next = e.relatedTarget;
+      if (!(next instanceof Element && next.closest('g.cmap-node, g.cmap-folder') && svgRef.current?.contains(next))) setFocusId(null);
+    },
+  });
 
   const onKeyDown = (e: KeyboardEvent<SVGSVGElement>) => {
     const dir = arrowDir(e.key);
@@ -210,14 +274,10 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (dir && plain) {
       e.preventDefault();
-      const from = shown.find((s) => s.dot.id === rovingId);
+      const from = targets.find((t) => t.id === rovingId);
       if (!from) return;
-      const next = nearestInDirection(
-        from,
-        shown.map((s) => ({ id: s.dot.id, x: s.x, y: s.y })),
-        dir,
-      );
-      if (next) focusDot(next);
+      const next = nearestInDirection(from, targets, dir);
+      if (next) focusNode(next);
     } else if (plain && (e.key === '+' || e.key === '=')) {
       e.preventDefault();
       zoomBy(STEP);
@@ -227,58 +287,71 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
     } else if (plain && e.key === '0') {
       e.preventDefault();
       fitAll();
-    } else if (e.key === 'Escape' && sel) {
+    } else if (e.key === 'Escape' && selected) {
       e.preventDefault();
-      setSelected(null);
+      onSelect(null);
     }
   };
-  const onDotKey = (e: KeyboardEvent<SVGGElement>, vaultId: string, id: string) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      e.stopPropagation();
-      navigate(noteHref(vaultId, id));
-    }
+  const activates = (e: KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
   };
-  const onDotClick = (e: MouseEvent<SVGGElement>, id: string) => {
+  const onDotClick = (e: MouseEvent<SVGGElement>, vaultId: string, id: string) => {
     e.stopPropagation();
     if (consumeDrag()) return;
-    setSelected(id);
+    onSelect({ kind: 'note', vaultId, id });
+    setFocusId(id);
+  };
+  const onFolderClick = (e: MouseEvent<SVGGElement>, vaultId: string, id: string) => {
+    e.stopPropagation();
+    if (consumeDrag()) return;
+    onSelect({ kind: 'folder', vaultId, id });
     setFocusId(id);
   };
   const onHubClick = (e: MouseEvent<SVGGElement>, vaultId: string) => {
     e.stopPropagation();
     if (consumeDrag()) return;
-    const b = scene.vaultBounds[vaultId];
-    if (!b) return;
-    touched.current = true;
-    animateTo(fit(b, size));
+    onSelect({ kind: 'hub', vaultId });
   };
   const onBackgroundClick = () => {
     if (consumeDrag()) return;
-    setSelected(null);
+    if (selected) onSelect(null);
   };
 
-  const inked = new Set<string>();
-  for (const id of hits) if (dotById.has(id)) inked.add(id);
-  if (sel) inked.add(sel);
-  if (hot && dotById.has(hot)) inked.add(hot);
+  // Ink: search hits (an Index hit inks its folder's path), the selected note or folder, and the hot result.
+  const inked: string[] = [];
+  const inkOnce = (id: string | null) => {
+    if (id && scene.chains[id] && !inked.includes(id)) inked.push(id);
+  };
+  for (const id of hits) inkOnce(id);
+  inkOnce(selNote);
+  inkOnce(selFolder);
+  inkOnce(hot);
+  const inkedNotes = new Set(inked.filter((id) => dotById.has(id)));
   const inkedFolders = new Set<string>();
-  for (const id of inked) for (const fid of dotById.get(id)!.folderIds) inkedFolders.add(fid);
+  for (const id of inked) for (const fid of scene.chainFolders[id] ?? []) inkedFolders.add(fid);
+
+  // Ink present on the first render is drawn as is; ids inked later draw in. An id that leaves and returns draws again.
+  const settledInk = useRef<Set<string> | null>(null);
+  if (settledInk.current === null) settledInk.current = new Set(inked);
+  const settled = settledInk.current;
+  useEffect(() => {
+    for (const id of [...settled]) if (!inked.includes(id)) settled.delete(id);
+  });
+
   const allFolderLabels = view.scale >= FOLDER_LABEL_SCALE;
   const searching = hits.size > 0;
-  const line = (s: { x1: number; y1: number; x2: number; y2: number }, i: number) => {
-    const a = toScreen(view, { x: s.x1, y: s.y1 });
-    const b = toScreen(view, { x: s.x2, y: s.y2 });
-    return <line key={i} x1={f1(a.x)} y1={f1(a.y)} x2={f1(b.x)} y2={f1(b.y)} />;
-  };
-  const selDot = sel ? dotById.get(sel)! : null;
-  const selAt = selDot ? toScreen(view, selDot) : null;
+  const at = (x: number, y: number) => toScreen(view, { x, y });
+  const maxDepth = scene.pencil.reduce((m, s) => Math.max(m, s.depth), 0);
+  const pending = usePresence(scene.linksPending && scene.dots.length > 0, CAPTION_EXIT_MS);
 
   return (
     <div className="cmap" ref={frameRef}>
       <svg
         ref={svgRef}
-        className={`cmap-svg${dragging ? ' is-dragging' : ''}`}
+        className={`cmap-svg${dragging ? ' is-dragging' : ''}${writing ? ' is-writing' : ''}`}
         width={size.w}
         height={size.h}
         viewBox={`0 0 ${size.w} ${size.h}`}
@@ -297,21 +370,65 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
             <feGaussianBlur stdDeviation="2.5" />
           </filter>
         </defs>
-        <g className="cmap-pencil">{scene.pencil.map(line)}</g>
-        <g className="cmap-links">{scene.links.map(line)}</g>
-        <g className="cmap-ink">
-          {[...inked].map((id) => (
-            <path key={id} d={taperPath(scene.chains[id].map((p) => toScreen(view, p)))} />
+        <g className="cmap-pencil">
+          {scene.pencil.map((s) => (
+            <path
+              key={s.id}
+              data-edge={s.id}
+              d={curvePath(at(s.x1, s.y1), at(s.x2, s.y2), HIERARCHY_BEND)}
+              strokeWidth={edgeWidth(s)}
+              pathLength={1}
+              style={writing ? { animationDelay: ms(s.depth * WRITE_STEP_MS) } : undefined}
+            />
           ))}
         </g>
-        <g className="cmap-folders" aria-hidden="true">
+        <g className="cmap-links" style={writing ? { animationDelay: ms((maxDepth + 1) * WRITE_STEP_MS) } : undefined}>
+          {scene.links.map((s) => (
+            <path key={s.id} d={linkPath(at(s.x1, s.y1), at(s.x2, s.y2))} />
+          ))}
+        </g>
+        <g className="cmap-ink">
+          {/* Sorted, so a new stroke never moves an existing one in the DOM (a move would replay its draw). */}
+          {[...inked].sort().map((id) => {
+            const d = chainPath(
+              scene.chains[id].map((p) => toScreen(view, p)),
+              HIERARCHY_BEND,
+            );
+            return d ? <path key={id} data-ink={id} className={settled.has(id) ? undefined : 'ink-draw'} d={d} pathLength={1} /> : null;
+          })}
+        </g>
+        <g className="cmap-folders">
           {scene.folders.map((f) => {
-            if (!allFolderLabels && !inkedFolders.has(f.id)) return null;
             const s = toScreen(view, f);
+            const on = inkedFolders.has(f.id);
+            const showLabel = allFolderLabels || on || f.id === focusId;
             return (
-              <text key={f.id} x={f1(s.x)} y={f1(s.y + 3.5)} textAnchor="middle">
-                {f.name}
-              </text>
+              <g
+                key={f.id}
+                ref={nodeRef(f.id)}
+                className={`cmap-folder${on ? ' on' : ''}`}
+                data-folder={f.id}
+                transform={`translate(${f1(s.x)} ${f1(s.y)})`}
+                style={writing ? { animationDelay: ms(f.depth * WRITE_STEP_MS + NODE_LAG_MS) } : undefined}
+                role="button"
+                aria-label={`folder ${f.name}, ${plural(f.noteCount, 'note')}`}
+                {...nodeFocusProps(f.id)}
+                onClick={(e) => onFolderClick(e, f.vaultId, f.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  fitTo(scene.folderBounds[f.id]);
+                }}
+                onKeyDown={(e) => {
+                  if (activates(e)) onSelect({ kind: 'folder', vaultId: f.vaultId, id: f.id });
+                }}
+              >
+                <circle className="cmap-hit" r={11} />
+                {f.id === selFolder && <circle className="cmap-sel" r={10} />}
+                <rect className="cmap-sq" x={-4.75} y={-4.75} width={9.5} height={9.5} rx={2.25} />
+                <text className={`cmap-folder-label${showLabel ? '' : ' is-hidden'}`} x={0} y={19} textAnchor="middle" aria-hidden="true">
+                  {f.name}
+                </text>
+              </g>
             );
           })}
         </g>
@@ -321,7 +438,18 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
             if (!e) return null;
             const s = toScreen(view, h);
             return (
-              <g key={h.vaultId} className="cmap-hub" transform={`translate(${f1(s.x)} ${f1(s.y)})`} onClick={(ev) => onHubClick(ev, h.vaultId)} aria-hidden="true">
+              <g
+                key={h.vaultId}
+                className="cmap-hub"
+                transform={`translate(${f1(s.x)} ${f1(s.y)})`}
+                onClick={(ev) => onHubClick(ev, h.vaultId)}
+                onDoubleClick={(ev) => {
+                  ev.stopPropagation();
+                  fitTo(scene.vaultBounds[h.vaultId]);
+                }}
+                aria-hidden="true"
+              >
+                {h.vaultId === selHub && <circle className="cmap-sel" r={11} />}
                 <g transform="translate(-7 -7)">
                   <VaultIcon color={e.vault.color} level={e.level} size={14} />
                 </g>
@@ -341,40 +469,35 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
           {shown.map(({ dot, x, y }) => {
             const tier = inkTier(dot.updatedAt, now);
             const active = dot.id === hover || dot.id === focusId;
-            const big = dot.id === sel || dot.id === hot || active;
+            const big = dot.id === selNote || dot.id === hot || active;
             const r = big ? 5 : 4;
             const when = relativeTime(dot.updatedAt, now);
-            const showLabel = view.scale >= LABEL_SCALE || inked.has(dot.id) || active;
+            const showLabel = view.scale >= LABEL_SCALE || inkedNotes.has(dot.id) || active;
+            const seen = firstSeen.current.get(dot.id);
             return (
               <g
                 key={dot.id}
-                ref={(el) => {
-                  if (el) dotRefs.current.set(dot.id, el);
-                  else dotRefs.current.delete(dot.id);
-                }}
-                className={`cmap-node${searching && !inked.has(dot.id) ? ' is-faded' : ''}`}
+                ref={nodeRef(dot.id)}
+                className={`cmap-node${searching && !inkedNotes.has(dot.id) ? ' is-faded' : ''}`}
                 data-note={dot.id}
                 transform={`translate(${f1(x)} ${f1(y)})`}
+                style={writing ? { animationDelay: ms(dot.folderIds.length * WRITE_STEP_MS + NODE_LAG_MS) } : undefined}
                 role="button"
-                tabIndex={dot.id === rovingId ? 0 : -1}
                 aria-label={`${dot.title}, ${dot.folderPath || 'vault root'}, edited ${when}`}
-                onClick={(e) => onDotClick(e, dot.id)}
-                onKeyDown={(e) => onDotKey(e, dot.vaultId, dot.id)}
-                onFocus={() => {
-                  setFocusId(dot.id);
-                  revealDot(dot.id);
-                }}
-                onBlur={(e) => {
-                  const next = e.relatedTarget;
-                  if (!(next instanceof Element && next.closest('g.cmap-node') && svgRef.current?.contains(next))) setFocusId(null);
+                {...nodeFocusProps(dot.id)}
+                onClick={(e) => onDotClick(e, dot.vaultId, dot.id)}
+                onKeyDown={(e) => {
+                  if (activates(e)) navigate(noteHref(dot.vaultId, dot.id));
                 }}
                 onPointerEnter={() => setHover(dot.id)}
                 onPointerLeave={() => setHover((h) => (h === dot.id ? null : h))}
               >
                 <circle className="cmap-hit" r={12} />
+                {/* Keyed by the edit time, so each new edit mounts a fresh pulse. */}
+                {seen !== undefined && seen !== dot.updatedAt && <circle key={dot.updatedAt} className="cmap-pulse" r={r + 4} filter={`url(#${uid}-glow)`} />}
                 {(tier === 'wet' || tier === 'fresh') && <circle className={`cmap-glow tier-${tier}`} r={r + 3} filter={`url(#${uid}-glow)`} />}
                 <circle className={`cmap-dot tier-${tier}`} r={r} />
-                {dot.id === sel && <circle className="cmap-sel" r={r + 3} />}
+                {dot.id === selNote && <circle className="cmap-sel" r={r + 3} />}
                 {showLabel && (
                   <text className="cmap-label" x={r + 5} y={3.5}>
                     {active ? `${dot.title} · ${when}` : dot.title}
@@ -398,7 +521,11 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
         </button>
       </div>
 
-      {selDot && selAt && <MapSlip dot={selDot} x={selAt.x} y={selAt.y} frame={size} href={noteHref(selDot.vaultId, selDot.id)} now={now} />}
+      {pending.mounted && (
+        <p ref={pending.ref} className="cmap-pending" data-state={pending.state}>
+          Links appear once note text is decrypted.
+        </p>
+      )}
       {loading && scene.dots.length === 0 && <p className="cmap-msg">Decrypting your notes…</p>}
       {entries
         .filter((e) => e.status === 'error')
@@ -408,35 +535,9 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
           </p>
         ))}
       <p id={`${uid}-help`} className="sr-only">
-        Arrow keys move between notes. Enter opens a note. Plus and minus zoom, 0 fits the map, Escape clears the selection.
+        Arrow keys move between folders and notes. Enter opens a note or selects a folder. Plus and minus zoom, 0 fits the map, Escape clears the
+        selection.
       </p>
-    </div>
-  );
-}
-
-export function MapLegend({ linksPending }: { linksPending: boolean }) {
-  return (
-    <div className="cmap-legend">
-      <span>
-        <i className="lg-pencil" aria-hidden="true" />
-        pencil: folder lines at rest
-      </span>
-      <span>
-        <i className="lg-ink" aria-hidden="true" />
-        ink: your search and selected note
-      </span>
-      <span>
-        <i className="lg-dot tier-wet" aria-hidden="true" />
-        <i className="lg-dot tier-fresh" aria-hidden="true" />
-        <i className="lg-dot tier-drying" aria-hidden="true" />
-        <i className="lg-dot tier-dry" aria-hidden="true" />
-        wet → dry: today, this week, this month, older
-      </span>
-      <span>
-        <i className="lg-link" aria-hidden="true" />
-        [[links]]
-      </span>
-      {linksPending && <span className="lg-note">Links appear once note text is decrypted.</span>}
     </div>
   );
 }

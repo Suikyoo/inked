@@ -56,6 +56,24 @@ describe('LocalMap', () => {
     expect(host!.textContent).toContain('Ops');
   });
 
+  it('draws a folder parent as a square and every edge as a quill curve', () => {
+    render(graph());
+    expect(host!.querySelector('rect.lmap-folder')).not.toBeNull();
+    const edges = [...host!.querySelectorAll('.cmap-pencil > *, .cmap-links > *')];
+    expect(edges.length).toBe(1 + 2 + 2); // parent → centre, two siblings, one link each way
+    for (const e of edges) {
+      expect(e.tagName).toBe('path');
+      expect(e.getAttribute('d')).toMatch(/^M[-\d. ]+Q[-\d. ]+$/);
+    }
+    expect(host!.querySelector('line')).toBeNull();
+  });
+
+  it('draws the hub, not a square, for a note at the vault root', () => {
+    render(graph(), 'o1');
+    expect(host!.querySelector('rect.lmap-folder')).toBeNull();
+    expect(host!.textContent).toContain('Work');
+  });
+
   it('clicking a neighbour opens it', () => {
     render(graph());
     act(() => void row('o1')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));

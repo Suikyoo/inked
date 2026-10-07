@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NoteView, TreeView } from '../state/store';
-import { ConceptMap, type ConceptMapProps } from './ConceptMap';
+import { ConceptMap, resetWriteOnForTests, type ConceptMapProps, type MapSelection } from './ConceptMap';
 import { folder, note, tree, vault } from './fixtures';
 import { buildVaultGraph } from './graph';
 import { layoutVault } from './layout';
@@ -15,8 +15,8 @@ import type { MapEntry } from './useVaultGraphs';
 
 const NOW = Date.parse('2026-10-07T12:00:00.000Z');
 
-function entry(t: TreeView, id = 'v1'): MapEntry {
-  const graph = buildVaultGraph(id, t, {}, true);
+function entry(t: TreeView, id = 'v1', linksReady = true): MapEntry {
+  const graph = buildVaultGraph(id, t, {}, linksReady);
   return { vaultId: id, vault: vault(id), status: t.status, level: 0, graph, layout: layoutVault(graph) };
 }
 const base = () =>
@@ -31,17 +31,37 @@ let host: HTMLElement | null = null;
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
-function ui(p: Partial<ConceptMapProps> & { entries: MapEntry[] }) {
+type Props = Partial<ConceptMapProps> & { entries: MapEntry[] };
+/** Every onSelect call, in order. The harness also feeds the selection back, as HomePage does. */
+let onSelect = vi.fn<(s: MapSelection | null) => void>();
+function Controlled(p: Props) {
+  const [selected, setSelected] = useState<MapSelection | null>(null);
+  return (
+    <ConceptMap
+      hits={new Set()}
+      hot={null}
+      loading={false}
+      now={NOW}
+      selected={selected}
+      {...p}
+      onSelect={(s) => {
+        onSelect(s);
+        setSelected(s);
+      }}
+    />
+  );
+}
+function ui(p: Props) {
   return (
     <MemoryRouter initialEntries={['/']}>
       <Routes>
-        <Route path="/" element={<ConceptMap hits={new Set()} hot={null} loading={false} now={NOW} {...p} />} />
+        <Route path="/" element={<Controlled {...p} />} />
         <Route path="/v/:v/n/:n" element={<Where />} />
       </Routes>
     </MemoryRouter>
   );
 }
-function render(p: Partial<ConceptMapProps> & { entries: MapEntry[] }) {
+function render(p: Props) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -50,6 +70,7 @@ function render(p: Partial<ConceptMapProps> & { entries: MapEntry[] }) {
 }
 beforeEach(() => {
   vi.useFakeTimers();
+  onSelect = vi.fn<(s: MapSelection | null) => void>();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -61,6 +82,7 @@ afterEach(() => {
 
 const nodes = () => [...host!.querySelectorAll<SVGGElement>('g.cmap-node')];
 const node = (id: string) => host!.querySelector<SVGGElement>(`g.cmap-node[data-note="${id}"]`)!;
+const folderNode = (id: string) => host!.querySelector<SVGGElement>(`g.cmap-folder[data-folder="${id}"]`)!;
 const svg = () => host!.querySelector<SVGSVGElement>('svg.cmap-svg')!;
 const fire = (el: Element, ev: Event) => act(() => void el.dispatchEvent(ev));
 const click = (el: Element) => fire(el, new MouseEvent('click', { bubbles: true }));
@@ -78,13 +100,14 @@ describe('ConceptMap', () => {
     expect(nodes().map((n) => n.dataset.note).sort()).toEqual(['n1', 'n2', 'n3']);
   });
 
-  it('clicking a dot selects it and shows the slip', () => {
+  it('clicking a dot selects it through onSelect and rings it; there is no slip or legend', () => {
     render({ entries: [entry(base())] });
     click(node('n1'));
-    const slip = host!.querySelector('.cmap-slip');
-    expect(slip?.textContent).toContain('Alpha');
-    expect(slip?.textContent).toContain('Ops');
-    expect(slip?.textContent).toContain('Open note →');
+    expect(onSelect.mock.calls).toEqual([[{ kind: 'note', vaultId: 'v1', id: 'n1' }]]);
+    expect(node('n1').querySelector('.cmap-sel')).not.toBeNull();
+    expect(host!.querySelector('.cmap-ink path[data-ink="n1"]')).not.toBeNull();
+    expect(host!.querySelector('.cmap-slip')).toBeNull();
+    expect(host!.querySelector('.cmap-legend')).toBeNull();
   });
 
   it('Enter on a dot opens the note', () => {
@@ -93,11 +116,19 @@ describe('ConceptMap', () => {
     expect(host!.querySelector('[data-testid="where"]')?.textContent).toBe('/v/v1/n/n2');
   });
 
-  it('Escape clears the selection', () => {
+  it('Escape clears the selection through onSelect(null)', () => {
     render({ entries: [entry(base())] });
     click(node('n1'));
     key(node('n1'), 'Escape');
-    expect(host!.querySelector('.cmap-slip')).toBeNull();
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(host!.querySelector('.cmap-sel')).toBeNull();
+  });
+
+  it('a background click clears the selection through onSelect(null)', () => {
+    render({ entries: [entry(base())] });
+    click(node('n1'));
+    click(svg());
+    expect(onSelect).toHaveBeenLastCalledWith(null);
   });
 
   it('a search fades the notes that do not match', () => {
@@ -128,7 +159,7 @@ describe('ConceptMap', () => {
     pointer('pointermove', 130, 110);
     pointer('pointerup', 130, 110);
     click(node('n1'));
-    expect(host!.querySelector('.cmap-slip')).toBeNull();
+    expect(onSelect).not.toHaveBeenCalled();
     const after = translate(node('n1'))!;
     expect(after.x - before.x).toBeCloseTo(30, 0);
     expect(after.y - before.y).toBeCloseTo(10, 0);
@@ -202,7 +233,7 @@ describe('ConceptMap', () => {
   });
 
   describe('folder labels (M1)', () => {
-    const folderLabels = () => [...host!.querySelectorAll('.cmap-folders text')].map((t) => t.textContent);
+    const folderLabels = () => [...host!.querySelectorAll('.cmap-folder-label:not(.is-hidden)')].map((t) => t.textContent);
     const wide = () =>
       tree([folder('f1', null, 'Ops'), folder('f2', 'f1', 'Runbooks'), folder('f3', null, 'Other')], [note('n1', 'f2', 'Alpha'), note('n2', 'f3', 'Beta'), note('n3', null, 'Gamma')]);
     const props = (p: Partial<ConceptMapProps> = {}) => ({ entries: [entry(wide())], ...p });
@@ -281,7 +312,8 @@ describe('ConceptMap', () => {
     const status = [...host!.querySelectorAll('.cmap > p.sr-only')].map((p) => p.textContent);
     expect(status).toContain('Vault v2: couldn’t load');
     expect(status).not.toContain('Vault v1: couldn’t load');
-    expect(host!.querySelector('g.cmap-folders')?.getAttribute('aria-hidden')).toBe('true');
+    // Folder labels are inside their node, which names itself with aria-label.
+    expect(host!.querySelector('.cmap-folder-label')?.closest('g.cmap-folder')?.getAttribute('aria-label')).toMatch(/^folder /);
   });
 
   it('focusing a dot that is off screen pans it into view', () => {
@@ -297,5 +329,175 @@ describe('ConceptMap', () => {
     expect(p.x).toBeLessThanOrEqual(800);
     expect(p.y).toBeGreaterThanOrEqual(0);
     expect(p.y).toBeLessThanOrEqual(480);
+  });
+
+  describe('folder nodes', () => {
+    const folders = () =>
+      tree(
+        [folder('f1', null, 'Ops'), folder('f2', 'f1', 'Runbooks')],
+        [note('a', 'f1', 'Alpha'), note('b', 'f1', 'Bravo'), note('ix', 'f1', 'Index'), note('c', 'f2', 'Charlie'), note('r', null, 'Root')],
+      );
+
+    it('renders folders as focusable squares named with their note count', () => {
+      render({ entries: [entry(folders())] });
+      const f1 = folderNode('f1');
+      expect(f1.getAttribute('role')).toBe('button');
+      expect(f1.getAttribute('aria-label')).toBe('folder Ops, 2 notes');
+      expect(folderNode('f2').getAttribute('aria-label')).toBe('folder Runbooks, 1 note');
+      expect(f1.querySelector('rect.cmap-sq')).not.toBeNull();
+      expect(f1.getAttribute('tabindex')).toBe('-1');
+    });
+
+    it('gives an Index note no dot', () => {
+      render({ entries: [entry(folders())] });
+      expect(nodes().map((n) => n.dataset.note).sort()).toEqual(['a', 'b', 'c', 'r']);
+    });
+
+    it('a search hit on an Index inks the path to its folder and turns it into a diamond', () => {
+      render({ entries: [entry(folders())], hits: new Set(['ix']) });
+      expect(host!.querySelector('.cmap-ink path[data-ink="ix"]')).not.toBeNull();
+      expect(folderNode('f1').classList.contains('on')).toBe(true);
+      expect(folderNode('f2').classList.contains('on')).toBe(false);
+    });
+
+    it('clicking a folder selects it, inks its path and turns its chain into diamonds', () => {
+      render({ entries: [entry(folders())] });
+      click(folderNode('f2'));
+      expect(onSelect.mock.calls).toEqual([[{ kind: 'folder', vaultId: 'v1', id: 'f2' }]]);
+      expect(folderNode('f2').classList.contains('on')).toBe(true);
+      expect(folderNode('f1').classList.contains('on')).toBe(true);
+      expect(folderNode('f2').querySelector('.cmap-sel')).not.toBeNull();
+      expect(host!.querySelector('.cmap-ink path[data-ink="f2"]')).not.toBeNull();
+    });
+
+    it('Enter or Space on a folder selects it', () => {
+      render({ entries: [entry(folders())] });
+      key(folderNode('f1'), 'Enter');
+      key(folderNode('f2'), ' ');
+      expect(onSelect.mock.calls).toEqual([[{ kind: 'folder', vaultId: 'v1', id: 'f1' }], [{ kind: 'folder', vaultId: 'v1', id: 'f2' }]]);
+    });
+
+    it('clicking the hub selects the vault', () => {
+      render({ entries: [entry(folders())] });
+      click(host!.querySelector('g.cmap-hub')!);
+      expect(onSelect.mock.calls).toEqual([[{ kind: 'hub', vaultId: 'v1' }]]);
+      expect(host!.querySelector('g.cmap-hub .cmap-sel')).not.toBeNull();
+    });
+
+    it('double-clicking a folder fits the view to its subtree', () => {
+      render({ entries: [entry(folders())] });
+      const gap = () => {
+        const f = translate(folderNode('f2'))!;
+        const c = translate(node('c'))!;
+        return Math.hypot(f.x - c.x, f.y - c.y);
+      };
+      const before = gap();
+      fire(folderNode('f2'), new MouseEvent('dblclick', { bubbles: true }));
+      expect(gap()).toBeGreaterThan(before * 1.5);
+    });
+
+    it('arrow keys rove between folders and notes', () => {
+      const e = entry(folders());
+      render({ entries: [e] });
+      const s = buildScene([e]);
+      const all = [...s.dots, ...s.folders];
+      const isFolder = (id: string) => s.folders.some((f) => f.id === id);
+      const dirs = ['left', 'right', 'up', 'down'] as const;
+      const keyOf = { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown' };
+      const step = (fromId: string, want: (id: string) => boolean) => {
+        const from = all.find((n) => n.id === fromId)!;
+        for (const d of dirs) {
+          const next = nearestInDirection(from, all, d);
+          if (next && want(next)) return { d, next };
+        }
+        throw new Error(`no ${fromId} neighbour of the wanted kind`);
+      };
+      const roving = () => [...host!.querySelectorAll('[tabindex="0"]')].map((el) => el.getAttribute('data-note') ?? el.getAttribute('data-folder'));
+
+      const toFolder = step('c', isFolder);
+      fire(node('c'), new FocusEvent('focusin', { bubbles: true }));
+      key(node('c'), keyOf[toFolder.d]);
+      expect(roving()).toEqual([toFolder.next]);
+
+      const toNote = step(toFolder.next, (id) => !isFolder(id));
+      key(folderNode(toFolder.next), keyOf[toNote.d]);
+      expect(roving()).toEqual([toNote.next]);
+    });
+  });
+
+  describe('motion', () => {
+    const motionOn = () => {
+      window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    };
+    afterEach(() => {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    });
+    const unmount = () => {
+      act(() => root?.unmount());
+      host?.remove();
+      root = null;
+    };
+    const edge = (id: string) => host!.querySelector<SVGPathElement>(`.cmap-pencil path[data-edge="${id}"]`)!;
+    const ink = (id: string) => host!.querySelector<SVGPathElement>(`.cmap-ink path[data-ink="${id}"]`);
+
+    it('writes on with depth-staggered edges on the first mount of a session only (Review Focus 5)', () => {
+      motionOn();
+      resetWriteOnForTests();
+      render({ entries: [entry(base())] });
+      expect(svg().classList.contains('is-writing')).toBe(true);
+      expect(edge('f1').style.animationDelay).toBe('0ms');
+      expect(edge('f2').style.animationDelay).toBe('140ms');
+      expect(edge('n2').style.animationDelay).toBe('280ms');
+      expect(edge('n2').getAttribute('pathLength')).toBe('1');
+      unmount();
+      render({ entries: [entry(base())] });
+      expect(svg().classList.contains('is-writing')).toBe(false);
+    });
+
+    it('keeps the write-on for the first paint that has something to draw', () => {
+      motionOn();
+      resetWriteOnForTests();
+      const r = render({ entries: [entry(tree([], [], 'loading'))], loading: true });
+      expect(svg().classList.contains('is-writing')).toBe(false);
+      r.rerender({ entries: [entry(base())] });
+      expect(svg().classList.contains('is-writing')).toBe(true);
+    });
+
+    it('skips the write-on under reduced motion', () => {
+      resetWriteOnForTests();
+      render({ entries: [entry(base())] });
+      expect(svg().classList.contains('is-writing')).toBe(false);
+    });
+
+    it('draws ink only for newly inked ids', () => {
+      const r = render({ entries: [entry(base())], hits: new Set(['n1']) });
+      expect(ink('n1')!.classList.contains('ink-draw')).toBe(false);
+      expect(ink('n1')!.getAttribute('pathLength')).toBe('1');
+      r.rerender({ entries: [entry(base())], hits: new Set(['n1', 'n2']) });
+      expect(ink('n1')!.classList.contains('ink-draw')).toBe(false);
+      expect(ink('n2')!.classList.contains('ink-draw')).toBe(true);
+      r.rerender({ entries: [entry(base())], hits: new Set(['n2']) });
+      expect(ink('n1')).toBeNull();
+      r.rerender({ entries: [entry(base())], hits: new Set(['n1', 'n2']) });
+      expect(ink('n1')!.classList.contains('ink-draw')).toBe(true);
+    });
+
+    it('pulses a dot whose updatedAt changed, never on first render', () => {
+      const r = render({ entries: [entry(base())] });
+      expect(host!.querySelector('.cmap-pulse')).toBeNull();
+      const t = base();
+      t.notes.n1 = { ...t.notes.n1, updatedAt: '2026-10-07T11:59:00.000Z' };
+      r.rerender({ entries: [entry(t)] });
+      expect(node('n1').querySelector('.cmap-pulse')).not.toBeNull();
+      expect(node('n2').querySelector('.cmap-pulse')).toBeNull();
+    });
+
+    it('shows the pending-links caption while links are not ready, then fades it out', () => {
+      const r = render({ entries: [entry(base(), 'v1', false)] });
+      expect(host!.querySelector('.cmap-pending')?.textContent).toBe('Links appear once note text is decrypted.');
+      r.rerender({ entries: [entry(base())] });
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(host!.querySelector('.cmap-pending')).toBeNull();
+    });
   });
 });
