@@ -1089,7 +1089,14 @@ export class AppStore {
     const key = this.vaultKey(vaultId);
     let read = await this.readNote(key, vaultId, noteId, ep);
     if (!this.putHead(vaultId, read.head)) {
-      read = await this.readNote(key, vaultId, noteId, ep);
+      const first = read;
+      try {
+        read = await this.readNote(key, vaultId, noteId, ep);
+      } catch (e) {
+        // A transient failure on the re-read must not discard a usable first read.
+        if (e instanceof LockedError || (e instanceof ApiError && e.status === 404)) throw e;
+        return first;
+      }
       // Still stale: keep the newer body this tab has.
       if (!this.putHead(vaultId, read.head)) return read;
     }

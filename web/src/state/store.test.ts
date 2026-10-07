@@ -819,6 +819,7 @@ describe('AppStore', () => {
   });
 
   it('a sign-out from another tab during the KDF phase holds the login until the peer’s session end (D3c)', async () => {
+    const before = kdfGate.entered;
     const s = await registeredStore();
     api.logout.mockResolvedValue({ ok: true });
     await s.lock();
@@ -826,7 +827,7 @@ describe('AppStore', () => {
     let openKdf!: () => void;
     kdfGate.hold = new Promise<void>((r) => (openKdf = r));
     const unlocking = s.unlock('ann', 'pw-ann-123456');
-    await vi.waitFor(() => expect(kdfGate.entered).toBe(1));
+    await vi.waitFor(() => expect(kdfGate.entered).toBe(before + 1));
     const peer = new FakeChannel('inked');
     peer.postMessage({ type: 'signout', tab: 'peer', id: 'S8' });
     // Signed out already: answered at once, and the username is forgotten.
@@ -1597,6 +1598,26 @@ describe('AppStore', () => {
     expect(head.title).toBe('Plan');
     expect(body).toBe('new body');
     expect(s.getState().bodies[created.id]).toBe('new body');
+  });
+
+  it('a failed re-read of a stale note load returns the first read instead of failing the open (M-b)', async () => {
+    const s = await registeredStore();
+    const vaultId = Object.keys(s.getState().vaults)[0];
+    api.createNote.mockImplementation(async (_v: string, b: NoteBody) => headFor(b, '2026-01-01T00:00:00.000Z'));
+    const created = await s.createNote(vaultId, null, 'Plan', 'old body');
+    const old: NoteBody = api.createNote.mock.calls[0][1];
+    api.updateNote.mockResolvedValueOnce(headFor(old, '2026-01-02T00:00:00.000Z'));
+    await s.saveNoteBody(vaultId, created.id, 'new body', '2026-01-01T00:00:00.000Z');
+    api.getNote
+      .mockResolvedValueOnce({ note: { ...headFor(old, '2026-01-01T00:00:00.000Z').note, encBody: old.encBody } })
+      .mockRejectedValueOnce(new ApiError(500, 'boom'));
+    const { head, body } = await s.loadNote(vaultId, created.id);
+    expect(api.getNote).toHaveBeenCalledTimes(2);
+    expect(head.updatedAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(body).toBe('old body');
+    // The first read is returned unstored.
+    expect(s.getState().bodies[created.id]).toBe('new body');
+    expect(s.getState().trees[vaultId].notes[created.id].updatedAt).toBe('2026-01-02T00:00:00.000Z');
   });
 
   it('a late save response older than the stored head leaves the loaded body alone (B3)', async () => {
