@@ -45,10 +45,9 @@ describe('buildScene', () => {
     expect(chain[1]).toEqual({ x: f1.x, y: f1.y });
   });
 
-  it('merges a two-way link into one line and counts neighbours', () => {
+  it('merges a two-way link into one line', () => {
     const s = buildScene([input('v1', { 'v1-a': '[[beta]]', 'v1-b': '[[alpha]]' })]);
     expect(s.links).toHaveLength(1);
-    expect(s.dots.find((d) => d.id === 'v1-a')!.links).toBe(1);
     expect(s.linksPending).toBe(false);
   });
 

@@ -17,7 +17,6 @@ export interface SceneDot {
   /** Ids of the folders above this note, top-down. */
   folderIds: string[];
   updatedAt: string;
-  links: number;
 }
 export interface SceneFolder {
   id: string;
@@ -204,18 +203,10 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
       scene.pencil.push({ ...seg(id, pos(parent), pos(id)), depth, kind });
     }
 
-    const neighbours = new Map<string, Set<string>>();
     if (graph.linksReady) {
       const seen = new Set<string>();
       for (const l of graph.links) {
         if (!layout.notes[l.from] || !layout.notes[l.to]) continue;
-        for (const [a, b] of [
-          [l.from, l.to],
-          [l.to, l.from],
-        ]) {
-          if (!neighbours.has(a)) neighbours.set(a, new Set());
-          neighbours.get(a)!.add(b);
-        }
         const key = l.from < l.to ? `${l.from}|${l.to}` : `${l.to}|${l.from}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -245,7 +236,6 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
         folderIds: chainIds,
         folderPath: chainIds.map((id) => folderById.get(id)!.name).join(' / '),
         updatedAt: n.updatedAt,
-        links: neighbours.get(n.id)?.size ?? 0,
       });
       ink(n.id, chainIds, w);
       cover(chainIds, w);
