@@ -275,3 +275,17 @@
 .res-why[data-why='meaning'] {
   color: var(--ink-light);
 }
+
+/* A related-note row is a button: reset it to look like a.res. */
+.res-btn {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.res-btn:hover,
+.res-btn:focus-visible {
+  background: var(--hover);
+}

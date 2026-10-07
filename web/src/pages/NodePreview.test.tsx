@@ -5,7 +5,9 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { folder, note, tree, vault } from '../map/fixtures';
 import type { MapSelection } from '../map/ConceptMap';
+import { SemanticProvider } from '../semantic/SemanticContext';
 import { StoreProvider } from '../state/StoreContext';
+import { semanticStub } from '../test/semantic';
 import type { AppState, AppStore } from '../state/store';
 import { NodePreview } from './NodePreview';
 
@@ -52,7 +54,14 @@ function Where() {
   );
 }
 
-function mount(state: AppState, selection: MapSelection, store: Partial<AppStore> = {}, onZoom = vi.fn()) {
+function mount(
+  state: AppState,
+  selection: MapSelection,
+  store: Partial<AppStore> = {},
+  onZoom = vi.fn(),
+  semantic = semanticStub(),
+  onSelect = vi.fn(),
+) {
   const full = { getState: () => state, subscribe: () => () => undefined, ...store } as unknown as AppStore;
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -61,16 +70,19 @@ function mount(state: AppState, selection: MapSelection, store: Partial<AppStore
     root!.render(
       <MemoryRouter initialEntries={['/']}>
         <StoreProvider store={full}>
-          <Routes>
-            <Route path="/" element={<NodePreview selection={selection} onZoom={onZoom} />} />
-            <Route path="/v/:v/n/:n" element={<Where />} />
-          </Routes>
+          <SemanticProvider store={semantic}>
+            <Routes>
+              <Route path="/" element={<NodePreview selection={selection} onZoom={onZoom} onSelect={onSelect} />} />
+              <Route path="/v/:v/n/:n" element={<Where />} />
+            </Routes>
+          </SemanticProvider>
         </StoreProvider>
       </MemoryRouter>,
     ),
   );
   return onZoom;
 }
+
 const text = () => host!.textContent ?? '';
 const link = (label: string) => [...host!.querySelectorAll('a')].find((a) => a.textContent === label);
 const button = (label: string) => [...host!.querySelectorAll('button')].find((b) => b.textContent === label);
@@ -183,5 +195,47 @@ describe('NodePreview', () => {
     expect(text()).toContain('Work');
     expect(link('Open Index')?.getAttribute('href')).toBe('/v/v1/n/n3');
     expect([...host!.querySelectorAll('.preview-notes a')].map((a) => a.textContent)).toEqual(['Loose']);
+  });
+
+  describe('Related', () => {
+    const stub = (neighbours: (id: string, k: number) => { id: string; similarity: number }[]) =>
+      semanticStub({ version: 1 }, { neighbours });
+
+    it('note: lists neighbours with similarity and selects the clicked one', () => {
+      const neighbours = vi.fn(() => [{ id: 'n2', similarity: 0.82 }]);
+      const onSelect = vi.fn();
+      mount(makeState(), { kind: 'note', vaultId: 'v1', id: 'n1' }, {}, vi.fn(), stub(neighbours), onSelect);
+      expect(neighbours).toHaveBeenCalledWith('n1', 5);
+      const sec = host!.querySelector('.preview-related')!;
+      expect(sec.textContent).toContain('Related');
+      expect(sec.textContent).toContain('Index');
+      expect(sec.textContent).toContain('Work / Ops');
+      expect(sec.textContent).toContain('◇ .82');
+      click(sec.querySelector('button')!);
+      expect(onSelect).toHaveBeenCalledWith({ kind: 'note', vaultId: 'v1', id: 'n2' });
+    });
+
+    it('folder: asks for neighbours of its Index note', () => {
+      const neighbours = vi.fn(() => []);
+      mount(makeState(), { kind: 'folder', vaultId: 'v1', id: 'f1' }, {}, vi.fn(), stub(neighbours));
+      expect(neighbours).toHaveBeenCalledWith('n2', 5);
+    });
+
+    it('hub: asks for neighbours of the root Index', () => {
+      const neighbours = vi.fn(() => []);
+      mount(makeState(), { kind: 'hub', vaultId: 'v1' }, {}, vi.fn(), stub(neighbours));
+      expect(neighbours).toHaveBeenCalledWith('n3', 5);
+    });
+
+    it('is hidden when there are no neighbours', () => {
+      mount(makeState(), { kind: 'note', vaultId: 'v1', id: 'n1' }, {}, vi.fn(), stub(() => []));
+      expect(text()).not.toContain('Related');
+      expect(host!.querySelector('.preview-related')).toBeNull();
+    });
+
+    it('skips neighbours whose note is missing', () => {
+      mount(makeState(), { kind: 'note', vaultId: 'v1', id: 'n1' }, {}, vi.fn(), stub(() => [{ id: 'gone', similarity: 0.9 }]));
+      expect(host!.querySelector('.preview-related')).toBeNull();
+    });
   });
 });

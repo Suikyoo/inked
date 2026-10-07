@@ -9,7 +9,9 @@ import type { MapSelection } from '../map/ConceptMap';
 import { useVaultGraph } from '../map/useVaultGraphs';
 import { renderMarkdown } from '../markdown/render';
 import { followNoteLink } from './NotePane';
+import { useSemantic, useSemanticStore } from '../semantic/SemanticContext';
 import { folderPath, useAppState, useStore } from '../state/StoreContext';
+import type { AppState } from '../state/store';
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 const href = (vaultId: string, noteId: string) => `/v/${vaultId}/n/${noteId}`;
@@ -44,8 +46,55 @@ function Markdown({ body, ready, vaultId }: { body: string | undefined; ready: b
   return <article className="md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+type Related = { id: string; vaultId: string; title: string; path: string; sim: string };
+
+/** Neighbours resolved to heads from every vault; missing or broken heads are skipped. */
+function relatedNotes(state: AppState, neighbours: { id: string; similarity: number }[]): Related[] {
+  const out: Related[] = [];
+  for (const { id, similarity } of neighbours) {
+    for (const [vaultId, t] of Object.entries(state.trees)) {
+      const n = t.notes[id];
+      if (!n || n.broken) continue;
+      const path = [state.vaults[vaultId]?.name ?? '', ...folderPath(t, n.folderId).map((f) => f.name)].join(' / ');
+      out.push({ id, vaultId, title: n.title, path, sim: similarity.toFixed(2).replace(/^0/, '') });
+      break;
+    }
+  }
+  return out;
+}
+
+function RelatedList({ related, onSelect }: { related: Related[]; onSelect: (s: MapSelection) => void }) {
+  if (related.length === 0) return null;
+  return (
+    <section className="preview-related" aria-label="Related notes">
+      <h3 className="results-sub">Related</h3>
+      <ul className="res-list">
+        {related.map((r) => (
+          <li key={r.id}>
+            <button type="button" className="res res-btn" onClick={() => onSelect({ kind: 'note', vaultId: r.vaultId, id: r.id })}>
+              <span className="res-title">{r.title}</span>
+              <span className="res-meta">{r.path}</span>
+              <span className="res-why" data-why="meaning" aria-label={`similarity ${r.sim}`}>
+                ◇ {r.sim}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** What the Home column shows for a node picked on the map. */
-export function NodePreview({ selection, onZoom }: { selection: MapSelection; onZoom: (s: MapSelection) => void }) {
+export function NodePreview({
+  selection,
+  onZoom,
+  onSelect,
+}: {
+  selection: MapSelection;
+  onZoom: (s: MapSelection) => void;
+  onSelect: (s: MapSelection) => void;
+}) {
   const state = useAppState();
   const store = useStore();
   const navigate = useNavigate();
@@ -58,6 +107,15 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
   const ready = !!state.bodiesReady[vaultId];
   const key = selection.kind === 'hub' ? `hub:${vaultId}` : selection.id;
   useEffect(() => setError(null), [key]);
+  const semantic = useSemanticStore();
+  const { version } = useSemantic();
+  // A note previews itself; a folder or the hub previews its Index note.
+  const relatedId = !tree ? null : selection.kind === 'note' ? selection.id : (indexNoteOf(tree, selection.kind === 'folder' ? selection.id : null)?.id ?? null);
+  const related = useMemo(
+    () => (relatedId ? relatedNotes(state, semantic.neighbours(relatedId, 5)) : []),
+    // `version` bumps whenever vectors change; neighbours() reads them from the store.
+    [relatedId, state.trees, state.vaults, semantic, version], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   if (!vault || !tree) return null;
 
   /**
@@ -111,6 +169,7 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
               </ul>
             )}
           </section>
+          <RelatedList related={related} onSelect={onSelect} />
         </div>
         <div className="preview-actions">
           <Link className="btn btn-primary btn-sm" to={href(vaultId, n.id)}>
@@ -172,6 +231,7 @@ export function NodePreview({ selection, onZoom }: { selection: MapSelection; on
             </ul>
           </section>
         )}
+        <RelatedList related={related} onSelect={onSelect} />
       </div>
       {error && (
         <p className="form-error" role="alert">

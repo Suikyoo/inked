@@ -340,7 +340,7 @@ export function HomePage() {
               {bodiesPending && q.length >= 2 && <p className="results-note">Still decrypting note text, so some matches may be missing.</p>}
             </>
           ) : column === 'preview' && selected ? (
-            <NodePreview selection={selected} onZoom={(sel) => setFitRequest((r) => ({ sel, n: (r?.n ?? 0) + 1 }))} />
+            <NodePreview selection={selected} onSelect={setSelected} onZoom={(sel) => setFitRequest((r) => ({ sel, n: (r?.n ?? 0) + 1 }))} />
           ) : (
             <div className="empty">
               <p>Select a folder or note on the map.</p>
