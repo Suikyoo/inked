@@ -58,6 +58,18 @@ describe('MCP tools', () => {
     expect(buildInstructions(TOOL_NAMES)).toMatch(/append_to_note/);
   });
 
+  it('never names a tool that is not registered, in instructions or descriptions', async () => {
+    for (const actions of [['@write'], ['note.create'], ['@organize'], ['@read'], ['note.update'], ['@read', '@write', '@organize']]) {
+      const c = await connect(actions);
+      const tools = (await c.listTools()).tools;
+      const registered = tools.map((t) => t.name);
+      const text = [c.getInstructions() ?? '', ...tools.map((t) => t.description ?? '')].join('\n');
+      for (const n of TOOL_NAMES) {
+        if (new RegExp(`\\b${n}\\b`).test(text)) expect(registered, `${actions} names ${n}`).toContain(n);
+      }
+    }
+  });
+
   it('round-trips a write and returns errors as isError results', async () => {
     const c = await connect(['@read', '@write']);
     const made = await c.callTool({ name: 'create_folder', arguments: { vault: 'Work', parent: null, name: 'Topic' } });
