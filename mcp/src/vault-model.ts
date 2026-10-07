@@ -131,6 +131,15 @@ export class VaultModel {
       }
       parent = kids[0].id;
     }
+    // A folder whose own name contains "/" can display the same path as a nested one: never pick silently.
+    const shown = parts.join('/');
+    const twins = [...snap.folders.values()].filter((f) => !f.broken && f.id !== parent && f.path === shown);
+    if (parent && twins.length > 0) {
+      throw new ToolError(
+        'ambiguous',
+        `Folder path "${ref}" is ambiguous; use an id: ${[parent, ...twins.map((f) => f.id)].join(', ')}`,
+      );
+    }
     return parent;
   }
 

@@ -80,6 +80,24 @@ describe('VaultModel', () => {
     expect(m.resolveFolder(snap, ids.slash)).toBe(ids.slash);
   });
 
+  it('refuses a path shared by a nested folder and a slash-named folder', async () => {
+    const { vaults } = await session.api.listVaults();
+    const key = await session.vaultKey(vaults.find((v) => v.id === work)!);
+    const mk = async (name: string, parentId: string | null) => {
+      const id = crypto.randomUUID();
+      await session.api.createFolder(work, { id, parentId, encMeta: await encryptFolderMeta(key, work, id, { name }) });
+      return id;
+    };
+    const x = await mk('X', null);
+    const y = await mk('Y', x);
+    const xy = await mk('X/Y', null);
+    const m = await model('*');
+    const snap = await m.snapshot(work);
+    expect(() => m.resolveFolder(snap, 'X/Y')).toThrow(new RegExp(`ambiguous.*(${y}.*${xy}|${xy}.*${y})`));
+    expect(m.resolveFolder(snap, y)).toBe(y);
+    expect(m.resolveFolder(snap, xy)).toBe(xy);
+  });
+
   it('reports ambiguous sibling names with the candidate ids', async () => {
     const m = await model('*');
     const snap = await m.snapshot(work);
