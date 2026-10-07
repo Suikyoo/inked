@@ -49,6 +49,27 @@ const SECURITY_HEADERS: Record<string, string> = {
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const isApiPath = (url: string) => /^\/api(\/|\?|$)/.test(url);
 
+/**
+ * The pathname as the router sees it: query stripped, percent-decoded, dot segments resolved and
+ * leading slashes collapsed. Checked on this rather than the raw URL so encoded or odd spellings of
+ * /models/ cannot slip past the JSON 404 and reach the SPA fallback.
+ */
+function routedPathname(url: string): string {
+  const q = url.indexOf('?');
+  let p = q < 0 ? url : url.slice(0, q);
+  try {
+    p = decodeURIComponent(p);
+  } catch {
+    // Malformed escapes: keep the raw value.
+  }
+  return path.posix.normalize(p).replace(/^\/+/, '/');
+}
+
+const isModelsPath = (url: string) => {
+  const p = routedPathname(url);
+  return p === '/models' || p.startsWith('/models/');
+};
+
 /** Error code for Fastify's own 4xx errors (body too large, bad JSON, ...). */
 function clientErrorCode(err: FastifyError, status: number): string {
   if (status === 413) return 'too_large';
@@ -175,7 +196,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   app.setNotFoundHandler((request, reply) => {
     // A missing model file is a plain 404, never the SPA shell.
-    if (request.url.startsWith('/models/')) return reply.code(404).send({ error: 'not_found' });
+    if (isModelsPath(request.url)) return reply.code(404).send({ error: 'not_found' });
     if (hasWeb && SAFE_METHODS.has(request.method) && !isApiPath(request.url)) {
       return reply.sendFile('index.html');
     }

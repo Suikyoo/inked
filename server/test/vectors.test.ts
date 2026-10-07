@@ -97,6 +97,17 @@ describe('model files', () => {
       const missing = await call(s.app, 'GET', '/models/nope.json');
       expect(missing.statusCode).toBe(404);
       expect(missing.headers['content-type']).toMatch(/json/);
+      // Spellings that normalise to /models/... must still get the JSON 404, never the SPA shell.
+      for (const url of ['/%6Dodels/nope.json', '/models', '/models/?x=1', '/models/../models/nope.json']) {
+        const r = await call(s.app, 'GET', url);
+        expect(r.statusCode, url).toBe(404);
+        expect(r.headers['content-type'], url).toMatch(/json/);
+        expect(r.body, url).not.toContain('<!doctype html>');
+      }
+      // A doubled leading slash is rejected or routed, but must never come back as the SPA HTML with 200.
+      const doubled = await call(s.app, 'GET', '//models/nope.json');
+      expect(doubled.body).not.toContain('<!doctype html>');
+      expect(doubled.statusCode === 200 && /html/.test(String(doubled.headers['content-type']))).toBe(false);
     } finally {
       await s.close();
     }
