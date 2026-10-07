@@ -12,45 +12,61 @@ export class Embedder {
   private nextId = 1;
   private crashes = 0;
   private manifest: Manifest | null = null;
+  private onProgress: (loaded: number, total: number) => void = () => {};
   private ready: Promise<void> | null = null;
+  private loadReject: ((e: Error) => void) | null = null;
   paused = false;
 
   constructor(private opts: { makeWorker?: () => Worker; onPaused?: () => void } = {}) {}
 
   load(manifest: Manifest, onProgress: (loaded: number, total: number) => void): Promise<void> {
+    this.terminate();
     this.manifest = manifest;
-    this.ready = this.start(onProgress);
+    this.onProgress = onProgress;
+    this.ready = this.start();
     return this.ready;
   }
 
-  private start(onProgress: (loaded: number, total: number) => void): Promise<void> {
+  private start(): Promise<void> {
     const w = (this.opts.makeWorker ?? defaultWorker)();
     this.worker = w;
+    let loaded = false;
     return new Promise<void>((resolve, reject) => {
+      this.loadReject = reject;
+      const fail = (message: string) => {
+        if (this.worker !== w) return;
+        if (!loaded) {
+          // A crash during the initial load rejects load(); the caller owns any retry.
+          this.loadReject = null;
+          reject(new Error(message));
+        }
+        this.onCrash(!loaded);
+      };
       w.onmessage = (e: MessageEvent<FromWorker>) => {
+        if (this.worker !== w) return;
         const m = e.data;
-        if (m.type === 'progress') onProgress(m.loaded, m.total);
-        else if (m.type === 'ready') resolve();
-        else if (m.type === 'result') {
+        if (m.type === 'progress') this.onProgress(m.loaded, m.total);
+        else if (m.type === 'ready') {
+          loaded = true;
+          this.loadReject = null;
+          resolve();
+        } else if (m.type === 'result') {
           this.pending.get(m.id)?.resolve(m.vectors);
           this.pending.delete(m.id);
         } else if (m.type === 'error') {
-          if (m.id === undefined) reject(new Error(m.message));
+          if (m.id === undefined) fail(m.message);
           else {
             this.pending.get(m.id)?.reject(new Error(m.message));
             this.pending.delete(m.id);
           }
         }
       };
-      w.onerror = () => {
-        reject(new Error('worker crashed'));
-        this.onCrash();
-      };
+      w.onerror = () => fail('worker crashed');
       w.postMessage({ type: 'load', manifest: this.manifest!, base: MODELS_BASE } satisfies ToWorker);
     });
   }
 
-  private onCrash() {
+  private onCrash(duringLoad: boolean) {
     for (const p of this.pending.values()) p.reject(new Error('worker crashed'));
     this.pending.clear();
     this.worker?.terminate();
@@ -61,7 +77,10 @@ export class Embedder {
       this.opts.onPaused?.();
       return;
     }
-    if (this.manifest) this.ready = this.start(() => {});
+    if (duringLoad || !this.manifest) return;
+    // Background restart after a crash in a working session; a failure surfaces on the next embed().
+    this.ready = this.start();
+    this.ready.catch(() => {});
   }
 
   async embed(texts: string[], kind: EmbedKind): Promise<Float32Array[]> {
@@ -79,10 +98,14 @@ export class Embedder {
   }
 
   terminate() {
-    for (const p of this.pending.values()) p.reject(new Error('embedder stopped'));
+    const stopped = new Error('embedder stopped');
+    this.loadReject?.(stopped);
+    this.loadReject = null;
+    for (const p of this.pending.values()) p.reject(stopped);
     this.pending.clear();
     this.worker?.terminate();
     this.worker = null;
-    this.ready = null;
+    this.ready = Promise.reject(stopped);
+    this.ready.catch(() => {});
   }
 }

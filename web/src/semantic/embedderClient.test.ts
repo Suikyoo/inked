@@ -29,6 +29,12 @@ class FakeWorker {
     this.terminated = true;
   }
 }
+/** Never answers, so a load stays in flight. */
+class SilentWorker extends FakeWorker {
+  postMessage(m: ToWorker) {
+    this.sent.push(m);
+  }
+}
 const manifest = { model: 'm', id: 'm@1', revision: '1', modelPath: '1/', ortPath: 'o/', files: [] };
 
 describe('Embedder', () => {
@@ -65,5 +71,34 @@ describe('Embedder', () => {
     e.terminate();
     expect(w.terminated).toBe(true);
     await expect(p).rejects.toThrow();
+  });
+  it('terminate during load rejects load(), a waiting embed() and later embed() calls', async () => {
+    const w = new SilentWorker();
+    const e = new Embedder({ makeWorker: () => w as unknown as Worker });
+    const loading = e.load(manifest, () => {});
+    const waiting = e.embed(['x'], 'query');
+    e.terminate();
+    await expect(loading).rejects.toThrow(/stopped/);
+    await expect(waiting).rejects.toThrow(/stopped/);
+    expect(w.terminated).toBe(true);
+    await expect(e.embed(['x'], 'query')).rejects.toThrow(/stopped/);
+  });
+  it('a crash during load rejects load() and starts no second worker', async () => {
+    const workers: SilentWorker[] = [];
+    const e = new Embedder({ makeWorker: () => (workers.push(new SilentWorker()), workers.at(-1) as unknown as Worker) });
+    const loading = e.load(manifest, () => {});
+    workers[0].crash();
+    await expect(loading).rejects.toThrow(/crashed/);
+    expect(workers).toHaveLength(1);
+    expect(workers[0].terminated).toBe(true);
+  });
+  it('load() twice terminates the first worker', async () => {
+    const workers: FakeWorker[] = [];
+    const e = new Embedder({ makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1) as unknown as Worker) });
+    await e.load(manifest, () => {});
+    await e.load(manifest, () => {});
+    expect(workers[0].terminated).toBe(true);
+    expect(workers[1].terminated).toBe(false);
+    await expect(e.embed(['x'], 'query')).resolves.toHaveLength(1);
   });
 });
