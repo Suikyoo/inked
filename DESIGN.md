@@ -134,7 +134,7 @@ components:
   button-default-hover:
     backgroundColor: "{colors.panel-3}"
   button-danger:
-    backgroundColor: "#8f3348"
+    backgroundColor: "{colors.danger}"
     textColor: "#ffffff"
     rounded: "{rounded.md}"
     height: "30px"
@@ -306,7 +306,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - Card: `panel`, 1px `side-border`, 10px radius, 18px padding, 12px internal gap. Banner / notice: `panel-2`, 8px or 6px radius, 12.5px text. Alert: `error-bg` with `error-text`, no border. Sync bar: 32px, `sync-bg` (#2b2029) with `error-text`.
 
 ### Concept map (signature)
-A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Folder structure draws as pencil lines, explicit links as dashed pencil, ink strokes as tapered paths. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. A slip card (220px, `panel-2`) shows title (2-line clamp), path, meta, and "Open note". A legend row beneath (11px `muted-3`) names the four recency steps. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. These 10px labels are the one exception to the 11px type floor: the panel is only 220px wide and the map carries up to 12 rows, so 11px would collide.
+A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Folder structure draws as pencil lines, explicit links as dashed pencil, ink strokes as tapered paths. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. A slip card (220px, `panel-2`) shows title (2-line clamp), path, meta, and "Open note". A legend row beneath (11px `muted-3`) names the four recency steps. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
 
 ## Do's and Don'ts
 
@@ -327,4 +327,4 @@ A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px
 - **Don't** encode map recency with anything but the wet-to-dry lightness ramp, or add ramp steps without checking them against `canvas`.
 - **Don't** add a light theme without redoing the tokens; the system is dark only.
 
-<!-- Design debt cleared in the 2026-10-07 cleanup round: the off-token hex literals (sync bar, danger, auth lead, menu hover, scrollbar thumb, code text) are now tokens in tokens.css, the dashed missing-link border uses map-pencil, and the local-map caption is 10px sentence case. The 9-10px local-map text remains the one deliberate exception to the 11px floor (220px panel, 12 rows). -->
+<!-- Design debt cleared in the 2026-10-07 cleanup round: the off-token hex literals (sync bar, danger, auth lead, menu hover, scrollbar thumb, code text) are now tokens in tokens.css, the dashed missing-link border uses map-pencil, and the local-map caption is 10px sentence case. The sub-11px text (map labels 10.5px, local-map labels 10px, its overflow count 9px, kbd 10.5px) is the deliberate exception to the 11px floor. -->
