@@ -637,3 +637,69 @@ describe('link density cues', () => {
     expect(node('x').classList.contains('is-orphan')).toBe(false);
   });
 });
+
+describe('lit state', () => {
+  const t = () =>
+    tree(
+      [folder('f1', null, 'Ops'), folder('f2', null, 'Misc')],
+      [note('a', 'f1', 'Alpha'), note('b', 'f1', 'Beta'), note('c', 'f2', 'Gamma'), note('d', null, 'Delta')],
+    );
+  const linked = () => entry(t(), 'v1', true, { a: '[[Beta]]' });
+  const hoverDot = (id: string) => {
+    fire(node(id), new MouseEvent('pointerover', { bubbles: true }));
+    act(() => void vi.advanceTimersByTime(40));
+  };
+  const dimmed = () => nodes().filter((n) => n.classList.contains('is-dim')).map((n) => n.dataset.note).sort();
+  const noMotion = () => {
+    window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  };
+  afterEach(() => {
+    delete (window as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it('dims unrelated dots on hover and flows one dash per link into the focus', () => {
+    render({ entries: [linked()] });
+    expect(dimmed()).toEqual([]);
+    hoverDot('a');
+    expect(dimmed()).toEqual(['c', 'd']);
+    expect(host!.querySelectorAll('.cmap-alink')).toHaveLength(1);
+    expect(host!.querySelector('.cmap-links')!.classList.contains('is-dim-links')).toBe(true);
+    expect(folderNode('f2').classList.contains('is-dim-soft')).toBe(true);
+    expect(folderNode('f1').classList.contains('is-dim-soft')).toBe(false);
+  });
+
+  it('does not dim on hover while searching', () => {
+    render({ entries: [linked()], hits: new Set(['c']) });
+    hoverDot('a');
+    expect(dimmed()).toEqual([]);
+    expect(host!.querySelectorAll('.cmap-alink')).toHaveLength(0);
+  });
+
+  it('applies hover once per frame and cancels a pending frame on unmount', () => {
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame');
+    render({ entries: [linked()] });
+    fire(node('a'), new MouseEvent('pointerover', { bubbles: true }));
+    expect(dimmed()).toEqual([]);
+    act(() => void root!.unmount());
+    root = null;
+    expect(cancel).toHaveBeenCalled();
+    cancel.mockRestore();
+  });
+
+  it('draws a ring when a note is selected and removes it on animationend', () => {
+    noMotion();
+    render({ entries: [linked()] });
+    expect(host!.querySelector('.cmap-ring')).toBeNull();
+    click(node('b'));
+    expect(node('b').querySelector('.cmap-ring')).not.toBeNull();
+    fire(node('b').querySelector('.cmap-ring')!, new Event('animationend', { bubbles: true }));
+    expect(host!.querySelector('.cmap-ring')).toBeNull();
+  });
+
+  it('draws no ring under reduced motion', () => {
+    window.matchMedia = vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    render({ entries: [linked()] });
+    click(node('b'));
+    expect(host!.querySelector('.cmap-ring')).toBeNull();
+  });
+});
