@@ -151,7 +151,7 @@ describe('expanding opens the Index', () => {
 describe('nested collapse', () => {
   it('a closed ancestor wraps an open descendant; only closed wrappers set visibility', async () => {
     const fs = await import('node:fs');
-    const css = fs.readFileSync(new URL('../styles/shell.css', import.meta.url), 'utf8');
+    const css = fs.readFileSync('src/styles/shell.css', 'utf8');
     const open = css.match(/.tree-collapse[data-open='true']s*{[^}]*}/)![0];
     expect(open).not.toMatch(/visibility/);
     expect(css.match(/.tree-collapse[data-open='false']s*{[^}]*}/)![0]).toMatch(/visibility:s*hidden/);
