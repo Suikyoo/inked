@@ -190,7 +190,7 @@ Inked is a notebook written in ink on dark violet-black paper. Everything quiet 
 
 The density is that of a desk tool used daily: a 13px base, 28px rows, 30px controls, a 240px sidebar, and a 700px reading column. Chrome recedes into tonal steps of the same violet; hierarchy comes from text tone (strong, body, muted) and an italic serif voice reserved for names (the wordmark, vault names, vault titles, map hub labels). It is dark only; there is no light theme.
 
-The map is a drawn diagram, not a data-viz widget. Structure is pencil (thin gray-violet quill curves), explicit links are dashed pencil, and recency is ink.
+The map is a drawn diagram, not a data-viz widget. Structure is pencil (thin gray-violet quill curves), explicit links are dotted pencil, and recency is ink.
 
 **Key Characteristics:**
 - Dark only, tonal layering of violet-black surfaces; no light mode.
@@ -219,7 +219,7 @@ A restrained violet-tinted dark palette with one ink accent and quiet, desaturat
 - **Error** (#f2a7b4 text; #241d2a surface; #e9c9cf body text) is a soft rose, never saturated red, except the destructive button fill (#8f3348). **OK** (#8fd1b5) and **Warn** (#d19c3c) are used sparingly.
 
 ### Concept map ramp
-An ordinal one-hue ramp from wet to dry ink, by age of last edit: **Wet** (`ink-wet`, #b69cff, under 1 day), **Fresh** (`ink-fresh`, #9d7cf2, under 7 days), **Drying** (`ink-drying`, #6b5a9e, under 30 days), **Dry** (`ink-dry`, #524b6e, older). Wet and Fresh add a soft glow (38% and 22% opacity). **Pencil** (`map-pencil`, #4a4659) draws folder structure; explicit links are the same pencil, dashed 3-3; **Map Ink** (#9d7cf2) draws tapered ink strokes; selection is `text-strong` (#ede9ff) at 1.5px. Vault colors are user-chosen data (swatches in settings), not palette tokens.
+An ordinal one-hue ramp from wet to dry ink, by age of last edit: **Wet** (`ink-wet`, #b69cff, under 1 day), **Fresh** (`ink-fresh`, #9d7cf2, under 7 days), **Drying** (`ink-drying`, #6b5a9e, under 30 days), **Dry** (`ink-dry`, #524b6e, older). Wet and Fresh add a soft glow (38% and 22% opacity). **Pencil** (`map-pencil`, #4a4659) draws folder structure; explicit links are the same pencil, dotted 2-4 with round caps; **Map Ink** (#9d7cf2) draws tapered ink strokes; selection is `text-strong` (#ede9ff) at 1.5px. Vault colors are user-chosen data (swatches in settings), not palette tokens.
 
 ### Named Rules
 **The One Ink Rule.** Purple is the only chromatic voice. Status colors are muted and appear only when something is wrong or done; do not introduce a second accent hue.
@@ -267,11 +267,10 @@ Tonal layering, not shadows. Depth is conveyed by stepping from ground to panel 
 - **Menu** (`box-shadow: 0 12px 28px -12px rgba(0,0,0,.75)`): context menus.
 - **Dialog** (`0 24px 48px -16px rgba(0,0,0,.8)`) over a `rgba(10,9,14,.62)` backdrop.
 - **Drawer** (`16px 0 40px -20px rgba(0,0,0,.8)`) and scrim `rgba(10,9,14,.55)`.
-- **Map slip** (`0 6px 18px rgba(0,0,0,.35)`): the popover card on a selected map node.
 - **Focus** (`0 0 0 1px ink-light, 0 0 0 3px rgba(182,156,255,.18)`) on field wrappers.
 
 ### Named Rules
-**The Flat-Until-Floating Rule.** Cards, panels, and rows have no shadow. Only menus, dialogs, the drawer, and the map slip lift, with large soft negative-spread shadows, never offset hard shadows.
+**The Flat-Until-Floating Rule.** Cards, panels, and rows have no shadow. Only menus, dialogs and the drawer lift, with large soft negative-spread shadows, never offset hard shadows.
 
 ## Shapes
 
@@ -298,7 +297,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - 36px, 8px radius, `panel` fill, a leading icon, and a trailing `kbd` hint hidden on focus. Results are 6px 8px rows with title (13px), meta (11.5px `muted-2`) and a 2-line snippet (12px `muted`), with matches highlighted by `mark`.
 
 ### Segmented control
-- 2px inset on `panel` with a 1px `line` border; 24px options; the pressed option has white text over an ink thumb that slides between the options over `--dur-2` (the control carries `data-mode`). Used for edit / view; the article and textarea crossfade over 120ms.
+- 2px inset on `panel` with a 1px `line` border; 24px options; the pressed option has white text over an ink thumb that slides between the options over `--dur-2` (the control carries `data-mode`). Used for edit / view; the article or textarea fades in over 120ms.
 
 ### Menus and dialogs
 - Menu: 188px wide, `panel-3`, 1px `border-2`, 8px radius, 30px items, danger items in error rose. Dialog: native `<dialog>`, 400px max, `panel-2`, 10px radius, 18px padding, title 15px/600, right-aligned actions, 8px gap.
@@ -307,7 +306,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - Card: `panel`, 1px `side-border`, 10px radius, 18px padding, 12px internal gap. Banner / notice: `panel-2`, 8px or 6px radius, 12.5px text. Alert: `error-bg` with `error-text`, no border. Sync bar: 32px, `sync-bg` (#2b2029) with `error-text`.
 
 ### Concept map (signature)
-A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px round markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Folders are rounded squares (`panel-3` fill, `muted-3` stroke) with an 11px hit target; on an inked path a folder turns into a diamond as the ink arrives. Every folder's `Index` note has no dot of its own: a hit on it inks the path to its folder (the diamond), and a vault's root Index lights the hub, which stands for it. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Edges are quill curves, not straight lines: folder structure draws as pencil curves (1.5px hub to top folder, 1.1px folder to subfolder, 0.8px to a note), explicit links as dashed pencil curves bowed more than the hierarchy so the two read apart, and ink strokes as the same curves joined end to end. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. There is no slip card and no legend: selecting a node shows it in the Home preview panel beside the map, which replaces "Recently edited" and holds the node's rendered Index or note, its notes, backlinks, "Open note" / "Open Index", and "Add description" where a folder or vault has no Index. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
+A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px round markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Folders are rounded squares (`panel-3` fill, `muted-3` stroke, about 9.5px) inside a 22px hit target (r=11); on an inked path a folder turns into a diamond as the ink arrives. Every folder's `Index` note has no dot of its own: a hit on it inks the path to its folder (the diamond), and a vault's root Index lights the hub, which stands for it. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Edges are quill curves, not straight lines: folder structure draws as pencil curves (1.5px hub to top folder, 1.1px folder to subfolder, 0.8px to a note), explicit links as dotted pencil curves (`2 4`, round caps) bowed more than the hierarchy so the two read apart, and ink strokes as the same curves joined end to end. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. There is no slip card and no legend: selecting a node shows it in the Home preview panel beside the map, which replaces "Recently edited" and holds the node's rendered Index or note, its notes, backlinks, "Open note" / "Open Index", and "Add description" where a folder or vault has no Index. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
 
 ## Motion
 
@@ -320,15 +319,15 @@ Motion is quiet and tied to the ink metaphor: it confirms a change of state and 
 ### Rules
 - **Route change:** content fades in and rises 2px over `--dur-2`. Enter only; leaving never waits. The same fade plays when the app shell first mounts after unlock, which is also the fallback when View Transitions are unavailable.
 - **Sidebar tree:** folders expand and collapse over `--dur-2` and the chevron rotates.
-- **Edit / view:** the segmented thumb slides over `--dur-2`; the article and textarea crossfade over 120ms.
-- **Save status:** the text crossfades; "Saved" fades in, then dims.
+- **Edit / view:** the segmented thumb slides over `--dur-2`; the article or textarea fades in over 120ms.
+- **Save status:** the new text fades in; "Saved" fades in, then dims slightly.
 - **Hover and press:** color changes over `--dur-1`; buttons scale to 0.98 while pressed.
 - **Banners and notices:** collapse in and out, holding their last content while they close.
 - **Map:** edges write on once per session, ink draws along a path over `--dur-ink`, and a note that was just edited gives a brief drying pulse.
-- Animate only opacity and transform (plus color on hover); never width, height or position.
+- Animate opacity and transform, and color on hover. The exceptions are `clip-path` (the unlock wipe), SVG `stroke-dashoffset` (map ink and write-on) and `grid-template-rows` (tree collapse, banners). Never width, height or position.
 
 ### Reduced motion
-Under `prefers-reduced-motion: reduce`, every animation runs for 1ms with no delay and transitions are limited to opacity, color, background-color and border-color at 120ms. The only loop kept is the spinner's gentle opacity pulse. Nothing is conveyed by movement alone.
+Under `prefers-reduced-motion: reduce`, every animation runs for 1ms with no delay and transitions are limited to opacity, color, background-color and border-color at 120ms. The loops kept are the spinner's gentle opacity pulse and the `.ink-fill` pulse. Nothing is conveyed by movement alone.
 
 ## Do's and Don'ts
 
@@ -344,7 +343,7 @@ Under `prefers-reduced-motion: reduce`, every animation runs for 1ms with no del
 ### Don't:
 - **Don't** add a second accent hue or use saturated red for errors; use the rose ramp.
 - **Don't** use pure black, pure gray, or any neutral without the violet tint.
-- **Don't** lift cards or rows with shadows; only floating layers (menu, dialog, drawer, map slip) get one, soft and negative-spread.
+- **Don't** lift cards or rows with shadows; only floating layers (menu, dialog, drawer) get one, soft and negative-spread.
 - **Don't** use the serif italic for sentences, buttons, or headings.
 - **Don't** encode map recency with anything but the wet-to-dry lightness ramp, or add ramp steps without checking them against `canvas`.
 - **Don't** add a light theme without redoing the tokens; the system is dark only.

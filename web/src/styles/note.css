@@ -88,17 +88,17 @@ a.crumb:hover {
 }
 .save-text {
   display: inline-block;
-  animation: fade-in var(--dur-2) var(--ease-out) both;
+  animation: fade-in var(--dur-2) var(--ease-out) backwards;
 }
 /* "Saved" arrives, then settles to a dimmer tone. */
 .save-status[data-save='saved'] .save-text {
   animation:
-    fade-in var(--dur-2) var(--ease-out) both,
+    fade-in var(--dur-2) var(--ease-out) backwards,
     save-dim var(--dur-4) var(--ease-std) 1.2s forwards;
 }
 @keyframes save-dim {
   to {
-    opacity: 0.6;
+    opacity: 0.8;
   }
 }
 @keyframes fade-in {
@@ -113,7 +113,8 @@ a.crumb:hover {
 
 .segmented {
   position: relative;
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
   padding: 2px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -136,7 +137,6 @@ a.crumb:hover {
 }
 .segmented button {
   position: relative;
-  flex: 1 1 0;
   height: 24px;
   padding: 0 10px;
   border: 0;
@@ -213,8 +213,8 @@ a.crumb:hover {
 }
 /* Switching mode remounts the article or textarea; the new one fades in over 120ms. */
 .editor,
-.md {
-  animation: fade-in 120ms var(--ease-out) both;
+.doc .md {
+  animation: fade-in 120ms var(--ease-out) backwards;
 }
 
 /* ---- Context panel --------------------------------------------------------------------- */

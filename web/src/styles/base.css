@@ -591,6 +591,10 @@ select.input-sm {
     transition-property: opacity, color, background-color, border-color !important;
     transition-duration: 120ms !important;
   }
+  .btn:active:not(:disabled),
+  .ibtn:active:not(:disabled) {
+    transform: none;
+  }
   /* The one allowed loop: a gentle opacity pulse instead of rotation. */
   .spinner {
     animation: pulse 1.6s ease-in-out infinite !important;
