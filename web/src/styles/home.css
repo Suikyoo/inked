@@ -180,7 +180,4 @@
   .map {
     order: 2;
   }
-  .map .cmap {
-    aspect-ratio: 100 / 40;
-  }
 }

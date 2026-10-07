@@ -52,12 +52,19 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
   const dotById = useMemo(() => new Map(scene.dots.map((d) => [d.id, d])), [scene]);
   const sel = selected && dotById.has(selected) ? selected : null;
 
+  // The svg is absolutely positioned, so the frame alone decides the size: measure it now, then follow it.
   useLayoutEffect(() => {
     const el = frameRef.current;
-    if (!el || typeof ResizeObserver !== 'function') return;
+    if (!el) return;
+    const apply = (w: number, h: number) => {
+      if (w > 0 && h > 0) setSize((s) => (s.w === w && s.h === h ? s : { w, h }));
+    };
+    const box = el.getBoundingClientRect();
+    apply(box.width - 2 * el.clientLeft, box.height - 2 * el.clientTop);
+    if (typeof ResizeObserver !== 'function') return;
     const ro = new ResizeObserver((items) => {
       const r = items[0]?.contentRect;
-      if (r && r.width > 0 && r.height > 0) setSize({ w: r.width, h: r.height });
+      if (r) apply(r.width, r.height);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -108,6 +115,14 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
   const onPointerMove = (e: PointerEvent<SVGSVGElement>) => {
     const prev = pointers.current.get(e.pointerId);
     if (!prev) return;
+    if (e.pointerType === 'mouse' && e.buttons === 0) {
+      // The button was released off the map before a drag began; no pointerup reached us.
+      pointers.current.delete(e.pointerId);
+      if (pointers.current.size < 2) pinch.current = null;
+      drag.current = null;
+      setDragging(false);
+      return;
+    }
     const p = local(e);
     pointers.current.set(e.pointerId, p);
     if (pointers.current.size >= 2) {
@@ -184,11 +199,13 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
   const focusDot = (id: string) => {
     setFocusId(id);
     revealDot(id);
-    dotRefs.current.get(id)?.focus();
+    dotRefs.current.get(id)?.focus({ preventScroll: true });
   };
 
   const onKeyDown = (e: KeyboardEvent<SVGSVGElement>) => {
     const dir = arrowDir(e.key);
+    // Ctrl/Meta/Alt with + - 0 is browser zoom; leave it alone.
+    const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (dir) {
       e.preventDefault();
       const from = shown.find((s) => s.dot.id === rovingId);
@@ -199,13 +216,13 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
         dir,
       );
       if (next) focusDot(next);
-    } else if (e.key === '+' || e.key === '=') {
+    } else if (plain && (e.key === '+' || e.key === '=')) {
       e.preventDefault();
       zoomBy(STEP);
-    } else if (e.key === '-') {
+    } else if (plain && e.key === '-') {
       e.preventDefault();
       zoomBy(1 / STEP);
-    } else if (e.key === '0') {
+    } else if (plain && e.key === '0') {
       e.preventDefault();
       fitAll();
     } else if (e.key === 'Escape' && sel) {
@@ -282,7 +299,7 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
             <path key={id} d={taperPath(scene.chains[id].map((p) => toScreen(view, p)))} />
           ))}
         </g>
-        <g className="cmap-folders">
+        <g className="cmap-folders" aria-hidden="true">
           {scene.folders.map((f) => {
             const s = toScreen(view, f);
             return (
@@ -302,11 +319,11 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
                 <g transform="translate(-7 -7)">
                   <VaultIcon color={e.vault.color} level={e.level} size={14} />
                 </g>
-                <text className="cmap-hub-name" x={11} y={4.5}>
+                <text className="cmap-hub-name" x={0} y={-12} textAnchor="middle">
                   {e.vault.name}
                 </text>
                 {e.status === 'error' && (
-                  <text className="cmap-hub-note" x={11} y={19}>
+                  <text className="cmap-hub-note" x={0} y={20} textAnchor="middle">
                     Couldn’t load
                   </text>
                 )}
@@ -377,6 +394,13 @@ export function ConceptMap({ entries, hits, hot, loading, now = Date.now() }: Co
 
       {selDot && selAt && <MapSlip dot={selDot} x={selAt.x} y={selAt.y} frame={size} href={noteHref(selDot.vaultId, selDot.id)} now={now} />}
       {loading && scene.dots.length === 0 && <p className="cmap-msg">Decrypting your notes…</p>}
+      {entries
+        .filter((e) => e.status === 'error')
+        .map((e) => (
+          <p key={e.vaultId} className="sr-only">
+            {e.vault.name}: couldn’t load
+          </p>
+        ))}
       <p id={`${uid}-help`} className="sr-only">
         Arrow keys move between notes. Enter opens a note. Plus and minus zoom, 0 fits the map, Escape clears the selection.
       </p>

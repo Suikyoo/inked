@@ -162,6 +162,62 @@ describe('ConceptMap', () => {
     expect(nodes().filter((n) => n.getAttribute('tabindex') === '0').map((n) => n.dataset.note)).toEqual(['n3']);
   });
 
+  it('zoom keys with Ctrl, Meta or Alt held pass through to the browser (F2)', () => {
+    render({ entries: [entry(base())] });
+    const before = node('n1').getAttribute('transform');
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey'] as const) {
+      for (const k of ['-', '+', '=', '0']) {
+        const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, [mod]: true });
+        fire(node('n1'), ev);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(node('n1').getAttribute('transform')).toBe(before);
+      }
+    }
+    const plain = new KeyboardEvent('keydown', { key: '-', bubbles: true, cancelable: true });
+    fire(node('n1'), plain);
+    expect(plain.defaultPrevented).toBe(true);
+    expect(node('n1').getAttribute('transform')).not.toBe(before);
+  });
+
+  it('a mouse press released outside the map does not leave the pan armed (F4)', () => {
+    render({ entries: [entry(base())] });
+    const before = translate(node('n1'))!;
+    const mouse = (type: string, x: number, y: number, buttons: number) => {
+      const ev = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, buttons });
+      Object.defineProperty(ev, 'pointerType', { value: 'mouse' });
+      Object.defineProperty(ev, 'pointerId', { value: 1 });
+      fire(svg(), ev);
+    };
+    mouse('pointerdown', 100, 100, 1);
+    mouse('pointermove', 102, 100, 1); // below the drag threshold; the button is then released off the map
+    mouse('pointermove', 160, 140, 0); // back over the map with no button held
+    mouse('pointermove', 220, 180, 0);
+    expect(translate(node('n1'))).toEqual(before);
+  });
+
+  it('sizes the svg to the frame measured on mount (V1)', () => {
+    const real = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      return this.classList.contains('cmap') ? new DOMRect(0, 0, 1000, 500) : real.call(this);
+    };
+    try {
+      render({ entries: [entry(base())] });
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = real;
+    }
+    expect(svg().getAttribute('viewBox')).toBe('0 0 1000 500');
+    expect(svg().getAttribute('width')).toBe('1000');
+    expect(svg().getAttribute('height')).toBe('500');
+  });
+
+  it('tells screen readers which vaults failed to load, outside the svg (F7)', () => {
+    render({ entries: [entry(base()), entry(tree([], [], 'error'), 'v2')] });
+    const status = [...host!.querySelectorAll('.cmap > p.sr-only')].map((p) => p.textContent);
+    expect(status).toContain('Vault v2: couldn’t load');
+    expect(status).not.toContain('Vault v1: couldn’t load');
+    expect(host!.querySelector('g.cmap-folders')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('focusing a dot that is off screen pans it into view', () => {
     render({ entries: [entry(base())] });
     pointer('pointerdown', 100, 100);

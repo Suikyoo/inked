@@ -167,7 +167,7 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} />
+            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending && state.vaultsStatus !== 'error'} />
             <MapLegend linksPending={mapEntries.some((e) => !e.graph.linksReady)} />
           </section>
         )}
