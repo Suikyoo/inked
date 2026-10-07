@@ -14,6 +14,7 @@ import { folderRoutes } from './routes/folders.js';
 import { inviteRoutes } from './routes/invites.js';
 import { noteRoutes } from './routes/notes.js';
 import { vaultRoutes } from './routes/vaults.js';
+import { vectorRoutes } from './routes/vectors.js';
 import { BODY_LIMIT } from './schemas.js';
 
 export interface AppOptions {
@@ -155,6 +156,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   vaultRoutes(app, ctx);
   folderRoutes(app, ctx);
   noteRoutes(app, ctx);
+  vectorRoutes(app, ctx);
 
   // The SPA is optional: without a built web/dist the server is API-only.
   const hasWeb = existsSync(path.join(opts.webDist, 'index.html'));
@@ -162,14 +164,18 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     await app.register(fastifyStatic, {
       root: opts.webDist,
       setHeaders(reply, filePath) {
-        // Vite emits content-hashed files under assets/; everything else must revalidate.
+        // Vite emits content-hashed files under assets/, and model files are immutable too. The models
+        // manifest names them, so it must revalidate, as must everything else.
         const hashed = filePath.includes(`${path.sep}assets${path.sep}`);
-        reply.header('cache-control', hashed ? 'public, max-age=31536000, immutable' : 'no-cache');
+        const model = filePath.includes(`${path.sep}models${path.sep}`) && path.basename(filePath) !== 'manifest.json';
+        reply.header('cache-control', hashed || model ? 'public, max-age=31536000, immutable' : 'no-cache');
       },
     });
   }
 
   app.setNotFoundHandler((request, reply) => {
+    // A missing model file is a plain 404, never the SPA shell.
+    if (request.url.startsWith('/models/')) return reply.code(404).send({ error: 'not_found' });
     if (hasWeb && SAFE_METHODS.has(request.method) && !isApiPath(request.url)) {
       return reply.sendFile('index.html');
     }

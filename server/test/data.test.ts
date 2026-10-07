@@ -343,6 +343,8 @@ describe('X-Inked-User binds a data request to the expected account', () => {
       await claiming(bob, alice.userId).put(`/api/notes/${note.id}`, { encBody: fakeCipher() }),
       // Checked before validation too.
       await wrong.get('/api/vaults/not-a-uuid/tree'),
+      await wrong.get(`/api/vaults/${vault.id}/vectors`),
+      await wrong.put(`/api/notes/${note.id}/vector`, { model: 'm', encVec: fakeCipher(), sourceUpdatedAt: note.updatedAt }),
     ];
     for (const r of responses) {
       expect([r.statusCode, r.json()]).toEqual([409, { error: 'user_mismatch' }]);

@@ -17,6 +17,11 @@ export const encMeta = ciphertext(ENC_META_MAX);
 export const encBody = ciphertext(ENC_BODY_MAX);
 export const wrappedKey = ciphertext(1024);
 
+/** 1 + 16×384 int8 plaintext, plus IV and tag, base64url: about 8.3k chars. */
+export const ENC_VEC_MAX = 9 * 1024;
+export const encVec = ciphertext(ENC_VEC_MAX);
+export const modelName = { type: 'string', pattern: '^[A-Za-z0-9._@/-]{1,80}$' } as const;
+
 /** base64url of 32 bytes (authKey, recoveryAuth); trailing padding tolerated. */
 export const key32 = { type: 'string', pattern: '^[A-Za-z0-9_-]{43}=?$' } as const;
 

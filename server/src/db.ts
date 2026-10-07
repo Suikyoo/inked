@@ -70,6 +70,16 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS notes_vault ON notes(vault_id, updated_at);
 CREATE INDEX IF NOT EXISTS notes_folder ON notes(folder_id);
+
+CREATE TABLE IF NOT EXISTS note_vectors (
+  note_id           TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
+  vault_id          TEXT NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
+  model             TEXT NOT NULL,
+  enc_vec           TEXT NOT NULL,
+  source_updated_at TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS note_vectors_vault ON note_vectors(vault_id);
 `;
 
 export function openDb(file: string): Db {
@@ -147,5 +157,14 @@ export interface NoteRow {
   enc_body: string;
   size: number;
   created_at: string;
+  updated_at: string;
+}
+
+export interface NoteVectorRow {
+  note_id: string;
+  vault_id: string;
+  model: string;
+  enc_vec: string;
+  source_updated_at: string;
   updated_at: string;
 }
