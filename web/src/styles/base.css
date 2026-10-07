@@ -151,9 +151,9 @@ kbd {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color var(--dur-2),
-    border-color var(--dur-2),
-    color var(--dur-2);
+    background-color var(--dur-1),
+    border-color var(--dur-1),
+    color var(--dur-1);
 }
 .btn:hover:not(:disabled) {
   background: var(--panel-3);
@@ -528,6 +528,7 @@ select.input-sm {
   *::before,
   *::after {
     animation-duration: 1ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-property: opacity, color, background-color, border-color !important;
     transition-duration: 120ms !important;

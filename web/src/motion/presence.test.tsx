@@ -33,7 +33,9 @@ describe('usePresence', () => {
   it('mounts as enter, then open on the next tick', () => {
     render(true);
     expect(el()?.getAttribute('data-state')).toBe('enter');
-    tick(50);
+    tick(10);
+    expect(el()?.getAttribute('data-state')).toBe('enter');
+    tick(40);
     expect(el()?.getAttribute('data-state')).toBe('open');
   });
 
@@ -48,6 +50,18 @@ describe('usePresence', () => {
     render(false);
     expect(el()?.getAttribute('data-state')).toBe('exit');
     act(() => void el()!.dispatchEvent(new Event('animationend')));
+    expect(el()).toBeNull();
+  });
+
+  it('ignores bubbling end events from a child', () => {
+    render(true);
+    tick(50);
+    render(false);
+    const kid = host.querySelector('[data-testid=el]')!.appendChild(document.createElement('span'));
+    act(() => void kid.dispatchEvent(new Event('animationend', { bubbles: true })));
+    act(() => void kid.dispatchEvent(new Event('transitionend', { bubbles: true })));
+    expect(el()).not.toBeNull();
+    tick(150);
     expect(el()).toBeNull();
   });
 

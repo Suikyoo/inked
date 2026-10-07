@@ -23,8 +23,15 @@ export function usePresence(open: boolean, exitMs: number): { mounted: boolean; 
       if (phaseRef.current === 'closed') setPhase('enter');
       const settle = () => setPhase('open');
       if (typeof requestAnimationFrame === 'function') {
-        const id = requestAnimationFrame(settle);
-        return () => cancelAnimationFrame(id);
+        // Double rAF so the [data-state=enter] styles resolve before the transition starts.
+        let inner = 0;
+        const outer = requestAnimationFrame(() => {
+          inner = requestAnimationFrame(settle);
+        });
+        return () => {
+          cancelAnimationFrame(outer);
+          cancelAnimationFrame(inner);
+        };
       }
       const id = setTimeout(settle, 0);
       return () => clearTimeout(id);
@@ -34,13 +41,17 @@ export function usePresence(open: boolean, exitMs: number): { mounted: boolean; 
     setPhase('exit');
     const el = elRef.current;
     const done = () => setPhase('closed');
-    el?.addEventListener('animationend', done, { once: true });
-    el?.addEventListener('transitionend', done, { once: true });
+    // animationend/transitionend bubble: only the root's own events count.
+    const onEnd = (e: Event) => {
+      if (e.target === el) done();
+    };
+    el?.addEventListener('animationend', onEnd);
+    el?.addEventListener('transitionend', onEnd);
     const id = setTimeout(done, exitMs + 50);
     return () => {
       clearTimeout(id);
-      el?.removeEventListener('animationend', done);
-      el?.removeEventListener('transitionend', done);
+      el?.removeEventListener('animationend', onEnd);
+      el?.removeEventListener('transitionend', onEnd);
     };
   }, [open, exitMs]);
 
