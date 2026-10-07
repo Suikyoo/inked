@@ -102,7 +102,8 @@ Note on check 4: with the local override, the host's request reaches nginx from 
 
 ```yaml
 # Inked behind nginx on the external cloudflared-net network. No host ports are published.
-# Deploy guide: docs/deploy.md. Local testing: docker compose -f compose.yaml -f compose.local.yaml up -d --build
+# Deploy guide: docs/deploy.md.
+# Local testing ONLY (never on the production host): d=$(mktemp -d); sudo chown 1000:1000 "$d"; INKED_DATA_DIR=$d docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
 services:
   inked:
     build: .
@@ -171,7 +172,7 @@ services:
 
 ```
 docker network create cloudflared-net   # once
-docker compose -f compose.yaml -f compose.local.yaml up -d --build
+docker compose -p inked-test -f compose.yaml -f compose.local.yaml up -d --build
 bash deploy/smoke-test.sh
 ```
 
