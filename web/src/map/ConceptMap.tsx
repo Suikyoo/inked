@@ -6,7 +6,7 @@ import { relativeTime } from '../lib/util';
 import { prefersReducedMotion, usePresence } from '../motion';
 import { litSet, mapFocus } from './lit';
 import { inkTier } from './recency';
-import { arrowDir, buildScene, chainPath, curvePath, densityClass, edgeWidth, HIERARCHY_BEND, linkPath, nearestInDirection, selRingRadius } from './scene';
+import { arrowDir, buildScene, chainPath, curvePath, densityClass, edgeWidth, HIERARCHY_BEND, linkPath, nearestInDirection, selRingRadius, THREAD_BEND } from './scene';
 import { fit, panBy, toScreen, useViewport, zoomAt, type Bounds, type Size } from './useViewport';
 import type { MapEntry } from './useVaultGraphs';
 
@@ -21,6 +21,12 @@ const EDGE = 16;
 const WRITE_STEP_MS = 140;
 /** Write-on: a folder square or dot fades in once its edge has finished drawing (--dur-ink). */
 const NODE_LAG_MS = 520;
+/** Meaning threads: how many neighbours, the wait after a new selection's ink path, and the stagger between them. */
+const THREAD_COUNT = 3;
+const THREAD_BASE_MS = 560;
+const THREAD_STEP_MS = 90;
+/** A neighbour's dot pulses as its thread arrives, after the 640 ms draw-in has mostly run. */
+const PULSE_LAG_MS = 520;
 /** The pending-links caption fades out over --dur-2. */
 const CAPTION_EXIT_MS = 140;
 
@@ -58,6 +64,8 @@ const ms = (n: number) => `${n}ms`;
 /** Roving/focus id of a vault hub, namespaced so it can never collide with a note or folder id. */
 const hubKey = (vaultId: string) => `hub:${vaultId}`;
 const NO_NEIGHBOURS = () => [];
+/** 0.823 -> ".82" */
+const similarityText = (s: number) => s.toFixed(2).replace(/^0/, '');
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fitRequest = null, neighbours = NO_NEIGHBOURS, now = Date.now() }: ConceptMapProps) {
@@ -417,7 +425,25 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
     searching,
   });
   // `neighbours` must be stable per vectors version (the caller memoises it), or this recomputes every render.
-  const lit = useMemo(() => litSet(focus, scene, focus ? neighbours(focus).map((n) => n.id) : []), [focus, scene, neighbours]);
+  const { lit, near } = useMemo(() => {
+    const near = focus ? neighbours(focus).filter((n) => n.id !== focus && dotById.has(n.id)).slice(0, THREAD_COUNT) : [];
+    return { lit: litSet(focus, scene, near.map((n) => n.id)), near };
+  }, [focus, scene, neighbours, dotById]);
+  const nearIndex = new Map(near.map((n, i) => [n.id, i]));
+
+  // Meaning threads restart whenever the focus moves, or the focused note becomes the selection. A new selection
+  // waits for the ink path to land; hover, keyboard focus and a selection from mount start at once.
+  const threads = useRef({ focus: null as string | null, sel: selectedNoteId, seq: 0, fresh: false });
+  const th = threads.current;
+  const selChanged = th.sel !== selectedNoteId;
+  th.sel = selectedNoteId;
+  const selFocus = focus !== null && focus === selectedNoteId;
+  if (th.focus !== focus || (selChanged && selFocus)) {
+    th.seq++;
+    th.fresh = selChanged && selFocus;
+  }
+  th.focus = focus;
+  const threadBase = th.fresh ? THREAD_BASE_MS : 0;
   // While searching, the search fade owns opacity; the flowing links and labels still follow the selection.
   const dimming = focus !== null && !searching;
 
@@ -473,6 +499,24 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
             return <path key={l.a + l.b} className="cmap-alink" d={linkPath(at(from.x, from.y), at(to.x, to.y))} />;
           })}
         </g>
+        {near.length > 0 && focus !== null && dotById.has(focus) && (
+          <g className="cmap-threads" key={th.seq}>
+            {near.map((n, i) => {
+              const from = dotById.get(focus)!;
+              const to = dotById.get(n.id)!;
+              const d = curvePath(at(from.x, from.y), at(to.x, to.y), THREAD_BEND);
+              const maskId = `${uid}-t${i}`;
+              return (
+                <g key={n.id}>
+                  <mask id={maskId} maskUnits="userSpaceOnUse" x={0} y={0} width={size.w} height={size.h}>
+                    <path className="cmap-tmask" d={d} pathLength={1} style={{ animationDelay: ms(threadBase + i * THREAD_STEP_MS) }} />
+                  </mask>
+                  <path className="cmap-thread" d={d} mask={`url(#${maskId})`} />
+                </g>
+              );
+            })}
+          </g>
+        )}
         <g className="cmap-ink">
           {/* Sorted, so a new stroke never moves an existing one in the DOM (a move would replay its draw). */}
           {[...inked].sort().map((id) => {
@@ -599,12 +643,18 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
                 {(tier === 'wet' || tier === 'fresh') && <circle className={`cmap-glow tier-${tier}`} r={r + 3} filter={`url(#${uid}-glow)`} />}
                 {(dens === 'r1' || dens === 'r2') && <circle className="cmap-dens" r={6.5} />}
                 {dens === 'r2' && <circle className="cmap-dens" r={9.25} />}
-                <circle className={`cmap-dot tier-${tier}`} r={r} />
+                <circle
+                  key={nearIndex.has(dot.id) ? `pulse${th.seq}` : 'dot'}
+                  className={`cmap-dot tier-${tier}${nearIndex.has(dot.id) ? ' is-pulse' : ''}`}
+                  r={r}
+                  style={nearIndex.has(dot.id) ? { animationDelay: ms(threadBase + PULSE_LAG_MS + nearIndex.get(dot.id)! * THREAD_STEP_MS) } : undefined}
+                />
                 {dot.id === selNote && <circle className="cmap-sel" r={selRingRadius(dot.degree)} />}
                 {ring?.id === dot.id && <circle key={ring.seq} className="cmap-ring" r={5} onAnimationEnd={() => setRing(null)} />}
                 {showLabel && (
                   <text className="cmap-label" x={r + 5} y={3.5}>
                     {active ? `${dot.title} · ${when}` : dot.title}
+                    {nearIndex.has(dot.id) && <tspan className="cmap-sim">{` · ◇ ${similarityText(near[nearIndex.get(dot.id)!].similarity)}`}</tspan>}
                   </text>
                 )}
               </g>

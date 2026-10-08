@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { VaultIcon } from '../brand/VaultIcon';
 import { FOCUS_SEARCH_EVENT } from '../components/AppShell';
@@ -114,6 +114,23 @@ export function HomePage() {
   const rows = held ?? liveRows;
   shown.current = { q, rows };
   const mapEntries = useVaultGraphs(state);
+  // The notes that have a dot on the map, kept as one Set while its members do not change (a body edit rebuilds
+  // mapEntries but not the dots), so the meaning-neighbour lookup below keeps its identity.
+  const dotIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const dotIds = useMemo(() => {
+    const next = new Set<string>();
+    for (const e of mapEntries) for (const n of e.graph.notes) if (!n.index && e.layout.notes[n.id]) next.add(n.id);
+    const prev = dotIdsRef.current;
+    if (prev.size === next.size && [...next].every((id) => prev.has(id))) return prev;
+    dotIdsRef.current = next;
+    return next;
+  }, [mapEntries]);
+  // New identity only when the vectors (version) or the map's notes change: the map recomputes its lit set on it.
+  const semVersion = sem.version;
+  const neighbours = useCallback(
+    (id: string) => semanticStore.neighbours(id, 3, dotIds),
+    [semanticStore, semVersion, dotIds],
+  );
   const hitIds = useMemo(() => new Set(rows.map((r) => r.entry.noteId)), [rows]);
   const [hot, setHot] = useState<string | null>(null);
   // The map rings and inks the selected node; the right column previews it.
@@ -260,7 +277,7 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} />
+            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} />
           </section>
         )}
 

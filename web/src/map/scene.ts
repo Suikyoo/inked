@@ -91,6 +91,8 @@ export const displayTitle = (title: string) => title.trim() || UNTITLED;
 export const HIERARCHY_BEND = 0.12;
 /** Bend of the dotted [[link]] curves. */
 export const LINK_BEND = 0.25;
+/** Bend of the meaning threads: a looser quill curve than the links. */
+export const THREAD_BEND = 0.35;
 
 const f1 = (n: number) => n.toFixed(1);
 

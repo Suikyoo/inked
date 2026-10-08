@@ -731,3 +731,84 @@ describe('lit state', () => {
     expect(host!.querySelector('.cmap-ring')).toBeNull();
   });
 });
+
+describe('meaning threads', () => {
+  const t = () =>
+    tree(
+      [folder('f1', null, 'Ops')],
+      [note('a', 'f1', 'Alpha'), note('b', 'f1', 'Beta'), note('c', null, 'Gamma'), note('d', null, 'Delta')],
+    );
+  const near = () => [
+    { id: 'b', similarity: 0.82 },
+    { id: 'c', similarity: 0.7 },
+  ];
+  const hoverDot = (id: string) => {
+    fire(node(id), new MouseEvent('pointerover', { bubbles: true }));
+    act(() => void vi.advanceTimersByTime(40));
+  };
+  const firstMask = () => host!.querySelector<SVGPathElement>('.cmap-tmask')!;
+  afterEach(() => {
+    delete (window as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it('draws a thread, a mask and a pulse per meaning neighbour, and labels it with its similarity', () => {
+    render({ entries: [entry(t())], neighbours: near });
+    hoverDot('a');
+    expect(host!.querySelectorAll('.cmap-thread')).toHaveLength(2);
+    expect(host!.querySelectorAll('.cmap-threads mask')).toHaveLength(2);
+    expect(node('b').querySelector('.cmap-dot')!.classList.contains('is-pulse')).toBe(true);
+    expect(node('c').querySelector('.cmap-dot')!.classList.contains('is-pulse')).toBe(true);
+    expect(node('d').querySelector('.is-pulse')).toBeNull();
+    expect(node('b').querySelector('.cmap-label')!.textContent).toContain('◇ .82');
+    expect(node('b').querySelector('.cmap-sim')).not.toBeNull();
+    const id = host!.querySelector('.cmap-thread')!.getAttribute('mask')!;
+    expect(host!.querySelector(id.slice(4, -1))?.tagName).toBe('mask');
+    expect(id).not.toContain(':');
+    expect(host!.querySelector<SVGPathElement>('.cmap-tmask')!.style.animationDelay).toBe('0ms');
+    expect(host!.querySelectorAll('.cmap-tmask')[1].getAttribute('style')).toContain('90ms');
+    expect(node('b').querySelector<SVGElement>('.cmap-dot')!.style.animationDelay).toBe('520ms');
+  });
+
+  it('remounts the threads when the focus moves', () => {
+    render({ entries: [entry(t())], neighbours: near });
+    hoverDot('a');
+    const before = host!.querySelector('.cmap-threads');
+    expect(before).not.toBeNull();
+    hoverDot('d');
+    const after = host!.querySelector('.cmap-threads');
+    expect(after).not.toBeNull();
+    expect(after).not.toBe(before);
+  });
+
+  it('draws no threads, pulses or similarity labels without neighbours', () => {
+    render({ entries: [entry(t())], neighbours: () => [] });
+    hoverDot('a');
+    expect(host!.querySelector('.cmap-threads')).toBeNull();
+    expect(host!.querySelector('.is-pulse')).toBeNull();
+    expect(host!.querySelector('.cmap-sim')).toBeNull();
+  });
+
+  it('waits for the ink path after a click, and starts at once on hover', () => {
+    render({ entries: [entry(t())], neighbours: near });
+    click(node('a'));
+    expect(firstMask().style.animationDelay).toBe('560ms');
+    expect(node('b').querySelector<SVGElement>('.cmap-dot')!.style.animationDelay).toBe('1080ms');
+    hoverDot('d');
+    expect(firstMask().style.animationDelay).toBe('0ms');
+  });
+
+  it('draws the threads of a selection that existed at mount without waiting', () => {
+    render({ entries: [entry(t())], neighbours: near, selected: { kind: 'note', vaultId: 'v1', id: 'a' } });
+    expect(host!.querySelectorAll('.cmap-thread')).toHaveLength(2);
+    expect(firstMask().style.animationDelay).toBe('0ms');
+  });
+
+  it('keeps the click ring when a neighbour pulse ends', () => {
+    window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    render({ entries: [entry(t())], neighbours: near });
+    click(node('a'));
+    expect(node('a').querySelector('.cmap-ring')).not.toBeNull();
+    fire(node('b').querySelector('.cmap-dot')!, new Event('animationend', { bubbles: true }));
+    expect(node('a').querySelector('.cmap-ring')).not.toBeNull();
+  });
+});

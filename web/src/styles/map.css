@@ -402,7 +402,54 @@
     transform: scale(4.5);
   }
 }
+.cmap-thread {
+  fill: none;
+  stroke: var(--ink-wet);
+  stroke-opacity: 0.75;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 5;
+  animation: cmap-flow-out 2.2s linear infinite;
+  pointer-events: none;
+}
+@keyframes cmap-flow-out {
+  to {
+    stroke-dashoffset: -10.2;
+  }
+}
+/* The mask reveals the thread along its length; pathLength="1" so one dash is the whole path. */
+.cmap-tmask {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 10;
+  stroke-dasharray: 1;
+  animation: cmap-draw 640ms var(--ease-out) both;
+}
+.cmap-dot.is-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cmap-pulse-n 420ms var(--ease-out) both;
+}
+@keyframes cmap-pulse-n {
+  45% {
+    transform: scale(1.7);
+  }
+}
+.cmap-sim {
+  fill: var(--ink-light);
+  font-weight: 600;
+}
 @media (prefers-reduced-motion: reduce) {
+  .cmap-thread {
+    animation: none;
+  }
+  .cmap-tmask {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .cmap-dot.is-pulse {
+    animation: none;
+  }
   .cmap-alink {
     animation: none;
   }

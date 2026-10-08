@@ -257,3 +257,20 @@ describe('HomePage search by meaning', () => {
     expect(search).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('HomePage meaning neighbours', () => {
+  it('asks for three neighbours among the map dots, and keeps the same lookup until the vectors change', () => {
+    const neighbours = vi.fn<SemanticStore['neighbours']>(() => []);
+    mount(baseState(), semanticStub({}, { neighbours }));
+    click(host!.querySelector('g.cmap-node[data-note="n1"]')!);
+    expect(neighbours).toHaveBeenCalled();
+    const mapCalls = () => neighbours.mock.calls.filter((c) => c[2]);
+    const [id, k, among] = mapCalls().at(-1)!;
+    expect([id, k]).toEqual(['n1', 3]);
+    expect([...among!].sort()).toEqual(['n1', 'n2', 'n3', 'n4']);
+    // Typing a query with no hits re-renders Home but changes neither the focus nor the map: no new lookups.
+    const calls = mapCalls().length;
+    type('zzzz');
+    expect(mapCalls()).toHaveLength(calls);
+  });
+});
