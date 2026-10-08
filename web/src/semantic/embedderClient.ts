@@ -15,6 +15,8 @@ export class Embedder {
   private onProgress: (loaded: number, total: number) => void = () => {};
   private ready: Promise<void> | null = null;
   private loadReject: ((e: Error) => void) | null = null;
+  /** Set once WebGPU failed to load: every later worker for this manifest goes straight to WASM. */
+  private wasmOnly = false;
   paused = false;
 
   constructor(private opts: { makeWorker?: () => Worker; onPaused?: () => void } = {}) {}
@@ -23,6 +25,7 @@ export class Embedder {
     this.terminate();
     this.manifest = manifest;
     this.onProgress = onProgress;
+    this.wasmOnly = false;
     this.ready = this.start();
     return this.ready;
   }
@@ -54,7 +57,14 @@ export class Embedder {
           this.pending.get(m.id)?.resolve(m.vectors);
           this.pending.delete(m.id);
         } else if (m.type === 'error') {
-          if (m.id === undefined) fail(m.message);
+          if (m.id === undefined && !loaded && m.gpuFailed && !this.wasmOnly) {
+            // WebGPU couldn't start (no adapter, unsupported ops). That worker's runtime is poisoned, so retry in a
+            // fresh one pinned to WASM. Not a crash.
+            this.wasmOnly = true;
+            this.worker = null;
+            w.terminate();
+            this.start().then(resolve, reject);
+          } else if (m.id === undefined) fail(m.message);
           else {
             this.pending.get(m.id)?.reject(new Error(m.message));
             this.pending.delete(m.id);
@@ -62,7 +72,12 @@ export class Embedder {
         }
       };
       w.onerror = () => fail('worker crashed');
-      w.postMessage({ type: 'load', manifest: this.manifest!, base: MODELS_BASE } satisfies ToWorker);
+      w.postMessage({
+        type: 'load',
+        manifest: this.manifest!,
+        base: MODELS_BASE,
+        ...(this.wasmOnly ? { device: 'wasm' as const } : {}),
+      } satisfies ToWorker);
     });
   }
 

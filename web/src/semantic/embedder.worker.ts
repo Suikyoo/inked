@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { env, pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import { pickDevice, type Device, type GpuLike } from './device';
 import { QUERY_PREFIX, type FromWorker, type ToWorker } from './protocol';
 
 let extractor: FeatureExtractionPipeline | null = null;
@@ -7,6 +8,7 @@ const post = (m: FromWorker) => (self as DedicatedWorkerGlobalScope).postMessage
 
 self.onmessage = async (e: MessageEvent<ToWorker>) => {
   const m = e.data;
+  let device: Device = 'wasm';
   try {
     if (m.type === 'load') {
       env.allowRemoteModels = false;
@@ -18,8 +20,10 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         env.backends.onnx.wasm.numThreads = 1;
       }
       const sizes = new Map<string, { loaded: number; total: number }>();
-      const device = 'gpu' in navigator ? 'webgpu' : 'wasm';
-      const make = (d: 'webgpu' | 'wasm') =>
+      device = m.device ?? (await pickDevice((navigator as Navigator & { gpu?: GpuLike }).gpu));
+      // No in-worker fallback: transformers.js keeps the first session's promise (backends/onnx.js wasmInitPromise),
+      // so after a failed WebGPU session every later session rethrows. The client retries in a fresh WASM worker.
+      const make = (d: Device) =>
         pipeline('feature-extraction', m.manifest.model, {
           dtype: 'q8',
           device: d,
@@ -35,7 +39,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
             post({ type: 'progress', loaded, total });
           },
         });
-      extractor = (await make(device).catch(() => make('wasm'))) as FeatureExtractionPipeline;
+      extractor = (await make(device)) as FeatureExtractionPipeline;
       post({ type: 'ready' });
     } else if (m.type === 'embed') {
       if (!extractor) throw new Error('model not loaded');
@@ -47,6 +51,8 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       post({ type: 'result', id: m.id, vectors });
     }
   } catch (err) {
-    post({ type: 'error', id: m.type === 'embed' ? m.id : undefined, message: (err as Error).message });
+    console.error('embedder:', err);
+    if (m.type === 'embed') post({ type: 'error', id: m.id, message: (err as Error).message });
+    else post({ type: 'error', message: (err as Error).message, gpuFailed: device === 'webgpu' });
   }
 };

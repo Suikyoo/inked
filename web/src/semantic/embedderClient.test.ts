@@ -35,6 +35,17 @@ class SilentWorker extends FakeWorker {
     this.sent.push(m);
   }
 }
+/** Fails the load as if WebGPU had no adapter, unless told to use WASM. */
+class GpuFailWorker extends FakeWorker {
+  postMessage(m: ToWorker) {
+    if (m.type === 'load' && m.device !== 'wasm') {
+      this.sent.push(m);
+      queueMicrotask(() => this.emit({ type: 'error', message: 'no available backend found. ERR: [webgpu]', gpuFailed: true }));
+      return;
+    }
+    super.postMessage(m);
+  }
+}
 const manifest = { model: 'm', id: 'm@1', revision: '1', modelPath: '1/', ortPath: 'o/', files: [] };
 
 describe('Embedder', () => {
@@ -100,5 +111,34 @@ describe('Embedder', () => {
     expect(workers[0].terminated).toBe(true);
     expect(workers[1].terminated).toBe(false);
     await expect(e.embed(['x'], 'query')).resolves.toHaveLength(1);
+  });
+  it('falls back to a fresh WASM-only worker when the WebGPU load fails, without counting a crash', async () => {
+    const workers: GpuFailWorker[] = [];
+    const onPaused = vi.fn();
+    const e = new Embedder({ makeWorker: () => (workers.push(new GpuFailWorker()), workers.at(-1) as unknown as Worker), onPaused });
+    await e.load(manifest, () => {});
+    expect(workers).toHaveLength(2);
+    expect(workers[0].terminated).toBe(true);
+    expect(workers[0].sent[0]).toMatchObject({ type: 'load' });
+    expect((workers[0].sent[0] as { device?: string }).device).toBeUndefined();
+    expect(workers[1].sent[0]).toMatchObject({ type: 'load', device: 'wasm' });
+    await expect(e.embed(['ab'], 'query')).resolves.toHaveLength(1);
+    // The fallback is not a crash: one later crash restarts (still on WASM) instead of pausing.
+    workers[1].crash();
+    expect(e.paused).toBe(false);
+    expect(onPaused).not.toHaveBeenCalled();
+    expect(workers[2].sent[0]).toMatchObject({ type: 'load', device: 'wasm' });
+  });
+  it('a WASM-only load that fails rejects load() and does not loop', async () => {
+    const workers: FakeWorker[] = [];
+    class AlwaysFail extends FakeWorker {
+      postMessage(m: ToWorker) {
+        this.sent.push(m);
+        if (m.type === 'load') queueMicrotask(() => this.emit({ type: 'error', message: 'no backend', gpuFailed: m.device !== 'wasm' }));
+      }
+    }
+    const e = new Embedder({ makeWorker: () => (workers.push(new AlwaysFail()), workers.at(-1) as unknown as Worker) });
+    await expect(e.load(manifest, () => {})).rejects.toThrow(/no backend/);
+    expect(workers).toHaveLength(2);
   });
 });
