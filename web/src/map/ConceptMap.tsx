@@ -86,6 +86,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
   useEffect(
     () => () => {
       if (hoverRaf.current !== null) cancelAnimationFrame(hoverRaf.current);
+      hoverRaf.current = null;
     },
     [],
   );
@@ -107,10 +108,15 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
   // Click ring: plays whenever a note becomes the selection, whatever set it.
   const ringSeq = useRef(0);
   const [ring, setRing] = useState<{ id: string; seq: number } | null>(null);
+  // Keyed on the selection itself, not on selNote, so mounting with a selection, or its dot arriving later, does not play it.
+  const selectedNoteId = selected?.kind === 'note' ? selected.id : null;
+  const lastSelectedNote = useRef(selectedNoteId);
   useEffect(() => {
-    if (selNote && !prefersReducedMotion()) setRing({ id: selNote, seq: ++ringSeq.current });
+    if (lastSelectedNote.current === selectedNoteId) return;
+    lastSelectedNote.current = selectedNoteId;
+    if (selectedNoteId && !prefersReducedMotion()) setRing({ id: selectedNoteId, seq: ++ringSeq.current });
     else setRing(null);
-  }, [selNote]);
+  }, [selectedNoteId]);
 
   // Write-on: decided at the first paint that has edges to draw, so a map that opens on
   // "Decrypting…" still writes on when the notes arrive. Reduced motion skips it.
@@ -410,8 +416,10 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
     selectedNote: selNote,
     searching,
   });
-  const lit = litSet(focus, scene, focus ? neighbours(focus).map((n) => n.id) : []);
-  const dimming = focus !== null;
+  // `neighbours` must be stable per vectors version (the caller memoises it), or this recomputes every render.
+  const lit = useMemo(() => litSet(focus, scene, focus ? neighbours(focus).map((n) => n.id) : []), [focus, scene, neighbours]);
+  // While searching, the search fade owns opacity; the flowing links and labels still follow the selection.
+  const dimming = focus !== null && !searching;
 
   const allFolderLabels = view.scale >= FOLDER_LABEL_SCALE;
   const at = (x: number, y: number) => toScreen(view, { x, y });

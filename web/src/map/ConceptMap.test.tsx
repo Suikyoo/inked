@@ -696,6 +696,34 @@ describe('lit state', () => {
     expect(host!.querySelector('.cmap-ring')).toBeNull();
   });
 
+  it('does not dim a search hit outside the selection while searching', () => {
+    render({ entries: [linked()], hits: new Set(['c']), selected: { kind: 'note', vaultId: 'v1', id: 'a' } });
+    expect(dimmed()).toEqual([]);
+    expect(host!.querySelectorAll('.cmap-alink')).toHaveLength(1);
+    expect(host!.querySelector('.cmap-links')!.classList.contains('is-dim-links')).toBe(false);
+  });
+
+  it('plays no ring on mount with a selection, and one when the selection changes later', () => {
+    noMotion();
+    const sel = (id: string): MapSelection => ({ kind: 'note', vaultId: 'v1', id });
+    const { rerender } = render({ entries: [linked()], selected: sel('a') });
+    expect(host!.querySelector('.cmap-ring')).toBeNull();
+    rerender({ entries: [linked()], selected: sel('b') });
+    expect(node('b').querySelector('.cmap-ring')).not.toBeNull();
+  });
+
+  it('asks for meaning neighbours once per focus, not on every render', () => {
+    const neighbours = vi.fn(() => []);
+    const entries = [linked()];
+    const { rerender } = render({ entries, neighbours });
+    click(node('b'));
+    const calls = neighbours.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    rerender({ entries, neighbours, now: NOW + 1000 });
+    rerender({ entries, neighbours, now: NOW + 2000 });
+    expect(neighbours).toHaveBeenCalledTimes(calls);
+  });
+
   it('draws no ring under reduced motion', () => {
     window.matchMedia = vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
     render({ entries: [linked()] });
