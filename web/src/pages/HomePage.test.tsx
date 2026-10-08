@@ -10,6 +10,7 @@ import type { SemanticStore } from '../semantic/semanticStore';
 import { StoreProvider } from '../state/StoreContext';
 import { semanticStub } from '../test/semantic';
 import type { AppState, AppStore } from '../state/store';
+import { resetWriteOnForTests } from '../map/ConceptMap';
 import { HomePage } from './HomePage';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,7 +39,29 @@ const baseState = (): AppState =>
     bodiesReady: { v1: true },
   }) as unknown as AppState;
 
-function mount(initial: AppState, semantic?: SemanticStore) {
+/** Stands in for the store's save events: `save` adds to the unseen set, then tells the listeners, as the store does. */
+function savesFake(unseen: string[] = []) {
+  const pending = new Set(unseen);
+  const listeners = new Set<(ids: string[]) => void>();
+  return {
+    onNotesSaved: (fn: (ids: string[]) => void) => {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    consumeUnseenSaves: () => {
+      const ids = [...pending];
+      pending.clear();
+      return ids;
+    },
+    save: (...ids: string[]) => {
+      for (const id of ids) pending.add(id);
+      act(() => listeners.forEach((l) => l(ids)));
+    },
+    listenerCount: () => listeners.size,
+  };
+}
+
+function mount(initial: AppState, semantic?: SemanticStore, saves = savesFake()) {
   let state = initial;
   const listeners = new Set<() => void>();
   const store = {
@@ -48,6 +71,8 @@ function mount(initial: AppState, semantic?: SemanticStore) {
       return () => listeners.delete(l);
     },
     loadAll: async () => undefined,
+    onNotesSaved: saves.onNotesSaved,
+    consumeUnseenSaves: saves.consumeUnseenSaves,
   } as unknown as AppStore;
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -272,5 +297,79 @@ describe('HomePage meaning neighbours', () => {
     const calls = mapCalls().length;
     type('zzzz');
     expect(mapCalls()).toHaveLength(calls);
+  });
+});
+
+describe('HomePage live ripples', () => {
+  const rings = (id: string) => host!.querySelectorAll(`g.cmap-node[data-note="${id}"] .cmap-save-ring`);
+  beforeEach(() => {
+    vi.useFakeTimers();
+    window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (window as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it('ripples a note saved while Home is mounted', () => {
+    const saves = savesFake();
+    mount(baseState(), undefined, saves);
+    expect(host!.querySelector('.cmap-save-ring')).toBeNull();
+    saves.save('n1');
+    expect(rings('n1')).toHaveLength(2);
+    expect(rings('n2')).toHaveLength(0);
+  });
+
+  it('ripples both notes of two saves in quick succession', () => {
+    const saves = savesFake();
+    mount(baseState(), undefined, saves);
+    saves.save('n1');
+    saves.save('n3');
+    expect(rings('n1')).toHaveLength(2);
+    expect(rings('n3')).toHaveLength(2);
+  });
+
+  it('merges saves that land in one tick', () => {
+    const saves = savesFake();
+    mount(baseState(), undefined, saves);
+    act(() => {
+      saves.save('n1');
+      saves.save('n2');
+    });
+    expect(rings('n1')).toHaveLength(2);
+    expect(rings('n2')).toHaveLength(2);
+  });
+
+  it('ripples saves made while Home was away once, after the write-on, and not again on a remount', () => {
+    resetWriteOnForTests();
+    const saves = savesFake(['n1']);
+    mount(baseState(), undefined, saves);
+    expect(host!.querySelector('.cmap-save-ring')).toBeNull();
+    act(() => void vi.advanceTimersByTime(3000));
+    expect(rings('n1')).toHaveLength(2);
+    act(() => root!.unmount());
+    host!.remove();
+    resetWriteOnForTests();
+    mount(baseState(), undefined, saves);
+    act(() => void vi.advanceTimersByTime(3000));
+    expect(host!.querySelector('.cmap-save-ring')).toBeNull();
+  });
+
+  it('plays them straight away when the map has already written on', () => {
+    resetWriteOnForTests();
+    mount(baseState());
+    act(() => void vi.advanceTimersByTime(3000));
+    act(() => root!.unmount());
+    host!.remove();
+    mount(baseState(), undefined, savesFake(['n2']));
+    expect(rings('n2')).toHaveLength(2);
+  });
+
+  it('stops listening when Home unmounts', () => {
+    const saves = savesFake();
+    mount(baseState(), undefined, saves);
+    expect(saves.listenerCount()).toBe(1);
+    act(() => root!.unmount());
+    expect(saves.listenerCount()).toBe(0);
   });
 });

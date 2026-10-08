@@ -309,6 +309,18 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 ### Concept map (signature)
 A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px round markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Folders are rounded squares (`panel-3` fill, `muted-3` stroke, about 9.5px) inside a 22px hit target (r=11); on an inked path a folder turns into a diamond as the ink arrives. Every folder's `Index` note has no dot of its own: a hit on it inks the path to its folder (the diamond), and a vault's root Index lights the hub, which stands for it. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Edges are quill curves, not straight lines: folder structure draws as pencil curves (1.5px hub to top folder, 1.1px folder to subfolder, 0.8px to a note), explicit links as dotted pencil curves (`2 4`, round caps) bowed more than the hierarchy so the two read apart, and ink strokes as the same curves joined end to end. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. There is no slip card and no legend: selecting a node shows it in the Home preview panel beside the map, which replaces "Recently edited" and holds the node's rendered Index or note, its notes, backlinks, "Open note" / "Open Index", and "Add description" where a folder or vault has no Index. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
 
+**Lit state.** Hovering or focusing a note, folder or hub (or selecting one) lights it and what it is tied to: its ink path, linked notes and its meaning neighbours. Everything else dims (notes to 30%, folders and pencil to 45%, links to 35%), and the links of the lit node flow toward it as a dash that runs along the curve. Hover is applied once per animation frame. While a search is active nothing dims, because search already fades non-hits.
+
+**Click sequence.** Clicking a note selects it, in this order: a ring spreads from the dot (`cmap-ring`, 4.5x, fades), the ink path to it draws, then its meaning threads. The ring plays when the selection changes after mount, from any source (map, list or keyboard), not on first render.
+
+**Density rings and hollow orphans.** A note's link count shows around its dot, in its ink tier: no links draws a hollow ring (r 3.4, stroke in the tier ink, canvas fill), one link is a plain dot, two links add one thin ring (r 6.5), three or more add two (r 6.5 and 9.25). Nothing is drawn until the vault's note text is decrypted, since links are not known before that; a caption says so.
+
+**Meaning threads.** With semantic search on, the lit note draws dotted `ink-wet` threads to its three nearest notes by meaning, bowed apart from the pencil links. Each thread draws in over 640ms behind a mask, staggered 90ms apart and starting 560ms after the ink path. Each neighbour's dot pulses once as its thread arrives (scale 1.7 over 420ms), and its label gains a "◇ .82" similarity.
+
+**Live ripples.** When a note is saved (here, in another tab, or on another device), its dot flashes to `ink-lighter` for one frame and eases back to its tier over 1800ms, two `ink-wet` rings spread from it (r 5, scaling to 5.5x over 1100ms, the second 200ms after the first), and each folder square on its path ticks to a 3px `ink-wet` stroke over 700ms. At most 6 notes ripple at once, staggered 120ms apart; further saved notes only flash. Notes not on the map are ignored. Saves made while Home was not open ripple once when it opens, after the write-on has finished.
+
+**Reduced motion.** No rings, no flowing links, no threads' draw-in, no pulses and no folder tick animation. The lit state still dims and lights, the dot flash is still applied (its fill eases over 120ms rather than 1800ms), and selection is still conveyed by the ink path and the selection ring.
+
 ## Motion
 
 Motion is quiet and tied to the ink metaphor: it confirms a change of state and never blocks a click or shifts layout.
@@ -324,7 +336,7 @@ Motion is quiet and tied to the ink metaphor: it confirms a change of state and 
 - **Save status:** the new text fades in; "Saved" fades in, then dims slightly.
 - **Hover and press:** color changes over `--dur-1`; buttons scale to 0.98 while pressed.
 - **Banners and notices:** collapse in and out, holding their last content while they close.
-- **Map:** edges write on once per session, ink draws along a path over `--dur-ink`, and a note that was just edited gives a brief drying pulse.
+- **Map:** edges write on once per session, ink draws along a path over `--dur-ink`, and a saved note ripples (see Live ripples under Concept map).
 - Animate opacity and transform, and color on hover. The exceptions are `clip-path` (the unlock wipe), SVG `stroke-dashoffset` (map ink and write-on) and `grid-template-rows` (tree collapse, banners). Never width, height or position.
 
 ### Reduced motion

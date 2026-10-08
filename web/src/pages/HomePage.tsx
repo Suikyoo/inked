@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { VaultIcon } from '../brand/VaultIcon';
 import { FOCUS_SEARCH_EVENT } from '../components/AppShell';
@@ -133,6 +133,26 @@ export function HomePage() {
   );
   const hitIds = useMemo(() => new Set(rows.map((r) => r.entry.noteId)), [rows]);
   const [hot, setHot] = useState<string | null>(null);
+  // Saves for the map's ripples. Saves made while Home was away are consumed once on mount (the store forgets them,
+  // so a remount does not replay them); later ones arrive as events. Ids of events in one tick merge into one seq.
+  const [saves, setSaves] = useState<{ seq: number; ids: string[] } | null>(null);
+  const saveSeq = useRef(0);
+  const saveBuf = useRef<string[]>([]);
+  useLayoutEffect(() => {
+    saveBuf.current = [];
+  }, [saves]);
+  useEffect(() => {
+    const push = (ids: string[]) => {
+      if (ids.length === 0) return;
+      saveBuf.current = [...saveBuf.current, ...ids];
+      setSaves({ seq: ++saveSeq.current, ids: saveBuf.current });
+    };
+    push(store.consumeUnseenSaves());
+    return store.onNotesSaved((ids) => {
+      store.consumeUnseenSaves();
+      push(ids);
+    });
+  }, [store]);
   // The map rings and inks the selected node; the right column previews it.
   const [selected, setSelected] = useState<MapSelection | null>(null);
   const [fitRequest, setFitRequest] = useState<{ sel: MapSelection; n: number } | null>(null);
@@ -277,7 +297,7 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} />
+            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} saves={saves} />
           </section>
         )}
 

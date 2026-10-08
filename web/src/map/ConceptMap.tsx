@@ -6,6 +6,7 @@ import { relativeTime } from '../lib/util';
 import { prefersReducedMotion, usePresence } from '../motion';
 import { litSet, mapFocus } from './lit';
 import { inkTier } from './recency';
+import { planRipples } from './ripples';
 import { arrowDir, buildScene, chainPath, curvePath, densityClass, edgeWidth, HIERARCHY_BEND, linkPath, nearestInDirection, selRingRadius, THREAD_BEND } from './scene';
 import { fit, panBy, toScreen, useViewport, zoomAt, type Bounds, type Size } from './useViewport';
 import type { MapEntry } from './useVaultGraphs';
@@ -21,6 +22,10 @@ const EDGE = 16;
 const WRITE_STEP_MS = 140;
 /** Write-on: a folder square or dot fades in once its edge has finished drawing (--dur-ink). */
 const NODE_LAG_MS = 520;
+/** Live ripples: the write-on has run this long after its last node fades in (the node's own fade is 520 ms). */
+const WRITE_SETTLE_MS = 520;
+/** Live ripples: the second ring follows the first by this much. */
+const RING_GAP_MS = 200;
 /** Meaning threads: how many neighbours, the wait after a new selection's ink path, and the stagger between them. */
 const THREAD_COUNT = 3;
 const THREAD_BASE_MS = 560;
@@ -56,6 +61,8 @@ export interface ConceptMapProps {
   fitRequest?: { sel: MapSelection; n: number } | null;
   /** Notes close in meaning to a note, nearest first. Feeds the lit state (and later the meaning threads). */
   neighbours?: (noteId: string) => { id: string; similarity: number }[];
+  /** Notes just saved. Each new `seq` ripples its ids (capped), flashes the rest and ticks their folders. */
+  saves?: { seq: number; ids: string[] } | null;
   now?: number;
 }
 
@@ -64,11 +71,13 @@ const ms = (n: number) => `${n}ms`;
 /** Roving/focus id of a vault hub, namespaced so it can never collide with a note or folder id. */
 const hubKey = (vaultId: string) => `hub:${vaultId}`;
 const NO_NEIGHBOURS = () => [];
+const NO_IDS: ReadonlySet<string> = new Set();
+const NO_TICKS: ReadonlyMap<string, { seq: number; delay: number }> = new Map();
 /** 0.823 -> ".82" */
 const similarityText = (s: number) => s.toFixed(2).replace(/^0/, '');
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fitRequest = null, neighbours = NO_NEIGHBOURS, now = Date.now() }: ConceptMapProps) {
+export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fitRequest = null, neighbours = NO_NEIGHBOURS, saves = null, now = Date.now() }: ConceptMapProps) {
   const navigate = useNavigate();
   const uid = 'cm' + useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const frameRef = useRef<HTMLDivElement>(null);
@@ -135,11 +144,84 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
     if (writeOn.current !== null) wroteOn = true;
   });
 
-  // Drying pulse: the updatedAt each dot first rendered with. A later change pulses the dot once.
-  const firstSeen = useRef(new Map<string, string>());
+  const maxDepth = scene.pencil.reduce((m, s) => Math.max(m, s.depth), 0);
+  const writeStart = useRef<number | null>(null);
+  if (writing && writeStart.current === null) writeStart.current = Date.now();
+
+  // Live ripples. Every id of a new `saves.seq` is queued; once the map has dots (and its write-on is over) the
+  // queue plays as one plan. Rings, flashes and ticks accumulate, so a second save never wipes the first.
+  const noRings = useMemo(() => new Map<string, { seq: number; delay: number }>(), []);
+  const [rings, setRings] = useState(noRings);
+  const [flash, setFlash] = useState<ReadonlySet<string>>(NO_IDS);
+  const [ticks, setTicks] = useState(NO_TICKS);
+  const queued = useRef<string[]>([]);
+  const lastSaveSeq = useRef(saves?.seq ?? 0);
+  const playSeq = useRef(0);
+  const flashFrames = useRef<number[]>([]);
+  const cancelFlash = () => {
+    for (const f of flashFrames.current) cancelAnimationFrame(f);
+    flashFrames.current = [];
+  };
+  useEffect(() => cancelFlash, []);
+  const dropRings = (id: string, seq: number) =>
+    setRings((prev) => {
+      if (prev.get(id)?.seq !== seq) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  const dotIdSet = useMemo(() => new Set(dotById.keys()), [dotById]);
   useEffect(() => {
-    for (const d of scene.dots) if (!firstSeen.current.has(d.id)) firstSeen.current.set(d.id, d.updatedAt);
-  }, [scene]);
+    if (saves && saves.seq !== lastSaveSeq.current) {
+      lastSaveSeq.current = saves.seq;
+      queued.current.push(...saves.ids);
+    }
+  }, [saves]);
+  useEffect(() => {
+    if (queued.current.length === 0 || dotIdSet.size === 0) return;
+    const play = () => {
+      const plan = planRipples(queued.current, dotIdSet);
+      queued.current = [];
+      const seq = ++playSeq.current;
+      const ids = [...plan.ripple.map((r) => r.id), ...plan.flash];
+      if (ids.length === 0) return;
+      if (!prefersReducedMotion() && plan.ripple.length > 0) {
+        setRings((prev) => {
+          const next = new Map(prev);
+          for (const r of plan.ripple) next.set(r.id, { seq, delay: r.delay });
+          return next;
+        });
+      }
+      const delayOf = new Map(plan.ripple.map((r) => [r.id, r.delay]));
+      setTicks((prev) => {
+        const next = new Map(prev);
+        for (const id of ids) {
+          const delay = delayOf.get(id) ?? 0;
+          for (const fid of scene.chainFolders[id] ?? []) {
+            const cur = next.get(fid);
+            next.set(fid, { seq, delay: cur?.seq === seq ? Math.min(cur.delay, delay) : delay });
+          }
+        }
+        return next;
+      });
+      // The flash class lasts one painted frame; the dot's fill transition then eases it back to its tier.
+      cancelFlash();
+      setFlash(new Set(ids));
+      flashFrames.current[0] = requestAnimationFrame(() => {
+        flashFrames.current[1] = requestAnimationFrame(() => {
+          flashFrames.current = [];
+          setFlash(NO_IDS);
+        });
+      });
+    };
+    const wait = writeStart.current === null ? 0 : writeStart.current + (maxDepth + 1) * WRITE_STEP_MS + NODE_LAG_MS + WRITE_SETTLE_MS - Date.now();
+    if (!(wait > 0)) {
+      play();
+      return;
+    }
+    const timer = setTimeout(play, wait);
+    return () => clearTimeout(timer);
+  }, [saves, dotIdSet, scene]);
 
   // The svg is absolutely positioned, so the frame alone decides the size: measure it now, then follow it.
   useLayoutEffect(() => {
@@ -449,7 +531,6 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
 
   const allFolderLabels = view.scale >= FOLDER_LABEL_SCALE;
   const at = (x: number, y: number) => toScreen(view, { x, y });
-  const maxDepth = scene.pencil.reduce((m, s) => Math.max(m, s.depth), 0);
   const pending = usePresence(scene.linksPending && scene.dots.length > 0, CAPTION_EXIT_MS);
 
   return (
@@ -536,7 +617,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
               <g
                 key={f.id}
                 ref={nodeRef(f.id)}
-                className={`cmap-folder${on ? ' on' : ''}${dimming && !lit.folders.has(f.id) ? ' is-dim-soft' : ''}`}
+                className={`cmap-folder${on ? ' on' : ''}${ticks.has(f.id) ? ' is-tick' : ''}${dimming && !lit.folders.has(f.id) ? ' is-dim-soft' : ''}`}
                 data-folder={f.id}
                 transform={`translate(${f1(s.x)} ${f1(s.y)})`}
                 style={writing ? { animationDelay: ms(f.depth * WRITE_STEP_MS + NODE_LAG_MS) } : undefined}
@@ -554,7 +635,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
               >
                 <circle className="cmap-hit" r={11} />
                 {f.id === selFolder && <circle className="cmap-sel" r={10} />}
-                <rect className="cmap-sq" x={-4.75} y={-4.75} width={9.5} height={9.5} rx={2.25} />
+                <rect key={ticks.get(f.id)?.seq ?? 0} className="cmap-sq" style={ticks.has(f.id) ? { animationDelay: ms(ticks.get(f.id)!.delay) } : undefined} x={-4.75} y={-4.75} width={9.5} height={9.5} rx={2.25} />
                 <text className={`cmap-folder-label${showLabel ? '' : ' is-hidden'}`} x={0} y={19} textAnchor="middle" aria-hidden="true">
                   {f.name}
                 </text>
@@ -614,7 +695,6 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
             const r = dens === 'hollow' ? 3.4 : big ? 5 : 4;
             const when = relativeTime(dot.updatedAt, now);
             const showLabel = view.scale >= LABEL_SCALE || inkedNotes.has(dot.id) || active || lit.notes.has(dot.id);
-            const seen = firstSeen.current.get(dot.id);
             return (
               <g
                 key={dot.id}
@@ -638,18 +718,26 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
                 onPointerLeave={() => hoverNext.current === dot.id && setHoverSoon(null)}
               >
                 <circle className="cmap-hit" r={12} />
-                {/* Keyed by the edit time, so each new edit mounts a fresh pulse. */}
-                {seen !== undefined && seen !== dot.updatedAt && <circle key={dot.updatedAt} className="cmap-pulse" r={r + 4} filter={`url(#${uid}-glow)`} />}
                 {(tier === 'wet' || tier === 'fresh') && <circle className={`cmap-glow tier-${tier}`} r={r + 3} filter={`url(#${uid}-glow)`} />}
                 {(dens === 'r1' || dens === 'r2') && <circle className="cmap-dens" r={6.5} />}
                 {dens === 'r2' && <circle className="cmap-dens" r={9.25} />}
                 <circle
                   key={nearIndex.has(dot.id) ? `pulse${th.seq}` : 'dot'}
-                  className={`cmap-dot tier-${tier}${nearIndex.has(dot.id) ? ' is-pulse' : ''}`}
+                  className={`cmap-dot tier-${tier}${nearIndex.has(dot.id) ? ' is-pulse' : ''}${flash.has(dot.id) ? ' is-flash' : ''}`}
                   r={r}
                   style={nearIndex.has(dot.id) ? { animationDelay: ms(threadBase + PULSE_LAG_MS + nearIndex.get(dot.id)! * THREAD_STEP_MS) } : undefined}
                 />
                 {dot.id === selNote && <circle className="cmap-sel" r={selRingRadius(dot.degree)} />}
+                {rings.has(dot.id) &&
+                  [0, 1].map((k) => (
+                    <circle
+                      key={`${rings.get(dot.id)!.seq}-${k}`}
+                      className="cmap-save-ring"
+                      r={5}
+                      style={{ animationDelay: ms(rings.get(dot.id)!.delay + k * RING_GAP_MS) }}
+                      onAnimationEnd={k === 1 ? () => dropRings(dot.id, rings.get(dot.id)!.seq) : undefined}
+                    />
+                  ))}
                 {ring?.id === dot.id && <circle key={ring.seq} className="cmap-ring" r={5} onAnimationEnd={() => setRing(null)} />}
                 {showLabel && (
                   <text className="cmap-label" x={r + 5} y={3.5}>

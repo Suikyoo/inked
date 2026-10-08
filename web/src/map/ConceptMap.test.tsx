@@ -574,14 +574,13 @@ describe('ConceptMap', () => {
       expect(ink('n1')!.classList.contains('ink-draw')).toBe(true);
     });
 
-    it('pulses a dot whose updatedAt changed, never on first render', () => {
+    it('has no drying pulse when the edit time of a dot changes', () => {
       const r = render({ entries: [entry(base())] });
-      expect(host!.querySelector('.cmap-pulse')).toBeNull();
       const t = base();
       t.notes.n1 = { ...t.notes.n1, updatedAt: '2026-10-07T11:59:00.000Z' };
       r.rerender({ entries: [entry(t)] });
-      expect(node('n1').querySelector('.cmap-pulse')).not.toBeNull();
-      expect(node('n2').querySelector('.cmap-pulse')).toBeNull();
+      expect(host!.querySelector('.cmap-pulse')).toBeNull();
+      expect(host!.querySelector('.cmap-save-ring')).toBeNull();
     });
 
     it('shows the pending-links caption while links are not ready, then fades it out', () => {
@@ -810,5 +809,110 @@ describe('meaning threads', () => {
     expect(node('a').querySelector('.cmap-ring')).not.toBeNull();
     fire(node('b').querySelector('.cmap-dot')!, new Event('animationend', { bubbles: true }));
     expect(node('a').querySelector('.cmap-ring')).not.toBeNull();
+  });
+});
+
+describe('live ripples', () => {
+  const t = () =>
+    tree(
+      [folder('f1', null, 'Ops'), folder('f2', null, 'Other')],
+      [note('a', 'f1', 'Alpha'), note('b', 'f2', 'Beta'), ...['c', 'd', 'e', 'f', 'g', 'h', 'i'].map((id) => note(id, null, id.toUpperCase()))],
+    );
+  const rings = (id: string) => node(id).querySelectorAll('.cmap-save-ring');
+  const folderEl = (id: string) => host!.querySelector(`[data-folder="${id}"]`)!;
+  const ended = (el: Element) => act(() => void el.dispatchEvent(new Event('animationend', { bubbles: true })));
+  beforeEach(() => {
+    window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  });
+  afterEach(() => {
+    delete (window as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it('draws two rings on a saved dot and ticks the folders on its path', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    expect(rings('a')).toHaveLength(2);
+    expect(rings('b')).toHaveLength(0);
+    expect(folderEl('f1').classList.contains('is-tick')).toBe(true);
+    expect(folderEl('f2').classList.contains('is-tick')).toBe(false);
+  });
+
+  it('flashes the dot for one frame, then lets it ease back', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    const dot = () => node('a').querySelector('.cmap-dot')!;
+    expect(dot().classList.contains('is-flash')).toBe(true);
+    act(() => void vi.advanceTimersByTime(100));
+    expect(dot().classList.contains('is-flash')).toBe(false);
+  });
+
+  it('ripples at most six dots, flashing the others, and ignores off-map ids', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'ghost'] } });
+    expect(host!.querySelectorAll('.cmap-node:has(.cmap-save-ring)')).toHaveLength(6);
+    expect(node('g').querySelector('.cmap-dot')!.classList.contains('is-flash')).toBe(true);
+    expect(node('h').querySelector('.cmap-dot')!.classList.contains('is-flash')).toBe(true);
+  });
+
+  it('staggers the rings by 120 ms per dot', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a', 'b'] } });
+    expect((rings('a')[1] as SVGElement).style.animationDelay).toBe('200ms');
+    expect((rings('b')[0] as SVGElement).style.animationDelay).toBe('120ms');
+  });
+
+  it('removes the rings of a dot when they finish', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    ended(rings('a')[1]);
+    expect(rings('a')).toHaveLength(0);
+  });
+
+  it('a later seq plays again and restarts the folder tick', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    const sq = folderEl('f1').querySelector('.cmap-sq');
+    r.rerender({ entries: [entry(t())], saves: { seq: 2, ids: ['a'] } });
+    expect(folderEl('f1').querySelector('.cmap-sq')).not.toBe(sq);
+    expect(folderEl('f1').classList.contains('is-tick')).toBe(true);
+  });
+
+  it('ripples ids from two quick saves, and does not replay a seq it has played', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    r.rerender({ entries: [entry(t())], saves: { seq: 2, ids: ['b'] } });
+    expect(rings('a')).toHaveLength(2);
+    expect(rings('b')).toHaveLength(2);
+    ended(rings('a')[1]);
+    r.rerender({ entries: [entry(t())], saves: { seq: 2, ids: ['b'] } });
+    expect(rings('a')).toHaveLength(0);
+  });
+
+  it('draws no rings under reduced motion but still ticks and flashes', () => {
+    window.matchMedia = vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    expect(host!.querySelector('.cmap-save-ring')).toBeNull();
+    expect(folderEl('f1').classList.contains('is-tick')).toBe(true);
+    expect(node('a').querySelector('.cmap-dot')!.classList.contains('is-flash')).toBe(true);
+  });
+
+  it('waits out the write-on before playing saves that arrive during it', () => {
+    resetWriteOnForTests();
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    expect(host!.querySelector('.cmap-save-ring')).toBeNull();
+    act(() => void vi.advanceTimersByTime(3000));
+    expect(rings('a')).toHaveLength(2);
+  });
+
+  it('cancels its pending frames on unmount', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame');
+    act(() => root!.unmount());
+    root = null;
+    expect(cancel).toHaveBeenCalled();
+    cancel.mockRestore();
   });
 });

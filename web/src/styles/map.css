@@ -138,30 +138,15 @@
   opacity: 0;
 }
 
-/* Drying pulse: one soft glow when a dot's edit time changes while the map is open. */
-.cmap-pulse {
-  fill: var(--ink-wet);
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: cmap-pulse 600ms var(--ease-out);
-  pointer-events: none;
-}
-@keyframes cmap-pulse {
-  30% {
-    opacity: 0.6;
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.8);
-  }
-}
 /* 2px surface ring keeps dots legible where they cross lines. */
 .cmap-dot {
   stroke: var(--canvas);
   stroke-width: 4;
   paint-order: stroke;
+  transition: fill 1800ms cubic-bezier(.3,0,.2,1);
 }
+/* A saved note's dot flashes to the lightest ink for one frame, then eases back to its tier. */
+.cmap-dot.is-flash { fill: var(--ink-lighter) !important; transition: none; }
 .cmap-dot.tier-wet,
 .cmap-glow.tier-wet {
   fill: var(--ink-wet);
@@ -456,4 +441,15 @@
   .cmap-ring {
     display: none;
   }
+}
+
+/* Live ripples: two rings spread from a saved note's dot, and each folder on its path ticks. */
+.cmap-save-ring { fill: none; stroke: var(--ink-wet); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: cmap-save 1100ms var(--ease-out) both; pointer-events: none; }
+@keyframes cmap-save { from { opacity: .75; transform: scale(1); } to { opacity: 0; transform: scale(5.5); } }
+.cmap-folder.is-tick .cmap-sq { animation: cmap-tick 700ms ease-out; }
+@keyframes cmap-tick { 25% { stroke: var(--ink-wet); stroke-width: 3; } }
+@media (prefers-reduced-motion: reduce) {
+  .cmap-save-ring { display: none; }
+  .cmap-dot { transition-duration: 120ms; }
+  .cmap-folder.is-tick .cmap-sq { animation: none; }
 }
