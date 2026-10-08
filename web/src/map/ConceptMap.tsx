@@ -63,6 +63,8 @@ export interface ConceptMapProps {
   neighbours?: (noteId: string) => { id: string; similarity: number }[];
   /** Notes just saved. Each new `seq` ripples its ids (capped), flashes the rest and ticks their folders. */
   saves?: { seq: number; ids: string[] } | null;
+  /** Called with the seq of the last `saves` once its ids have played, so the owner can drop it. */
+  onSavesPlayed?: (seq: number) => void;
   now?: number;
 }
 
@@ -77,7 +79,7 @@ const NO_TICKS: ReadonlyMap<string, { seq: number; delay: number }> = new Map();
 const similarityText = (s: number) => s.toFixed(2).replace(/^0/, '');
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fitRequest = null, neighbours = NO_NEIGHBOURS, saves = null, now = Date.now() }: ConceptMapProps) {
+export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fitRequest = null, neighbours = NO_NEIGHBOURS, saves = null, onSavesPlayed, now = Date.now() }: ConceptMapProps) {
   const navigate = useNavigate();
   const uid = 'cm' + useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const frameRef = useRef<HTMLDivElement>(null);
@@ -155,7 +157,9 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
   const [flash, setFlash] = useState<ReadonlySet<string>>(NO_IDS);
   const [ticks, setTicks] = useState(NO_TICKS);
   const queued = useRef<string[]>([]);
-  const lastSaveSeq = useRef(saves?.seq ?? 0);
+  const lastSaveSeq = useRef(0);
+  const playedCb = useRef(onSavesPlayed);
+  playedCb.current = onSavesPlayed;
   const playSeq = useRef(0);
   const flashFrames = useRef<number[]>([]);
   const cancelFlash = () => {
@@ -182,6 +186,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
     const play = () => {
       const plan = planRipples(queued.current, dotIdSet);
       queued.current = [];
+      playedCb.current?.(lastSaveSeq.current);
       const seq = ++playSeq.current;
       const ids = [...plan.ripple.map((r) => r.id), ...plan.flash];
       if (ids.length === 0) return;

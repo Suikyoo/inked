@@ -138,6 +138,8 @@ export function HomePage() {
   const [saves, setSaves] = useState<{ seq: number; ids: string[] } | null>(null);
   const saveSeq = useRef(0);
   const saveBuf = useRef<string[]>([]);
+  // Once the map has played a seq it is dropped, so a map that mounts later does not replay it.
+  const onSavesPlayed = useCallback((seq: number) => setSaves((cur) => (cur && cur.seq <= seq ? null : cur)), []);
   useLayoutEffect(() => {
     saveBuf.current = [];
   }, [saves]);
@@ -297,7 +299,7 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} saves={saves} />
+            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} saves={saves} onSavesPlayed={onSavesPlayed} />
           </section>
         )}
 

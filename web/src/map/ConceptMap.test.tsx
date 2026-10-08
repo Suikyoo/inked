@@ -2,6 +2,8 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NoteView, TreeView } from '../state/store';
 import { ConceptMap, resetWriteOnForTests, type ConceptMapProps, type MapSelection } from './ConceptMap';
@@ -904,6 +906,24 @@ describe('live ripples', () => {
     expect(host!.querySelector('.cmap-save-ring')).toBeNull();
     act(() => void vi.advanceTimersByTime(3000));
     expect(rings('a')).toHaveLength(2);
+  });
+
+  it('plays a held saves value on a fresh mount, once, and reports it played', () => {
+    const played = vi.fn();
+    render({ entries: [entry(t())], saves: { seq: 3, ids: ['a'] }, onSavesPlayed: played });
+    expect(rings('a')).toHaveLength(2);
+    expect(played).toHaveBeenCalledTimes(1);
+    expect(played).toHaveBeenCalledWith(3);
+  });
+
+  it('holds the second ring back with a delay, and the CSS never fills backwards into view', () => {
+    const r = render({ entries: [entry(t())] });
+    r.rerender({ entries: [entry(t())], saves: { seq: 1, ids: ['a'] } });
+    expect(Number.parseInt((rings('a')[1] as SVGElement).style.animationDelay, 10)).toBeGreaterThan(0);
+    const css = readFileSync(join(import.meta.dirname, '../styles/map.css'), 'utf8');
+    const rule = css.match(/.cmap-save-ring {[^}]*}/)![0];
+    expect(rule).toContain('opacity: 0');
+    expect(rule).not.toMatch(/both/);
   });
 
   it('cancels its pending frames on unmount', () => {

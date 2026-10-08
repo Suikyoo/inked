@@ -444,12 +444,14 @@
 }
 
 /* Live ripples: two rings spread from a saved note's dot, and each folder on its path ticks. */
-.cmap-save-ring { fill: none; stroke: var(--ink-wet); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: cmap-save 1100ms var(--ease-out) both; pointer-events: none; }
+.cmap-save-ring { fill: none; stroke: var(--ink-wet); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; opacity: 0; animation: cmap-save 1100ms var(--ease-out) forwards; pointer-events: none; }
 @keyframes cmap-save { from { opacity: .75; transform: scale(1); } to { opacity: 0; transform: scale(5.5); } }
 .cmap-folder.is-tick .cmap-sq { animation: cmap-tick 700ms ease-out; }
 @keyframes cmap-tick { 25% { stroke: var(--ink-wet); stroke-width: 3; } }
 @media (prefers-reduced-motion: reduce) {
   .cmap-save-ring { display: none; }
   .cmap-dot { transition-duration: 120ms; }
-  .cmap-folder.is-tick .cmap-sq { animation: none; }
+  /* The global reduced-motion rule forces 1ms; the more specific selector keeps a short 120ms colour change. */
+  .cmap-folder.is-tick .cmap-sq { animation: cmap-tick-rm 120ms ease-out !important; }
 }
+@keyframes cmap-tick-rm { from { stroke: var(--ink-wet); } }

@@ -319,7 +319,7 @@ A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px
 
 **Live ripples.** When a note is saved (here, in another tab, or on another device), its dot flashes to `ink-lighter` for one frame and eases back to its tier over 1800ms, two `ink-wet` rings spread from it (r 5, scaling to 5.5x over 1100ms, the second 200ms after the first), and each folder square on its path ticks to a 3px `ink-wet` stroke over 700ms. At most 6 notes ripple at once, staggered 120ms apart; further saved notes only flash. Notes not on the map are ignored. Saves made while Home was not open ripple once when it opens, after the write-on has finished.
 
-**Reduced motion.** No rings, no flowing links, no threads' draw-in, no pulses and no folder tick animation. The lit state still dims and lights, the dot flash is still applied (its fill eases over 120ms rather than 1800ms), and selection is still conveyed by the ink path and the selection ring.
+**Reduced motion.** No rings, no flowing links, no threads' draw-in and no pulses. The folder tick shrinks to a 120ms stroke colour change. The lit state still dims and lights, the dot flash is still applied (its fill eases over 120ms rather than 1800ms), and selection is still conveyed by the ink path and the selection ring.
 
 ## Motion
 
