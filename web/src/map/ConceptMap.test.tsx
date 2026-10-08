@@ -676,6 +676,14 @@ describe('lit state', () => {
     expect(host!.querySelectorAll('.cmap-alink')).toHaveLength(0);
   });
 
+  it('does not dim on hover while a query is active, even with no hits', () => {
+    render({ entries: [linked()], hits: new Set(), searching: true });
+    hoverDot('a');
+    expect(dimmed()).toEqual([]);
+    expect(host!.querySelectorAll('.cmap-alink')).toHaveLength(0);
+    expect(nodes().some((n) => n.classList.contains('is-faded'))).toBe(false);
+  });
+
   it('applies hover once per frame and cancels a pending frame on unmount', () => {
     const cancel = vi.spyOn(window, 'cancelAnimationFrame');
     render({ entries: [linked()] });

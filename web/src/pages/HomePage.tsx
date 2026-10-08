@@ -26,6 +26,7 @@ interface RowFlags {
 const STAGGER_ROWS = 8;
 /** Wait this long after the last keystroke before asking for meaning matches. */
 const SEMANTIC_DEBOUNCE_MS = 250;
+const NO_MEANING: SemanticInput[] = [];
 const toMB = (bytes: number) => Math.round(bytes / 1e6);
 
 function Highlighted({ text, indices, offset }: { text: string; indices: number[]; offset: number }) {
@@ -81,11 +82,12 @@ export function HomePage() {
     const exclude = new Set(titleHits.map((h) => h.entry.noteId));
     return searchBodies(q, entries, state.bodies, exclude, 15);
   }, [q, entries, state.bodies, titleHits]);
-  const [semantic, setSemantic] = useState<SemanticInput[]>([]);
+  // Meaning results are kept with the query they answer, so rows never mix them with another query's hits.
+  const [semantic, setSemantic] = useState<{ q: string; results: SemanticInput[] }>({ q: '', results: [] });
   const semReady = sem.phase === 'ready';
   useEffect(() => {
     if (q.length < 3 || !semReady) {
-      setSemantic((prev) => (prev.length ? [] : prev));
+      setSemantic((prev) => (prev.results.length ? { q: '', results: [] } : prev));
       return;
     }
     const abort = new AbortController();
@@ -93,10 +95,10 @@ export function HomePage() {
       semanticStore
         .search(q, abort.signal)
         .then((r) => {
-          if (!abort.signal.aborted) setSemantic(r);
+          if (!abort.signal.aborted) setSemantic({ q, results: r });
         })
         .catch(() => {
-          if (!abort.signal.aborted) setSemantic([]);
+          if (!abort.signal.aborted) setSemantic({ q, results: [] });
         });
     }, SEMANTIC_DEBOUNCE_MS);
     return () => {
@@ -104,13 +106,15 @@ export function HomePage() {
       abort.abort();
     };
   }, [q, semReady, semanticStore]);
-  const liveRows = useMemo(() => buildRows(titleHits, bodyHits, semantic, entries, q), [titleHits, bodyHits, semantic, entries, q]);
+  const meaning = semantic.q === q ? semantic.results : NO_MEANING;
+  const liveRows = useMemo(() => buildRows(titleHits, bodyHits, meaning, entries, q), [titleHits, bodyHits, meaning, entries, q]);
   // While focus is inside the list the rows hold still, so a late meaning result cannot move what the reader is
-  // about to open. The new rows wait in liveRows and apply when focus leaves the list or the query changes.
-  const browsing = useRef(false);
+  // about to open. The new rows wait in liveRows and apply when focus leaves the list or the query changes. The
+  // hold is read from the document at render time, so a focused row that unmounts releases it by itself.
   const shown = useRef<{ q: string; rows: SearchRow[] } | null>(null);
   const [, setTick] = useState(0);
-  const held = browsing.current && shown.current?.q === q ? shown.current.rows : null;
+  const browsing = !!listRef.current?.contains(document.activeElement);
+  const held = browsing && shown.current?.q === q ? shown.current.rows : null;
   const rows = held ?? liveRows;
   shown.current = { q, rows };
   const mapEntries = useVaultGraphs(state);
@@ -299,7 +303,7 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} saves={saves} onSavesPlayed={onSavesPlayed} />
+            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} saves={saves} onSavesPlayed={onSavesPlayed} searching={q.length > 0} />
           </section>
         )}
 
@@ -311,17 +315,12 @@ export function HomePage() {
           onKeyDown={onListKey}
           onMouseOver={(e) => setHot(hotFrom(e.target))}
           onMouseLeave={() => setHot(null)}
-          onFocus={(e) => {
-            setHot(hotFrom(e.target));
-            browsing.current = true;
-          }}
+          onFocus={(e) => setHot(hotFrom(e.target))}
           onBlur={(e) => {
             setHot(null);
             const next = e.relatedTarget;
-            if (browsing.current && !(next instanceof Node && e.currentTarget.contains(next))) {
-              browsing.current = false;
-              setTick((n) => n + 1);
-            }
+            // Focus left the list: render again so rows that waited behind the hold apply.
+            if (!(next instanceof Node && e.currentTarget.contains(next))) setTick((n) => n + 1);
           }}
         >
           {homeError(state) ? (

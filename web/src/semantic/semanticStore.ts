@@ -163,6 +163,7 @@ export class SemanticStore {
       const arrived = [...this.awaitingBody].filter((id) => id in s.bodies);
       for (const id of arrived) this.awaitingBody.delete(id);
       if (arrived.length) this.enqueue(arrived);
+      this.refreshCoverage();
     }
   };
 
@@ -239,8 +240,10 @@ export class SemanticStore {
       }
       this.embedder = emb;
       await emb.load(m, (loaded, total) => {
-        // Every file in (or already cached, on the first report): only the model is left to start.
-        if (live()) this.set({ phase: loaded >= total ? 'loading' : 'downloading', download: { loaded, total } });
+        // Loading starts once every expected byte is in (or already cached, on the first report). Between two files
+        // loaded equals total for the files seen so far, so that alone must not end the download phase.
+        const expected = Math.max(total, this.state.downloadBytes ?? 0);
+        if (live()) this.set({ phase: loaded >= expected ? 'loading' : 'downloading', download: { loaded, total } });
       });
       if (!live()) return;
       this.set({ phase: 'ready', download: null });
@@ -318,7 +321,7 @@ export class SemanticStore {
 
   private coverage(): SemanticState['coverage'] {
     const out: SemanticState['coverage'] = {};
-    const { trees } = this.app.getState();
+    const { trees, bodies, bodiesFailed } = this.app.getState();
     for (const vaultId of this.vectorsIn) {
       const t = trees[vaultId];
       if (!t) continue;
@@ -326,8 +329,15 @@ export class SemanticStore {
       let total = 0;
       for (const n of Object.values(t.notes)) {
         if (n.broken) continue;
+        const embedded = !!this.fresh(n.id);
+        // A note that can never be embedded (blank title and body, or a body that failed to decrypt) is left out,
+        // or the indexing bar and the "meaning covers" note would never go away.
+        if (!embedded) {
+          const body = bodies[n.id];
+          if (body === undefined ? bodiesFailed[n.id] : !n.title.trim() && body.trim() === '') continue;
+        }
         total++;
-        if (this.fresh(n.id)) done++;
+        if (embedded) done++;
       }
       out[vaultId] = { done, total };
     }

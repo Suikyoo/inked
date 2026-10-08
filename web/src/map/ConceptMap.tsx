@@ -53,6 +53,8 @@ export interface ConceptMapProps {
   hits: ReadonlySet<string>;
   /** Note under the pointer or focus in the results list. */
   hot: string | null;
+  /** A search query is active (even with no hits): focus and hover stay off. */
+  searching?: boolean;
   loading: boolean;
   selected: MapSelection | null;
   /** Called with the clicked node, or null when Escape or a background click clears the selection. */
@@ -79,7 +81,7 @@ const NO_TICKS: ReadonlyMap<string, { seq: number; delay: number }> = new Map();
 const similarityText = (s: number) => s.toFixed(2).replace(/^0/, '');
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fitRequest = null, neighbours = NO_NEIGHBOURS, saves = null, onSavesPlayed, now = Date.now() }: ConceptMapProps) {
+export function ConceptMap({ entries, hits, hot, searching: queryActive = false, loading, selected, onSelect, fitRequest = null, neighbours = NO_NEIGHBOURS, saves = null, onSavesPlayed, now = Date.now() }: ConceptMapProps) {
   const navigate = useNavigate();
   const uid = 'cm' + useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const frameRef = useRef<HTMLDivElement>(null);
@@ -503,7 +505,8 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
   });
 
   // Lit state: class toggles only, so the scene is never rebuilt by a hover.
-  const searching = hits.size > 0;
+  const faded = hits.size > 0;
+  const searching = faded || queryActive;
   const focus = mapFocus({
     hover: hover && dotById.has(hover) ? hover : null,
     keyboard: focusId && dotById.has(focusId) ? focusId : null,
@@ -704,7 +707,7 @@ export function ConceptMap({ entries, hits, hot, loading, selected, onSelect, fi
               <g
                 key={dot.id}
                 ref={nodeRef(dot.id)}
-                className={`cmap-node tier-${tier}${dens === 'hollow' ? ' is-orphan' : ''}${searching && !inkedNotes.has(dot.id) ? ' is-faded' : ''}${dimming && !lit.notes.has(dot.id) ? ' is-dim' : ''}`}
+                className={`cmap-node tier-${tier}${dens === 'hollow' ? ' is-orphan' : ''}${faded && !inkedNotes.has(dot.id) ? ' is-faded' : ''}${dimming && !lit.notes.has(dot.id) ? ' is-dim' : ''}`}
                 data-note={dot.id}
                 transform={`translate(${f1(x)} ${f1(y)})`}
                 style={writing ? { animationDelay: ms(dot.folderIds.length * WRITE_STEP_MS + NODE_LAG_MS) } : undefined}

@@ -240,6 +240,18 @@ describe('AppStore notes saved event', () => {
     await vi.waitFor(() => expect(s.getState().bodies[x.id]).toBe('new text'));
   });
 
+  it('marks a body that cannot be decrypted as failed, and clears the mark once it reads', async () => {
+    const { s, vaultId, notes } = await storeWithNotes(['x']);
+    const x = notes[0];
+    const good = x.encBody;
+    api.bodies.mockResolvedValue({ notes: [{ id: x.id, encBody: 'v1.not-a-real-ciphertext', updatedAt: T0 }] });
+    await s.loadBodies(vaultId);
+    expect(s.getState().bodiesFailed[x.id]).toBe(true);
+    api.bodies.mockResolvedValue({ notes: [{ id: x.id, encBody: good, updatedAt: T0 }] });
+    await s.loadBodies(vaultId);
+    expect(x.id in s.getState().bodiesFailed).toBe(false);
+  });
+
   it('bodies fetched before a reload never come back as the new text', async () => {
     const { s, vaultId, notes } = await storeWithNotes(['x']);
     const x = notes[0];

@@ -102,9 +102,9 @@ To move Inked to another host, copy the tarball there, run `docker compose up -d
 
 ## Semantic search model
 
-The semantic search model (bge-small-en-v1.5, q8 ONNX) and the ONNX Runtime WASM are downloaded at image build time from Hugging Face. The revision is pinned and every file is sha256-checked by `scripts/fetch-model.mjs`; a mismatch fails the build. They are served from Inked's own origin under `/models/`, and nothing is fetched at runtime.
+The semantic search model (bge-small-en-v1.5, q8 ONNX) is downloaded at image build time from Hugging Face. The revision is pinned and every model file is sha256-checked by `scripts/fetch-model.mjs`; a mismatch fails the build. The ONNX Runtime WASM is copied from the npm package, so it is not sha256-checked there; its integrity comes from the npm lockfile. The model and runtime are served from Inked's own origin under `/models/`, and nothing is fetched at runtime.
 
-`INKED_SEMANTIC=0 docker compose build` leaves the model out (about 45 MB smaller). The semantic search toggle is then hidden in the app. The default is `INKED_SEMANTIC=1`.
+`INKED_SEMANTIC=0 docker compose build` leaves the model out (about 56 MB smaller). The semantic search toggle is then hidden in the app. The default is `INKED_SEMANTIC=1`.
 
 ## 7. Accepted risk
 

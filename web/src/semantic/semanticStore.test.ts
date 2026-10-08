@@ -3,7 +3,7 @@ import { RESAVE_DEBOUNCE_MS, SemanticStore, UPLOAD_BACKOFF_MS } from './semantic
 
 // Fake AppStore: minimal surface used by SemanticStore.
 function fakeApp() {
-  let state: any = { phase: 'locked', trees: {}, bodies: {}, bodiesReady: {} };
+  let state: any = { phase: 'locked', trees: {}, bodies: {}, bodiesReady: {}, bodiesFailed: {} };
   const ls = new Set<() => void>();
   const saved = new Set<(ids: string[]) => void>();
   return {
@@ -67,6 +67,21 @@ describe('SemanticStore', () => {
     expect(s.getState().available).toBe(false);
     expect(s.getState().phase).toBe('unavailable');
     expect(embedder.load).not.toHaveBeenCalled();
+  });
+
+  it('leaves notes that can never be embedded out of coverage', async () => {
+    const app = fakeApp();
+    const { d } = deps();
+    const s = new SemanticStore(app as any, d as any);
+    app.set({
+      phase: 'unlocked',
+      trees: tree([{ id: 'a', updatedAt: '2026-10-01T00:00:00.000Z' }, { id: 'blank', title: '  ', updatedAt: '2026-10-01T00:00:00.000Z' }, { id: 'locked', updatedAt: '2026-10-01T00:00:00.000Z' }]),
+    });
+    await flush();
+    // Bodies arrive: 'blank' is empty and 'locked' never decrypted.
+    app.set({ bodies: { a: 'alpha', blank: '   ' }, bodiesReady: { v: true }, bodiesFailed: { locked: true } });
+    await flushN(10);
+    expect(s.getState().coverage.v).toEqual({ done: 1, total: 1 });
   });
 
   it('embeds stale notes newest first, uploads, and reports coverage', async () => {
@@ -286,7 +301,7 @@ describe('SemanticStore', () => {
     const { d, embedder } = deps({ prefs: { semantic: () => false, setSemantic: vi.fn() } });
     d.api.listVectors = vi.fn(async () => ({ vectors: [{ noteId: 'a', model: 'bge@1', encVec: 'x', sourceUpdatedAt: '2026-10-01T00:00:00.000Z' }, { noteId: 'b', model: 'bge@1', encVec: 'y', sourceUpdatedAt: '2026-10-01T00:00:00.000Z' }] }));
     const s = new SemanticStore(app as any, d as any);
-    app.set({ phase: 'unlocked', trees: tree([{ id: 'a', updatedAt: '2026-10-01T00:00:00.000Z' }, { id: 'b', updatedAt: '2026-10-01T00:00:00.000Z' }]), bodiesReady: { v: true } });
+    app.set({ phase: 'unlocked', trees: tree([{ id: 'a', updatedAt: '2026-10-01T00:00:00.000Z' }, { id: 'b', updatedAt: '2026-10-01T00:00:00.000Z' }]), bodies: { a: 'alpha', b: 'beta' }, bodiesReady: { v: true } });
     await flushN(5);
     expect(embedder.load).not.toHaveBeenCalled();
     expect(s.getState().phase).toBe('off');
@@ -352,6 +367,23 @@ describe('SemanticStore', () => {
     finish();
     await flush();
     expect(s.getState().phase).toBe('ready');
+  });
+
+  it('stays downloading between files until every expected byte has arrived', async () => {
+    const app = fakeApp();
+    const { d, embedder } = deps({ fetchManifest: async () => ({ ...manifest, files: [{ path: 'a', bytes: 20, sha256: 'x' }, { path: 'b', bytes: 30, sha256: 'y' }] }) });
+    let progress!: (l: number, t: number) => void;
+    embedder.load.mockImplementation((_m, p) => ((progress = p), new Promise<void>(() => {})));
+    const s = new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    // File 1 is in and file 2 has not started: loaded == total for the files seen so far.
+    progress(20, 20);
+    expect(s.getState().phase).toBe('downloading');
+    progress(35, 50);
+    expect(s.getState().phase).toBe('downloading');
+    progress(50, 50);
+    expect(s.getState().phase).toBe('loading');
   });
 
   it('a cached model skips the download phase', async () => {

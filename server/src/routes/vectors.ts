@@ -46,7 +46,8 @@ export function vectorRoutes(app: FastifyInstance, ctx: AppContext): void {
       `INSERT INTO note_vectors (note_id, vault_id, model, enc_vec, source_updated_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(note_id) DO UPDATE SET model = excluded.model, enc_vec = excluded.enc_vec,
-         source_updated_at = excluded.source_updated_at, updated_at = excluded.updated_at`,
+         source_updated_at = excluded.source_updated_at, updated_at = excluded.updated_at
+         WHERE excluded.source_updated_at >= note_vectors.source_updated_at`,
     ).run(note.id, note.vault_id, model, ct, new Date(source).toISOString(), nowIso());
     return { ok: true };
   });

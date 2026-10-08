@@ -450,7 +450,11 @@
 @keyframes cmap-tick { 25% { stroke: var(--ink-wet); stroke-width: 3; } }
 @media (prefers-reduced-motion: reduce) {
   .cmap-save-ring { display: none; }
-  .cmap-dot { transition-duration: 120ms; }
+  /* The global reduced-motion rule limits transitions to opacity and colours, which drops fill. Restore fill on the
+     dots alone, at 120ms, so the save flash still settles instead of blipping for one frame. The flash itself
+     still jumps at once. */
+  .cmap-dot { transition-property: fill !important; transition-duration: 120ms !important; }
+  .cmap-dot.is-flash { transition: none !important; }
   /* The global reduced-motion rule forces 1ms; the more specific selector keeps a short 120ms colour change. */
   .cmap-folder.is-tick .cmap-sq { animation: cmap-tick-rm 120ms ease-out !important; }
 }

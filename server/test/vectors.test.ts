@@ -43,6 +43,17 @@ describe('note vectors', () => {
     const note = (await as(alice).get(`/api/notes/${noteId}`)).json().note;
     expect(note.updatedAt).toBe(updatedAt);
   });
+  it('keeps the newer vector when an older write arrives late', async () => {
+    const { vaultId, noteId, updatedAt } = await vaultWithNote(alice);
+    const older = new Date(Date.parse(updatedAt) - 60_000).toISOString();
+    const newer = { model: 'm', encVec: fakeCipher(1600), sourceUpdatedAt: updatedAt };
+    expect((await as(alice).put(`/api/notes/${noteId}/vector`, newer)).statusCode).toBe(200);
+    const late = await as(alice).put(`/api/notes/${noteId}/vector`, { model: 'm', encVec: fakeCipher(1600), sourceUpdatedAt: older });
+    expect(late.statusCode).toBe(200);
+    expect(late.json()).toEqual({ ok: true });
+    const list = (await as(alice).get(`/api/vaults/${vaultId}/vectors`)).json().vectors;
+    expect(list).toEqual([{ noteId, model: 'm', encVec: newer.encVec, sourceUpdatedAt: updatedAt }]);
+  });
   it('answers 422 for a sourceUpdatedAt newer than the note and 400 for a bad date', async () => {
     const { noteId } = await vaultWithNote(alice);
     const future = new Date(Date.now() + 60_000).toISOString();

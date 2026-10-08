@@ -259,6 +259,36 @@ describe('HomePage search by meaning', () => {
     expect(titles().some((t) => t?.endsWith('Gamma'))).toBe(true);
   });
 
+  it('shows no meaning row from the previous query while the new one is pending', async () => {
+    const pending: ((r: SemanticInput[]) => void)[] = [];
+    const search = vi.fn(async (q: string) => (q === 'car' ? ([{ noteId: 'n4', similarity: 0.8, chunk: 0 }] as SemanticInput[]) : new Promise<SemanticInput[]>((r) => pending.push(r))));
+    mount(baseState(), semanticStub(ready, { search, chunkText: () => 'Gamma talks about cars' }));
+    type('car');
+    await advance(250);
+    expect(rows().some((r) => titleOf(r)?.endsWith('Gamma'))).toBe(true);
+    type('cars');
+    expect(rows().some((r) => r.querySelector('.res-why[data-why="meaning"]'))).toBe(false);
+    await advance(250);
+    // Enter would open rows[0]; there is none, so the note that matched only the old query is not offered.
+    expect(host!.querySelectorAll('aside.results a.res')).toHaveLength(0);
+    await act(async () => pending[0]([{ noteId: 'n4', similarity: 0.7, chunk: 0 }]));
+    expect(rows().some((r) => titleOf(r)?.endsWith('Gamma'))).toBe(true);
+  });
+
+  it('does not freeze the order after a focused Related row unmounts', async () => {
+    const neighbours = vi.fn((id: string, _k: number, among?: ReadonlySet<string>) => (among ? [] : id === 'n1' ? [{ id: 'n3', similarity: 0.8 }] : id === 'n3' ? [{ id: 'n1', similarity: 0.8 }] : []));
+    const search = vi.fn(async () => [{ noteId: 'n4', similarity: 0.9, chunk: 0 }] as SemanticInput[]);
+    mount(baseState(), semanticStub(ready, { search, neighbours, chunkText: () => 'Gamma talks about cars' }));
+    click(host!.querySelector('g.cmap-node[data-note="n1"]')!);
+    const rel = host!.querySelector<HTMLButtonElement>('.preview-related button')!;
+    act(() => rel.focus());
+    click(rel);
+    expect(rel.isConnected).toBe(false);
+    type('alpha');
+    await advance(250);
+    expect(rows().some((r) => titleOf(r)?.endsWith('Gamma'))).toBe(true);
+  });
+
   it('never searches by meaning unless the model is ready', async () => {
     const { search, store } = sem(async () => [], { phase: 'off', enabled: false, available: true });
     mount(baseState(), store);

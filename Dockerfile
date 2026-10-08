@@ -8,6 +8,8 @@ COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
 COPY mcp/package.json mcp/
+# onnxruntime-node's postinstall otherwise downloads the CUDA build (hundreds of MB) on linux/x64. It is never used.
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 RUN npm ci
 COPY core core
 COPY server server

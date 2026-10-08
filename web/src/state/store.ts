@@ -93,6 +93,8 @@ export interface AppState {
   /** Decrypted note bodies, for full-text search and backlinks. Memory only. */
   bodies: Record<string, string>;
   bodiesReady: Record<string, boolean>;
+  /** Notes whose body was fetched but could not be decrypted: they have no entry in `bodies` and never will. */
+  bodiesFailed: Record<string, true>;
   /** This account's saves waiting in the ciphertext queue (see syncPendingCount). Survives lock (not part of EMPTY_DATA). */
   pendingCount: number;
   /** A lock, sign-out or session end is flushing edits before the keys go: editing is paused. */
@@ -106,6 +108,7 @@ const EMPTY_DATA = {
   trees: {},
   bodies: {},
   bodiesReady: {},
+  bodiesFailed: {},
 };
 
 const initialState: AppState = {
@@ -1013,12 +1016,14 @@ export class AppStore {
     const key = this.vaultKey(vaultId);
     const { notes } = await api.bodies(vaultId);
     const out: Record<string, string> = {};
+    const failed: string[] = [];
     await Promise.all(
       notes.map(async (n) => {
         try {
           out[n.id] = await decryptNoteBody(key, vaultId, n.id, n.encBody);
         } catch {
           // Unreadable bodies are simply not searchable.
+          failed.push(n.id);
         }
       }),
     );
@@ -1028,7 +1033,10 @@ export class AppStore {
     this.set((s) => {
       const heads = s.trees[vaultId]?.notes ?? {};
       for (const n of notes) if (n.id in out && heads[n.id] && heads[n.id].updatedAt > n.updatedAt) delete out[n.id];
-      return { bodies: { ...out, ...s.bodies }, bodiesReady: { ...s.bodiesReady, [vaultId]: true } };
+      const bodiesFailed = { ...s.bodiesFailed };
+      for (const n of notes) delete bodiesFailed[n.id];
+      for (const id of failed) bodiesFailed[id] = true;
+      return { bodies: { ...out, ...s.bodies }, bodiesReady: { ...s.bodiesReady, [vaultId]: true }, bodiesFailed };
     });
   }
 
