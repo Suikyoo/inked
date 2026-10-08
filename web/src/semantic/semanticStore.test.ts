@@ -371,7 +371,7 @@ describe('SemanticStore', () => {
 
   it('stays downloading between files until every expected byte has arrived', async () => {
     const app = fakeApp();
-    const { d, embedder } = deps({ fetchManifest: async () => ({ ...manifest, files: [{ path: 'a', bytes: 20, sha256: 'x' }, { path: 'b', bytes: 30, sha256: 'y' }] }) });
+    const { d, embedder } = deps({ fetchManifest: async () => ({ ...manifest, files: [{ path: '1/a', bytes: 20, sha256: 'x' }, { path: '1/b', bytes: 30, sha256: 'y' }] }) });
     let progress!: (l: number, t: number) => void;
     embedder.load.mockImplementation((_m, p) => ((progress = p), new Promise<void>(() => {})));
     const s = new SemanticStore(app as any, d as any);
@@ -383,6 +383,28 @@ describe('SemanticStore', () => {
     progress(35, 50);
     expect(s.getState().phase).toBe('downloading');
     progress(50, 50);
+    expect(s.getState().phase).toBe('loading');
+  });
+
+  it('switches to loading once the model files are in, even though the ORT runtime files were never reported', async () => {
+    const app = fakeApp();
+    const realistic = {
+      ...manifest,
+      modelPath: 'abcd/',
+      ortPath: 'ort-1/',
+      files: [
+        { path: 'abcd/tokenizer.json', bytes: 700_000, sha256: 'a' },
+        { path: 'abcd/model_quantized.onnx', bytes: 33_300_000, sha256: 'b' },
+        { path: 'ort-1/ort-wasm-simd-threaded.wasm', bytes: 21_600_000, sha256: 'c' },
+      ],
+    };
+    const { d, embedder } = deps({ fetchManifest: async () => realistic });
+    let progress!: (l: number, t: number) => void;
+    embedder.load.mockImplementation((_m, p) => ((progress = p), new Promise<void>(() => {})));
+    const s = new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    progress(34_000_000, 34_000_000);
     expect(s.getState().phase).toBe('loading');
   });
 

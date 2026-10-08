@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import { prefs } from '../lib/prefs';
 import type { AppStore } from '../state/store';
 import type { Embedder } from './embedderClient';
-import { fetchManifest, modelBytes, type Manifest } from './manifest';
+import { fetchManifest, modelBytes, transformerBytes, type Manifest } from './manifest';
 import { clearModelCache, requestPersist, verifyModelCache } from './modelCache';
 
 export const RESAVE_DEBOUNCE_MS = 2000;
@@ -242,7 +242,7 @@ export class SemanticStore {
       await emb.load(m, (loaded, total) => {
         // Loading starts once every expected byte is in (or already cached, on the first report). Between two files
         // loaded equals total for the files seen so far, so that alone must not end the download phase.
-        const expected = Math.max(total, this.state.downloadBytes ?? 0);
+        const expected = Math.max(total, transformerBytes(m));
         if (live()) this.set({ phase: loaded >= expected ? 'loading' : 'downloading', download: { loaded, total } });
       });
       if (!live()) return;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchManifest } from './manifest';
+import { fetchManifest, modelBytes, transformerBytes } from './manifest';
 
 const res = (status: number, body: string, type = 'application/json') =>
   Promise.resolve(new Response(body, { status, headers: { 'content-type': type } }));
@@ -14,5 +14,22 @@ describe('fetchManifest', () => {
     expect(await fetchManifest(() => res(200, '<!doctype html>', 'text/html'))).toBeNull();
     expect(await fetchManifest(() => res(200, '{"model":1}'))).toBeNull();
     expect(await fetchManifest(() => Promise.reject(new TypeError('offline')))).toBeNull();
+  });
+});
+
+describe('transformerBytes', () => {
+  it('sums only the files transformers.js fetches (under modelPath)', () => {
+    const m = {
+      ...good,
+      modelPath: 'abcd1234/',
+      ortPath: 'ort-1/',
+      files: [
+        { path: 'abcd1234/tokenizer.json', sha256: 'a', bytes: 700 },
+        { path: 'abcd1234/model.onnx', sha256: 'b', bytes: 33_000 },
+        { path: 'ort-1/ort-wasm.wasm', sha256: 'c', bytes: 21_600 },
+      ],
+    };
+    expect(transformerBytes(m)).toBe(33_700);
+    expect(modelBytes(m)).toBe(55_300);
   });
 });

@@ -29,3 +29,7 @@ export async function fetchManifest(fetcher: typeof fetch = fetch): Promise<Mani
 }
 
 export const modelBytes = (m: Manifest) => m.files.reduce((n, f) => n + f.bytes, 0);
+
+/** Bytes of the files transformers.js fetches and reports (under modelPath); ORT files are excluded. */
+export const transformerBytes = (m: Manifest) =>
+  m.files.reduce((n, f) => (f.path.startsWith(m.modelPath) ? n + f.bytes : n), 0);
