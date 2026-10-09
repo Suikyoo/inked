@@ -113,6 +113,41 @@
   background: rgba(233, 201, 207, 0.08);
 }
 
+/* This browser has not chosen whether to download the search model. */
+.model-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 4px 12px 4px 24px;
+  background: var(--row-selected);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.model-bar-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+.model-bar-btn {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-lighter);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.model-bar-btn.is-quiet {
+  color: var(--muted);
+  font-weight: 500;
+}
+.model-bar-btn:hover {
+  background: var(--menu-hover);
+}
+
 /* ---- Sidebar ----------------------------------------------------------------------------- */
 .sidebar {
   position: sticky;
@@ -405,6 +440,10 @@
   }
   .sync-bar {
     padding: 0 8px 0 16px;
+  }
+  .model-bar {
+    padding: 4px 8px 4px 16px;
+    flex-wrap: wrap;
   }
   /* Touch: always show row actions. */
   .tree-actions {
