@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS note_vectors (
   updated_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS note_vectors_vault ON note_vectors(vault_id);
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  enc_settings TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
 `;
 
 export function openDb(file: string): Db {
@@ -166,5 +171,11 @@ export interface NoteVectorRow {
   model: string;
   enc_vec: string;
   source_updated_at: string;
+  updated_at: string;
+}
+
+export interface UserSettingsRow {
+  user_id: string;
+  enc_settings: string;
   updated_at: string;
 }

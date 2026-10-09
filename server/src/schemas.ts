@@ -20,6 +20,10 @@ export const wrappedKey = ciphertext(1024);
 /** 1 + 16×384 int8 plaintext, plus IV and tag, base64url: about 8.3k chars. */
 export const ENC_VEC_MAX = 9 * 1024;
 export const encVec = ciphertext(ENC_VEC_MAX);
+
+/** Encrypted account settings (Ask provider and the search-by-meaning switch). */
+export const ENC_SETTINGS_MAX = 4 * 1024;
+export const encSettings = ciphertext(ENC_SETTINGS_MAX);
 export const modelName = { type: 'string', pattern: '^[A-Za-z0-9._@/-]{1,80}$' } as const;
 
 /** base64url of 32 bytes (authKey, recoveryAuth); trailing padding tolerated. */

@@ -14,6 +14,7 @@ import { folderRoutes } from './routes/folders.js';
 import { inviteRoutes } from './routes/invites.js';
 import { noteRoutes } from './routes/notes.js';
 import { vaultRoutes } from './routes/vaults.js';
+import { settingsRoutes } from './routes/settings.js';
 import { vectorRoutes } from './routes/vectors.js';
 import { BODY_LIMIT } from './schemas.js';
 
@@ -178,6 +179,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   folderRoutes(app, ctx);
   noteRoutes(app, ctx);
   vectorRoutes(app, ctx);
+  settingsRoutes(app, ctx);
 
   // The SPA is optional: without a built web/dist the server is API-only.
   const hasWeb = existsSync(path.join(opts.webDist, 'index.html'));
