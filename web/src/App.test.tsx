@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { AppState, AppStore } from './state/store';
+import { accountStub } from './test/account';
 import { semanticStub } from './test/semantic';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,7 +26,7 @@ function render(store: ReturnType<typeof fakeStore>) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  act(() => root!.render(<App store={store as unknown as AppStore} semantic={semanticStub()} />));
+  act(() => root!.render(<App store={store as unknown as AppStore} semantic={semanticStub()} account={accountStub()} />));
   return host;
 }
 

@@ -13,6 +13,8 @@ import { AuthLayout } from './pages/AuthLayout';
 import { InsecureContextPage } from './pages/InsecureContextPage';
 import { SemanticProvider } from './semantic/SemanticContext';
 import type { SemanticStore } from './semantic/semanticStore';
+import { AccountSettingsProvider } from './state/AccountSettingsContext';
+import type { AccountSettingsStore } from './state/accountSettings';
 import { AppStore } from './state/store';
 import { StoreProvider, useAppState, useStore } from './state/StoreContext';
 
@@ -75,7 +77,7 @@ function NotFound() {
   );
 }
 
-export function App({ store, semantic }: { store: AppStore; semantic: SemanticStore }) {
+export function App({ store, semantic, account }: { store: AppStore; semantic: SemanticStore; account: AccountSettingsStore }) {
   // Only an explicit false (or missing WebCrypto) counts as insecure; test DOMs may leave isSecureContext undefined.
   const insecure = window.isSecureContext === false || !globalThis.crypto?.subtle;
 
@@ -87,39 +89,41 @@ export function App({ store, semantic }: { store: AppStore; semantic: SemanticSt
 
   return (
     <StoreProvider store={store}>
-      <SemanticProvider store={semantic}>
-        <BrowserRouter>
-          <Gate>
-            <Routes>
-              <Route path="/setup" element={<SetupPage />} />
-              <Route path="/join/:token" element={<JoinPage />} />
-              <Route
-                path="/login"
-                element={
-                  <PublicOnly>
-                    <LoginPage />
-                  </PublicOnly>
-                }
-              />
-              {/* Guards itself: it stays mounted after unlocking to show the replacement recovery key. */}
-              <Route path="/recover" element={<RecoverPage />} />
-              <Route
-                element={
-                  <RequireUnlocked>
-                    <AppShell />
-                  </RequireUnlocked>
-                }
-              >
-                <Route index element={<HomePage />} />
-                <Route path="v/:vaultId" element={<VaultPage />} />
-                <Route path="v/:vaultId/n/:noteId" element={<VaultPage />} />
-                <Route path="settings" element={<SettingsPage />} />
-              </Route>
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Gate>
-        </BrowserRouter>
-      </SemanticProvider>
+      <AccountSettingsProvider store={account}>
+        <SemanticProvider store={semantic}>
+          <BrowserRouter>
+            <Gate>
+              <Routes>
+                <Route path="/setup" element={<SetupPage />} />
+                <Route path="/join/:token" element={<JoinPage />} />
+                <Route
+                  path="/login"
+                  element={
+                    <PublicOnly>
+                      <LoginPage />
+                    </PublicOnly>
+                  }
+                />
+                {/* Guards itself: it stays mounted after unlocking to show the replacement recovery key. */}
+                <Route path="/recover" element={<RecoverPage />} />
+                <Route
+                  element={
+                    <RequireUnlocked>
+                      <AppShell />
+                    </RequireUnlocked>
+                  }
+                >
+                  <Route index element={<HomePage />} />
+                  <Route path="v/:vaultId" element={<VaultPage />} />
+                  <Route path="v/:vaultId/n/:noteId" element={<VaultPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                </Route>
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Gate>
+          </BrowserRouter>
+        </SemanticProvider>
+      </AccountSettingsProvider>
     </StoreProvider>
   );
 }

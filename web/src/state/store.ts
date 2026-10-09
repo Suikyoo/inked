@@ -2,6 +2,8 @@ import { api, ApiError, setRequestUser, setUnauthorizedHandler, setUserMismatchH
 import type { FolderDTO, NoteHeadDTO, User, VaultDTO } from 'inked-core';
 import {
   aad,
+  decryptAccountSettings,
+  encryptAccountSettings,
   assertKdfParams,
   CryptoError,
   decryptFolderMeta,
@@ -27,6 +29,7 @@ import {
   unwrapUserKey,
   unwrapVaultKey,
   wipe,
+  type AccountSettings,
   type KdfParams,
 } from 'inked-core';
 import { argon2InWorker } from '../lib/argon2Worker';
@@ -420,6 +423,23 @@ export class AppStore {
 
   decryptVector(vaultId: string, noteId: string, model: string, ct: string): Promise<Int8Array[]> {
     return decryptNoteVector(this.vaultKey(vaultId), vaultId, noteId, model, ct);
+  }
+
+  /** Encrypts the synced account settings under userKey, bound to this user. */
+  encryptAccountSettings(s: AccountSettings): Promise<string> {
+    const { key, userId } = this.accountKey();
+    return encryptAccountSettings(key, userId, s);
+  }
+
+  decryptAccountSettings(ct: string): Promise<AccountSettings> {
+    const { key, userId } = this.accountKey();
+    return decryptAccountSettings(key, userId, ct);
+  }
+
+  private accountKey(): { key: CryptoKey; userId: string } {
+    const userId = this.state.user?.id;
+    if (!this.userKey || !userId) throw new Error('locked');
+    return { key: this.userKey, userId };
   }
 
   clearNotice() {
