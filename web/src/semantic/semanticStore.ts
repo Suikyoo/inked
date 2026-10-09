@@ -1,4 +1,4 @@
-import { chunkNote, dequantize, isFresh, meanVector, noteScore, quantize, SEM_FLOOR, topK, type SemanticInput } from 'inked-core';
+import { chunkNote, dequantize, isFresh, meanVector, noteScore, quantize, retrieve, SEM_FLOOR, topK, type SemanticInput } from 'inked-core';
 import { api } from '../api/client';
 import { prefs, type SemanticChoice } from '../lib/prefs';
 import type { AccountSettingsStore } from '../state/accountSettings';
@@ -617,5 +617,36 @@ export class SemanticStore {
     const lines = text.split('\n');
     const line = chunk === 0 && head.title.trim() && lines.length > 1 ? lines[1] : lines[0];
     return line.slice(0, SNIPPET_MAX);
+  }
+
+  /** The best chunks for a question, with their full text; null while the model is not ready. */
+  async retrieveChunks(
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<{ noteId: string; vaultId: string; chunk: number; score: number; text: string }[] | null> {
+    const emb = this.embedder;
+    if (this.state.phase !== 'ready' || !emb) return null;
+    const ep = this.epoch;
+    let q: Float32Array | undefined;
+    try {
+      [q] = await emb.embed([query], 'query');
+    } catch {
+      return null;
+    }
+    if (!q || signal?.aborted || ep !== this.epoch) return [];
+    const candidates: { noteId: string; chunks: Float32Array[] }[] = [];
+    for (const id of this.vectors.keys()) {
+      const v = this.fresh(id);
+      if (v) candidates.push({ noteId: id, chunks: v.chunks });
+    }
+    const { bodies } = this.app.getState();
+    const out: { noteId: string; vaultId: string; chunk: number; score: number; text: string }[] = [];
+    for (const h of retrieve(q, candidates)) {
+      const head = this.app.noteHead(h.noteId);
+      const body = bodies[h.noteId];
+      const text = head && body !== undefined ? chunkNote(head.title, body)[h.chunk] : undefined;
+      if (head && text !== undefined) out.push({ ...h, vaultId: head.vaultId, text });
+    }
+    return out;
   }
 }

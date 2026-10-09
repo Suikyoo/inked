@@ -627,4 +627,20 @@ describe('account switch and browser choice', () => {
     await expect(s.setEnabled(true)).rejects.toThrow('locked');
     await expect(s.downloadHere()).rejects.toThrow('locked');
   });
+  it('retrieveChunks returns full chunk text for the best chunks, or null without a model', async () => {
+    const app = fakeApp();
+    const { d } = deps();
+    const s = new SemanticStore(app as any, d as any);
+    expect(await s.retrieveChunks('x')).toBeNull();
+    app.set({
+      phase: 'unlocked',
+      trees: tree([{ id: 'a', title: 'Alpha', updatedAt: '2026-10-01T00:00:00.000Z' }]),
+      bodies: { a: 'alpha body' },
+      bodiesReady: { v: true },
+    });
+    await vi.waitFor(() => expect(s.getState().coverage.v?.done).toBe(1));
+    // The fake embedder maps equal text to equal vectors, so querying the chunk text finds it.
+    const hits = await s.retrieveChunks('Alpha\nalpha body');
+    expect(hits).toEqual([{ noteId: 'a', vaultId: 'v', chunk: 0, score: expect.closeTo(1, 5), text: 'Alpha\nalpha body' }]);
+  });
 });

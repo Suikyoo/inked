@@ -53,6 +53,7 @@ export function semanticStub(state: Partial<SemanticState> = {}, methods: Partia
     search: async () => [],
     neighbours: () => [],
     chunkText: () => null,
+    retrieveChunks: async () => null,
     dispose: () => undefined,
     ...methods,
   };
