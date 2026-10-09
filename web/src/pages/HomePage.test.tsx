@@ -1,14 +1,20 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { folder, note, tree, vault } from '../map/fixtures';
 import type { SemanticInput } from 'inked-core';
 import { SemanticProvider } from '../semantic/SemanticContext';
 import type { SemanticStore } from '../semantic/semanticStore';
 import { StoreProvider } from '../state/StoreContext';
+import { AccountSettingsProvider } from '../state/AccountSettingsContext';
+import type { AccountSettingsStore } from '../state/accountSettings';
+import { AskProvider } from '../ask/AskContext';
+import type { AskStore } from '../ask/askStore';
 import { semanticStub } from '../test/semantic';
+import { accountStub } from '../test/account';
+import { askStub } from '../test/ask';
 import type { AppState, AppStore } from '../state/store';
 import { resetWriteOnForTests } from '../map/ConceptMap';
 import { HomePage } from './HomePage';
@@ -61,7 +67,19 @@ function savesFake(unseen: string[] = []) {
   };
 }
 
-function mount(initial: AppState, semantic?: SemanticStore, saves = savesFake()) {
+let path = '';
+function LocationProbe() {
+  path = useLocation().pathname;
+  return null;
+}
+const currentPath = () => path;
+
+interface Extra {
+  account?: AccountSettingsStore;
+  ask?: AskStore;
+}
+
+function mount(initial: AppState, semantic?: SemanticStore, saves = savesFake(), extra: Extra = {}) {
   let state = initial;
   const listeners = new Set<() => void>();
   const store = {
@@ -80,9 +98,14 @@ function mount(initial: AppState, semantic?: SemanticStore, saves = savesFake())
   act(() =>
     root!.render(
       <MemoryRouter>
+        <LocationProbe />
         <StoreProvider store={store}>
           <SemanticProvider store={semantic ?? semanticStub()}>
-            <HomePage />
+            <AccountSettingsProvider store={extra.account ?? accountStub()}>
+              <AskProvider store={extra.ask ?? askStub()}>
+                <HomePage />
+              </AskProvider>
+            </AccountSettingsProvider>
           </SemanticProvider>
         </StoreProvider>
       </MemoryRouter>,
@@ -401,5 +424,132 @@ describe('HomePage live ripples', () => {
     expect(saves.listenerCount()).toBe(1);
     act(() => root!.unmount());
     expect(saves.listenerCount()).toBe(0);
+  });
+});
+
+describe('Ask in the search bar', () => {
+  const origins = { llmOrigins: ['https://api.openai.com'] };
+  const deployState = (): AppState => {
+    const s = baseState();
+    s.trees.v1 = tree([folder('f1', null, 'Ops')], [note('n1', 'f1', 'Deploy steps'), note('n2', null, 'Beta')]);
+    s.bodies = { n1: '', n2: '' };
+    return s;
+  };
+  const renderHome = (extra: Extra) => mount(deployState(), undefined, undefined, extra);
+  const input = () => host!.querySelector<HTMLInputElement>('input#q')!;
+  const typeQuery = type;
+  const keydown = (el: Element, key: string, init: KeyboardEventInit = {}) =>
+    act(() => void el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })));
+  const turn = (status: string) => ({ id: 1, question: 'deploy', answer: 'x', sources: [], cited: [], via: 'meaning', status, error: null });
+
+  it('has no Ask button or row without allowed origins', () => {
+    renderHome({ account: accountStub() });
+    typeQuery('deploy');
+    expect(host!.querySelector('button[aria-label^="Ask"]')).toBeNull();
+    expect(host!.textContent).not.toContain('Ask your notes:');
+  });
+
+  it('Enter still opens the top result; Ctrl+Enter asks', () => {
+    const ask = vi.fn(async () => undefined);
+    renderHome({ account: accountStub(origins), ask: askStub({}, { ask }) });
+    typeQuery('deploy');
+    keydown(input(), 'Enter', { ctrlKey: true });
+    expect(ask).toHaveBeenCalledWith('deploy', expect.any(Array));
+    // Asking clears the field and this stub adds no turn, so Home is back in search mode: type the query again.
+    typeQuery('deploy');
+    keydown(input(), 'Enter');
+    expect(currentPath()).toMatch(/^\/v\/.+\/n\/.+$/);
+  });
+
+  it('the Ask button and the last Ask row both ask', () => {
+    const ask = vi.fn(async () => undefined);
+    renderHome({ account: accountStub(origins), ask: askStub({}, { ask }) });
+    typeQuery('deploy');
+    const rows = [...host!.querySelectorAll('#results .res')];
+    expect(rows.at(-1)!.textContent).toContain('Ask your notes: “deploy”');
+    act(() => (rows.at(-1) as HTMLElement).click());
+    // Asking cleared the field; type again so the Ask button is enabled.
+    typeQuery('deploy');
+    act(() => host!.querySelector<HTMLButtonElement>('button[aria-label="Ask your notes"]')!.click());
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers the Ask row and a hint when nothing matches', () => {
+    renderHome({ account: accountStub(origins) });
+    typeQuery('zzzz');
+    expect(host!.querySelector('#results .res-ask')?.textContent).toContain('Ask your notes: “zzzz”');
+    expect(host!.textContent).toContain('You can still ask your notes.');
+  });
+
+  it('describes the ask shortcut in the search help only when Ask is available', () => {
+    renderHome({ account: accountStub(origins) });
+    expect(host!.querySelector('#search-help')!.textContent).toContain('Press Control and Enter to ask your notes.');
+    act(() => root!.unmount());
+    host!.remove();
+    renderHome({ account: accountStub() });
+    expect(host!.querySelector('#search-help')!.textContent).not.toContain('ask your notes');
+  });
+
+  it('while asking: results become the answer, the bar takes follow-ups, Stop and Esc stop, second Esc returns', () => {
+    const ask = vi.fn(async () => undefined);
+    const stop = vi.fn();
+    const clear = vi.fn();
+    const streaming = { turns: [turn('streaming')], busy: true };
+    renderHome({ account: accountStub(origins), ask: askStub(streaming as never, { ask, stop, clear }) });
+    typeQuery('deploy');
+    keydown(input(), 'Enter', { ctrlKey: true });
+    expect(host!.querySelector('.ask')).not.toBeNull();
+    expect(host!.querySelector('aside.results')!.getAttribute('aria-label')).toBe('Answer');
+    expect(input().placeholder).toBe('Follow up…');
+    expect(host!.querySelector('button[aria-label="Stop"]')).not.toBeNull();
+    keydown(input(), 'Escape');
+    expect(stop).toHaveBeenCalled();
+    act(() => host!.querySelector<HTMLButtonElement>('button[aria-label="Stop"]')!.click());
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it('after an answer: Enter asks a follow-up, Esc on an empty field leaves ask mode', () => {
+    const ask = vi.fn(async () => undefined);
+    const clear = vi.fn();
+    const done = { turns: [turn('done')], busy: false };
+    renderHome({ account: accountStub(origins), ask: askStub(done as never, { ask, clear }) });
+    typeQuery('deploy');
+    keydown(input(), 'Enter', { ctrlKey: true });
+    expect(host!.querySelector('.ask')).not.toBeNull();
+    typeQuery('and staging?');
+    keydown(input(), 'Enter');
+    expect(ask).toHaveBeenLastCalledWith('and staging?', expect.any(Array));
+    expect(currentPath()).toBe('/');
+    keydown(input(), 'Escape');
+    expect(clear).toHaveBeenCalled();
+    expect(host!.querySelector('.ask')).toBeNull();
+    expect(input().placeholder).toBe('Search Inked');
+    typeQuery('deploy');
+    expect(host!.querySelector('.results-title')?.textContent).toBe('1 match');
+  });
+
+  it('leaves ask mode when a lock clears the conversation', () => {
+    let snapshot = { turns: [turn('streaming')], busy: true } as never;
+    const listeners = new Set<() => void>();
+    const store = askStub({}, { getState: () => snapshot, subscribe: (l) => (listeners.add(l), () => void listeners.delete(l)) });
+    renderHome({ account: accountStub(origins), ask: store });
+    typeQuery('deploy');
+    keydown(input(), 'Enter', { ctrlKey: true });
+    expect(host!.querySelector('.ask')).not.toBeNull();
+    snapshot = { turns: [], busy: false } as never;
+    act(() => listeners.forEach((l) => l()));
+    expect(host!.querySelector('.ask')).toBeNull();
+    expect(input().placeholder).toBe('Search Inked');
+  });
+
+  it('the Back to search button leaves ask mode', () => {
+    const clear = vi.fn();
+    renderHome({ account: accountStub(origins), ask: askStub({ turns: [turn('done')] } as never, { clear }) });
+    typeQuery('deploy');
+    keydown(input(), 'Enter', { ctrlKey: true });
+    act(() => host!.querySelector<HTMLButtonElement>('button[aria-label="Back to search"]')!.click());
+    expect(clear).toHaveBeenCalled();
+    expect(host!.querySelector('.ask')).toBeNull();
   });
 });
