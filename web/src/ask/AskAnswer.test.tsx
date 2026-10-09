@@ -88,6 +88,15 @@ describe('AskAnswer', () => {
     expect(onSelect).toHaveBeenCalledWith({ kind: 'note', vaultId: 'v', id: 'a' });
     expect(host!.textContent).toContain('1 source lit on the map');
   });
+  it('renders links and images from the model as plain text', () => {
+    const { onSelect } = render({ turns: [turn({ answer: 'A [x](https://evil.example) B [y](/settings) C ![pic](https://evil.example/x.png) D [[Deploy runbook]]' })] });
+    expect(host!.querySelectorAll('a')).toHaveLength(1);
+    expect(host!.querySelector('img')).toBeNull();
+    expect(host!.querySelector('a[target]')).toBeNull();
+    for (const w of ['x', 'y', 'pic']) expect(host!.querySelector('.ask-a')!.textContent).toContain(w);
+    act(() => host!.querySelector<HTMLAnchorElement>('a.wl')!.click());
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'note', vaultId: 'v', id: 'a' });
+  });
   it('does not link titles that are not sources', () => {
     render({ turns: [turn({ answer: 'See [[Elsewhere]].', cited: [] })] });
     expect(host!.querySelector('a.wl')).toBeNull();

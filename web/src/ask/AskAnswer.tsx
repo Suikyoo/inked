@@ -2,7 +2,7 @@ import { answerToNote, llmOrigin, type SearchEntry } from 'inked-core';
 import { useMemo, useState, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { MapSelection } from '../map/ConceptMap';
-import { renderMarkdown } from '../markdown/render';
+import { renderUntrustedMarkdown } from '../markdown/render';
 import { describeError, copyText } from '../lib/util';
 import { useAppState, useStore } from '../state/StoreContext';
 import type { AppState } from '../state/store';
@@ -100,7 +100,7 @@ function Turn({ turn, last, entries, onSelect }: { turn: AskTurnView; last: bool
   const byTitle = useMemo(() => new Map(turn.sources.map((s) => [s.title.trim().toLowerCase(), s])), [turn.sources]);
   const html = useMemo(
     () =>
-      renderMarkdown(turn.answer, {
+      renderUntrustedMarkdown(turn.answer, {
         resolveWikiLink: (title) => {
           const s = byTitle.get(title.trim().toLowerCase());
           return s ? `/v/${s.vaultId}/n/${s.noteId}` : null;
@@ -116,6 +116,17 @@ function Turn({ turn, last, entries, onSelect }: { turn: AskTurnView; last: bool
     onSelect({ kind: 'note', vaultId: m[1], id: m[2] });
   };
   const origin = account.settings.llm ? llmOrigin(account.settings.llm.baseUrl) : null;
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = async () => {
+    let ok = false;
+    try {
+      ok = await copyText(turn.answer);
+    } catch {
+      ok = false;
+    }
+    setCopied(ok ? 'Copied' : 'Couldn’t copy');
+    setTimeout(() => setCopied(null), 2000);
+  };
   const done = turn.status === 'done' || turn.status === 'stopped';
   return (
     <article className="ask-turn" aria-busy={turn.status === 'retrieving' || turn.status === 'streaming'}>
@@ -141,9 +152,10 @@ function Turn({ turn, last, entries, onSelect }: { turn: AskTurnView; last: bool
       {done && turn.answer && (
         <div className="ask-actions">
           <SaveAsNote turn={turn} />
-          <button type="button" className="btn btn-sm" onClick={() => void copyText(turn.answer)}>
+          <button type="button" className="btn btn-sm" onClick={() => void copy()}>
             Copy
           </button>
+          {copied && <span className="results-note" role="status">{copied}</span>}
           <span className="results-note">
             {turn.cited.length} {turn.cited.length === 1 ? 'source' : 'sources'} lit on the map
           </span>
@@ -161,7 +173,7 @@ export function AskAnswer({ entries, onSelect }: { entries: readonly SearchEntry
   const ask = useAsk();
   const last = ask.turns[ask.turns.length - 1];
   return (
-    <div className="ask" aria-live="polite" aria-atomic="false">
+    <div className="ask" aria-live="polite" aria-atomic="false" aria-busy={ask.busy}>
       <h2 className="results-title">{ask.busy ? 'Asking your notes…' : 'Answer'}</h2>
       {ask.turns.map((t) => (
         <Turn key={t.id} turn={t} last={t === last} entries={entries} onSelect={onSelect} />

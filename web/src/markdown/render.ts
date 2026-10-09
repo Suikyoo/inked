@@ -52,3 +52,20 @@ export function sanitizeHtml(html: string): string {
 export function renderMarkdown(src: string, env: WikiLinkEnv = {}): string {
   return sanitizeHtml(md.render(src, { ...env }));
 }
+
+/**
+ * Render Markdown from an untrusted source (an LLM answer). Images become their alt text (no remote loads),
+ * and every link except a resolved wiki-link citation (`a.wl` to /v/:vault/n/:id) becomes plain text.
+ */
+export function renderUntrustedMarkdown(src: string, env: WikiLinkEnv = {}): string {
+  const doc = new DOMParser().parseFromString(`<body>${sanitizeHtml(md.render(src, { ...env }))}</body>`, 'text/html');
+  for (const img of Array.from(doc.body.querySelectorAll('img'))) img.replaceWith(doc.createTextNode(img.getAttribute('alt') ?? ''));
+  for (const a of Array.from(doc.body.querySelectorAll('a'))) {
+    const citation = a.classList.contains('wl') && /^\/v\/[^/]+\/n\/[^/]+$/.test(a.getAttribute('href') ?? '');
+    if (citation) continue;
+    const span = doc.createElement('span');
+    span.append(...Array.from(a.childNodes));
+    a.replaceWith(span);
+  }
+  return sanitizeHtml(doc.body.innerHTML);
+}
