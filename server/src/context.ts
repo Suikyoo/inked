@@ -15,6 +15,8 @@ export interface AppContext {
   accountLimiter: FailureLimiter;
   /** One-time first-run setup token; null once setup is done (or was not needed). */
   setupToken: string | null;
+  /** Origins the browser may call for Ask (CSP connect-src and /api/status). */
+  llmOrigins: string[];
 }
 
 declare module 'fastify' {

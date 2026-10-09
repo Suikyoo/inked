@@ -127,7 +127,7 @@ const data = <T>(method: Method, path: string, body?: unknown, opts: CallOptions
   request<T>(method, path, body, { bound: true, timeoutMs: opts.timeoutMs, asUser: opts.asUser });
 
 export const api = {
-  status: () => request<{ needsSetup: boolean }>('GET', '/api/status', undefined, { authed: false }),
+  status: () => request<{ needsSetup: boolean; llmOrigins?: string[] }>('GET', '/api/status', undefined, { authed: false }),
   setup: (body: SetupBody) => request<{ user: User }>('POST', '/api/setup', body, { authed: false }),
   params: (username: string) =>
     request<{ kdfSalt: string; kdfParams: KdfParams }>('GET', `/api/auth/params?username=${enc(username)}`, undefined, {
@@ -179,6 +179,9 @@ export const api = {
     data<{ vectors: { noteId: string; model: string; encVec: string; sourceUpdatedAt: string }[] }>('GET', `/api/vaults/${enc(vaultId)}/vectors`),
   putVector: (noteId: string, body: { model: string; encVec: string; sourceUpdatedAt: string }) =>
     data<{ ok: true }>('PUT', `/api/notes/${enc(noteId)}/vector`, body),
+  getSettings: () => data<{ encSettings: string | null; updatedAt: string | null }>('GET', '/api/me/settings'),
+  putSettings: (body: { encSettings: string; baseUpdatedAt: string | null }) =>
+    data<{ updatedAt: string }>('PUT', '/api/me/settings', body),
   tree: (vaultId: string) =>
     data<{ folders: FolderDTO[]; notes: NoteHeadDTO[] }>('GET', `/api/vaults/${enc(vaultId)}/tree`),
   bodies: (vaultId: string) =>

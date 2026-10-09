@@ -17,9 +17,9 @@ afterEach(async () => {
 
 describe('setup', () => {
   it('reports needsSetup until the first user exists', async () => {
-    expect((await call(t.app, 'GET', '/api/status')).json()).toEqual({ needsSetup: true });
+    expect((await call(t.app, 'GET', '/api/status')).json()).toEqual({ needsSetup: true, llmOrigins: [] });
     await setupAdmin(t.app);
-    expect((await call(t.app, 'GET', '/api/status')).json()).toEqual({ needsSetup: false });
+    expect((await call(t.app, 'GET', '/api/status')).json()).toEqual({ needsSetup: false, llmOrigins: [] });
   });
 
   it('creates an admin, sets a session cookie and lowercases the username', async () => {

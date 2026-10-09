@@ -17,6 +17,7 @@ services:
       COOKIE_SECURE: "true"
       # Only nginx on the private network may set the client IP (it forwards Cloudflare's CF-Connecting-IP).
       TRUST_PROXY: "172.31.250.0/28"
+      INKED_LLM_ORIGINS: ${INKED_LLM_ORIGINS:-}
     networks:
       - inked-internal
 

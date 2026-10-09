@@ -5,6 +5,7 @@ import { useAppState, useStore } from '../state/StoreContext';
 import type { AppStore } from '../state/store';
 import { usePresence } from '../motion';
 import { CloseIcon, LockIcon, MenuIcon } from './Icons';
+import { ModelBanner } from './ModelBanner';
 import { Sidebar } from './Sidebar';
 
 const IDLE_MS = 15 * 60 * 1000;
@@ -113,6 +114,7 @@ export function AppShell() {
       <div className="scrim" aria-hidden="true" onClick={() => setDrawer(false)} />
       <Sidebar id="sidebar" onLock={lock} />
       <div className="main" id="main" tabIndex={-1}>
+        <ModelBanner />
         <Collapse open={state.pendingCount > 0}>
           <div className="sync-bar" role="status">
             <span>

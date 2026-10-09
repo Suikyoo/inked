@@ -33,7 +33,7 @@ describe('CSRF header', () => {
     expect(wrong.statusCode).toBe(403);
 
     // Nothing was created.
-    expect((await call(t.app, 'GET', '/api/status')).json()).toEqual({ needsSetup: true });
+    expect((await call(t.app, 'GET', '/api/status')).json()).toEqual({ needsSetup: true, llmOrigins: [] });
 
     const admin = await setupAdmin(t.app);
     const del = await t.app.inject({
@@ -193,5 +193,28 @@ describe('trusted proxy', () => {
     expect(codes.slice(5)).toEqual([429, 429, 429]);
     // A different second-to-last entry is a different client, even with the same last entry.
     expect(await hammer(t.app, acct.username, '198.51.100.1, 203.0.113.51, 203.0.113.9', 1)).toEqual([401]);
+  });
+});
+
+describe('LLM origins', () => {
+  it('adds the origins to connect-src and /api/status', async () => {
+    const t = await makeApp({ llmOrigins: ['https://api.openai.com'] });
+    try {
+      const r = await call(t.app, 'GET', '/api/status', {});
+      expect(r.json()).toEqual({ needsSetup: true, llmOrigins: ['https://api.openai.com'] });
+      expect(r.headers['content-security-policy']).toContain("connect-src 'self' https://api.openai.com;");
+    } finally {
+      await t.close();
+    }
+  });
+  it('keeps connect-src self-only by default', async () => {
+    const t = await makeApp();
+    try {
+      const r = await call(t.app, 'GET', '/api/status', {});
+      expect(r.json().llmOrigins).toEqual([]);
+      expect(r.headers['content-security-policy']).toBe(EXPECTED_HEADERS['content-security-policy']);
+    } finally {
+      await t.close();
+    }
   });
 });

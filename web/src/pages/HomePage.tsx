@@ -2,7 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { VaultIcon } from '../brand/VaultIcon';
 import { FOCUS_SEARCH_EVENT } from '../components/AppShell';
-import { PlusIcon, SearchIcon } from '../components/Icons';
+import { CloseIcon, PlusIcon, SearchIcon, SparkIcon } from '../components/Icons';
+import { useAsk, useAskStore } from '../ask/AskContext';
+import { AskAnswer, askLitIds } from '../ask/AskAnswer';
+import { useAccountSettings } from '../state/AccountSettingsContext';
 import { uniqueTitle } from '../components/VaultTree';
 import { ConceptMap, type MapSelection } from '../map/ConceptMap';
 import { useVaultGraphs } from '../map/useVaultGraphs';
@@ -61,6 +64,17 @@ export function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const askStore = useAskStore();
+  const askState = useAsk();
+  const account = useAccountSettings();
+  const askAvailable = account.llmOrigins.length > 0;
+  const [asking, setAsking] = useState(() => askStore.getState().turns.length > 0);
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  // A lock clears the conversation; leave ask mode with it. ask() pushes its turn before its first await, so this
+  // never sees an empty conversation right after asking.
+  useEffect(() => {
+    if (asking && askState.turns.length === 0) setAsking(false);
+  }, [asking, askState.turns.length]);
 
   useEffect(() => {
     const focus = () => {
@@ -136,6 +150,7 @@ export function HomePage() {
     [semanticStore, semVersion, dotIds],
   );
   const hitIds = useMemo(() => new Set(rows.map((r) => r.entry.noteId)), [rows]);
+  const litIds = useMemo(() => askLitIds(askState), [askState]);
   const [hot, setHot] = useState<string | null>(null);
   // Saves for the map's ripples. Saves made while Home was away are consumed once on mount (the store forgets them,
   // so a remount does not replay them); later ones arrive as events. Ids of events in one tick merge into one seq.
@@ -162,7 +177,7 @@ export function HomePage() {
   // The map rings and inks the selected node; the right column previews it.
   const [selected, setSelected] = useState<MapSelection | null>(null);
   const [fitRequest, setFitRequest] = useState<{ sel: MapSelection; n: number } | null>(null);
-  const column = homeColumn(state, query, selected);
+  const column = asking ? 'ask' : homeColumn(state, query, selected);
   const hotFrom = (t: EventTarget) => (t instanceof Element ? t.closest('a.res')?.getAttribute('data-note') ?? null : null);
 
   const bodiesPending = state.vaultOrder.some((id) => !state.vaults[id]?.broken && !state.bodiesReady[id]);
@@ -171,26 +186,51 @@ export function HomePage() {
 
   const hrefFor = (e: SearchEntry) => `/v/${e.vaultId}/n/${e.noteId}`;
 
-  const results = () => listRef.current?.querySelectorAll<HTMLAnchorElement>('a.res') ?? [];
+  // Result anchors and the Ask row button, so the arrow keys reach the Ask row.
+  const results = () => listRef.current?.querySelectorAll<HTMLElement>('#results .res') ?? [];
+
+  const startAsk = (question: string) => {
+    if (!askAvailable || !question.trim()) return;
+    setAsking(true);
+    setQuery('');
+    void askStore.ask(question, entries);
+    inputRef.current?.focus();
+  };
+  const leaveAsk = () => {
+    askStore.clear();
+    setAsking(false);
+    setQuery('');
+    inputRef.current?.focus();
+  };
 
   const onInputKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.keyCode === 229)) return;
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    if (e.key === 'Enter' && mod && askAvailable) {
       e.preventDefault();
-      if (query) setQuery('');
+      startAsk(query);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      if (asking && askState.busy) askStore.stop();
+      else if (query) setQuery('');
+      else if (asking) leaveAsk();
       else inputRef.current?.blur();
-    } else if (e.key === 'ArrowDown') {
+    } else if (e.key === 'ArrowDown' && !asking) {
       e.preventDefault();
       results()[0]?.focus();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const first = rows[0]?.entry;
-      if (first) navigate(hrefFor(first));
+      if (asking) startAsk(query);
+      else {
+        const first = rows[0]?.entry;
+        if (first) navigate(hrefFor(first));
+      }
     }
   };
 
   const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const items = Array.from(results());
-    const i = items.indexOf(document.activeElement as HTMLAnchorElement);
+    const i = items.indexOf(document.activeElement as HTMLElement);
     if (i < 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -270,16 +310,35 @@ export function HomePage() {
             type="search"
             autoComplete="off"
             spellCheck={false}
-            placeholder="Search Inked"
+            placeholder={asking ? 'Follow up…' : 'Search Inked'}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKey}
             aria-controls="results"
             aria-describedby="search-help"
           />
-          <kbd aria-hidden="true">/</kbd>
+          {!asking && <kbd aria-hidden="true">/</kbd>}
+          {askAvailable &&
+            (asking && askState.busy ? (
+              <button type="button" className="search-ask" aria-label="Stop" onClick={() => askStore.stop()}>
+                <CloseIcon size={12} />
+                Stop
+              </button>
+            ) : (
+              <button type="button" className="search-ask" aria-label="Ask your notes" onClick={() => startAsk(query)} disabled={!query.trim()}>
+                <SparkIcon size={12} />
+                Ask
+                <kbd aria-hidden="true">{isMac ? '⌘↵' : 'Ctrl ↵'}</kbd>
+              </button>
+            ))}
+          {asking && (
+            <button type="button" className="ibtn ibtn-sm" aria-label="Back to search" onClick={leaveAsk}>
+              <CloseIcon size={12} />
+            </button>
+          )}
           <span id="search-help" className="sr-only">
             Matches note titles and folder paths as you type. Press Enter to open the top result, or arrow down to move through results. With search by meaning on, results also include notes about the same topic.
+            {askAvailable && ` Press ${isMac ? 'Command' : 'Control'} and Enter to ask your notes.`}
           </span>
         </form>
         <div className="home-head-side is-end">
@@ -303,13 +362,13 @@ export function HomePage() {
       <div className="home-body">
         {(state.vaultsStatus !== 'ready' || vaults.length > 0) && (
           <section className="map" aria-label="Concept map">
-            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} saves={saves} onSavesPlayed={onSavesPlayed} searching={q.length > 0} />
+            <ConceptMap entries={mapEntries} neighbours={neighbours} hits={asking ? litIds : hitIds} hot={hot} loading={treesPending} selected={selected} onSelect={setSelected} fitRequest={fitRequest} saves={saves} onSavesPlayed={onSavesPlayed} searching={asking || q.length > 0} />
           </section>
         )}
 
         <aside
           className="results"
-          aria-label={column === 'search' ? 'Search results' : 'Preview'}
+          aria-label={column === 'ask' ? 'Answer' : column === 'search' ? 'Search results' : 'Preview'}
           id="results"
           ref={listRef}
           onKeyDown={onListKey}
@@ -337,6 +396,8 @@ export function HomePage() {
               <p>You don’t have any vaults yet. A vault holds folders and notes, each encrypted with its own key.</p>
               <p>Use the + next to “Vaults” in the sidebar to create one.</p>
             </div>
+          ) : column === 'ask' ? (
+            <AskAnswer entries={entries} onSelect={setSelected} />
           ) : column === 'search' ? (
             <>
               <h2 className="results-title" aria-live="polite">
@@ -371,9 +432,20 @@ export function HomePage() {
                     </li>
                   );
                 })}
+                {askAvailable && q && (
+                  <li>
+                    <button type="button" className="res res-ask" onClick={() => startAsk(query)}>
+                      <SparkIcon size={13} />
+                      <span className="res-title">Ask your notes: “{q}”</span>
+                    </button>
+                  </li>
+                )}
               </ul>
               {total === 0 && !treesPending && (
-                <p className="empty">No notes match “{q}”. Try fewer letters.</p>
+                <p className="empty">
+                  No notes match “{q}”. Try fewer letters.
+                  {askAvailable && ' You can still ask your notes.'}
+                </p>
               )}
               {bodiesPending && q.length >= 2 && <p className="results-note">Still decrypting note text, so some matches may be missing.</p>}
             </>

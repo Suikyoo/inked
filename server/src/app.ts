@@ -14,6 +14,7 @@ import { folderRoutes } from './routes/folders.js';
 import { inviteRoutes } from './routes/invites.js';
 import { noteRoutes } from './routes/notes.js';
 import { vaultRoutes } from './routes/vaults.js';
+import { settingsRoutes } from './routes/settings.js';
 import { vectorRoutes } from './routes/vectors.js';
 import { BODY_LIMIT } from './schemas.js';
 
@@ -24,6 +25,8 @@ export interface AppOptions {
   trustProxy?: false | number | string;
   /** Fixed setup token (tests); by default one is generated and logged when no users exist. */
   setupToken?: string;
+  /** Extra origins the browser may call for Ask (added to CSP connect-src). */
+  llmOrigins?: string[];
   logger?: FastifyServerOptions['logger'];
 }
 
@@ -35,16 +38,19 @@ declare module 'fastify' {
   }
 }
 
-const SECURITY_HEADERS: Record<string, string> = {
-  'content-security-policy':
-    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
-    "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
-    "frame-ancestors 'none'; form-action 'self'",
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
-  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
-  'cross-origin-opener-policy': 'same-origin',
-};
+function securityHeaders(llmOrigins: readonly string[]): Record<string, string> {
+  const connect = ["'self'", ...llmOrigins].join(' ');
+  return {
+    'content-security-policy':
+      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
+      `img-src 'self' data: blob:; font-src 'self'; connect-src ${connect}; object-src 'none'; base-uri 'none'; ` +
+      "frame-ancestors 'none'; form-action 'self'",
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+    'cross-origin-opener-policy': 'same-origin',
+  };
+}
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const isApiPath = (url: string) => /^\/api(\/|\?|$)/.test(url);
@@ -89,6 +95,8 @@ export function toFastifyTrustProxy(value: false | number | string): FastifyTrus
 export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const serverSecret = loadServerSecret(opts.dataDir);
   const db = openDb(path.join(opts.dataDir, 'inked.db'));
+  const llmOrigins = opts.llmOrigins ?? [];
+  const headers = securityHeaders(llmOrigins);
 
   const app = Fastify({
     bodyLimit: BODY_LIMIT,
@@ -106,6 +114,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     cookieSecure: opts.cookieSecure,
     limiter: new FailureLimiter(),
     accountLimiter: new FailureLimiter(30, 15 * 60_000, 15 * 60_000),
+    llmOrigins,
     setupToken: opts.setupToken ?? (countUsers(db) === 0 ? randomBytes(16).toString('base64url') : null),
   };
   if (ctx.setupToken && !opts.setupToken) {
@@ -146,7 +155,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    reply.headers(SECURITY_HEADERS);
+    reply.headers(headers);
     if (isApiPath(request.url)) reply.header('cache-control', 'no-store');
     return payload;
   });
@@ -178,6 +187,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   folderRoutes(app, ctx);
   noteRoutes(app, ctx);
   vectorRoutes(app, ctx);
+  settingsRoutes(app, ctx);
 
   // The SPA is optional: without a built web/dist the server is API-only.
   const hasWeb = existsSync(path.join(opts.webDist, 'index.html'));

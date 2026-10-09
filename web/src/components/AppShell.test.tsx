@@ -8,6 +8,7 @@ import type { AppStore } from '../state/store';
 import { AppShell } from './AppShell';
 
 vi.mock('./Sidebar', () => ({ Sidebar: () => null }));
+vi.mock('./ModelBanner', () => ({ ModelBanner: () => null }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -1,5 +1,6 @@
 import { SemanticStore, type SemanticState } from '../semantic/semanticStore';
 import type { AppStore } from '../state/store';
+import { accountStub } from './account';
 
 /**
  * Test helpers for rendering under SemanticProvider. Plain functions (no vitest import), so they
@@ -15,7 +16,8 @@ export function unavailableSemanticStore(app: AppStore): SemanticStore {
     makeEmbedder: () => {
       throw new Error('semantic search is unavailable in this test');
     },
-    prefs: { semantic: () => false, setSemantic: () => undefined },
+    prefs: { choice: () => null, setChoice: () => undefined },
+    account: accountStub(),
     cache: { verify: async () => 0, clear: async () => undefined, persist: async () => false },
     delay: async () => undefined,
   });
@@ -23,6 +25,8 @@ export function unavailableSemanticStore(app: AppStore): SemanticStore {
 
 export const SEMANTIC_STATE: SemanticState = {
   available: false,
+  accountOn: false,
+  choice: null,
   enabled: false,
   phase: 'unavailable',
   download: null,
@@ -43,10 +47,13 @@ export function semanticStub(state: Partial<SemanticState> = {}, methods: Partia
     getState: () => snapshot,
     subscribe: () => () => undefined,
     setEnabled: async () => undefined,
+    downloadHere: async () => undefined,
+    declineHere: () => undefined,
     retry: () => undefined,
     search: async () => [],
     neighbours: () => [],
     chunkText: () => null,
+    retrieveChunks: async () => null,
     dispose: () => undefined,
     ...methods,
   };

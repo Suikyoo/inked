@@ -63,7 +63,8 @@
 .search input::-webkit-search-cancel-button {
   display: none;
 }
-.search:focus-within kbd {
+/* Only the "/" hint hides while typing; the Ask button's shortcut stays visible. */
+.search:focus-within > kbd {
   visibility: hidden;
 }
 
@@ -287,5 +288,86 @@
 }
 .res-btn:hover,
 .res-btn:focus-visible {
+  background: var(--hover);
+}
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ask-turn + .ask-turn {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ask-q {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.ask-a {
+  font-size: 13.5px;
+  color: var(--text-body);
+}
+.ask-actions,
+.ask-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ask-a {
+    animation: res-in var(--dur-2) var(--ease-out);
+  }
+}
+
+/* The Ask button in the search field, and its Stop state while an answer streams. */
+.search-ask {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: var(--row-selected);
+  color: var(--ink-lighter);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.search-ask:hover:not(:disabled) {
+  background: var(--selection);
+}
+.search-ask:disabled {
+  color: var(--muted-3);
+  cursor: default;
+}
+.search-ask kbd {
+  margin-left: 2px;
+}
+/* The last result row asks the query; it keeps .res padding and radius so it lines up with the notes above. */
+.res-ask {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--ink-light);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.res-ask .res-title {
+  color: var(--ink-light);
+}
+.res-ask:hover,
+.res-ask:focus-visible {
   background: var(--hover);
 }

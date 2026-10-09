@@ -220,7 +220,7 @@ function insertUser(
 export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
 
-  app.get('/api/status', async () => ({ needsSetup: countUsers(db) === 0 }));
+  app.get('/api/status', async () => ({ needsSetup: countUsers(db) === 0, llmOrigins: ctx.llmOrigins }));
 
   app.post<{ Body: RegisterBody & { setupToken: string } }>('/api/setup', { schema: setupSchema }, async (request, reply) => {
     if (countUsers(db) > 0) throw new ApiError(409, 'already_setup');

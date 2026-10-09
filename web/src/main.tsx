@@ -19,12 +19,16 @@ import './styles/settings.css';
 import { App } from './App';
 import { AppStore } from './state/store';
 import { SemanticStore } from './semantic/semanticStore';
+import { AccountSettingsStore } from './state/accountSettings';
+import { AskStore } from './ask/askStore';
 
 const store = new AppStore();
-const semantic = new SemanticStore(store);
+const account = new AccountSettingsStore(store);
+const semantic = new SemanticStore(store, { account });
+const ask = new AskStore(store, semantic, account);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App store={store} semantic={semantic} />
+    <App store={store} semantic={semantic} account={account} ask={ask} />
   </StrictMode>,
 );

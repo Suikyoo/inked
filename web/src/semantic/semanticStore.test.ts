@@ -34,20 +34,39 @@ const fakeVec = (t: string) => {
 function makeEmbedderStub() {
   return { paused: false, load: vi.fn(async (_m: unknown, p: (l: number, t: number) => void) => p(10, 10)), embed: vi.fn(async (ts: string[]) => ts.map(fakeVec)), terminate: vi.fn() };
 }
-function deps(over: Record<string, unknown> = {}) {
-  const embedder = makeEmbedderStub();
+function fakeAccount(settings: Record<string, unknown> = { semantic: true }, loaded = true) {
+  let state: any = { loaded, settings, unreadable: false, llmOrigins: [] };
+  const ls = new Set<() => void>();
   return {
-    embedder,
-    d: {
-      api: { listVectors: vi.fn(async () => ({ vectors: [] as unknown[] })), putVector: vi.fn(async (_id: string, _body: { model: string; encVec: string; sourceUpdatedAt: string }) => ({ ok: true as const })) },
-      fetchManifest: vi.fn(async () => manifest),
-      makeEmbedder: () => embedder,
-      prefs: { semantic: () => true, setSemantic: vi.fn() },
-      cache: { verify: vi.fn(async () => 0), clear: vi.fn(async () => {}), persist: vi.fn(async () => true) },
-      delay: () => Promise.resolve(),
-      ...over,
+    getState: () => state,
+    subscribe: (f: () => void) => (ls.add(f), () => ls.delete(f)),
+    update: vi.fn(async (change: (s: any) => any) => {
+      state = { ...state, settings: change(state.settings) };
+      ls.forEach((f) => f());
+    }),
+    set(p: any) {
+      state = { ...state, ...p };
+      ls.forEach((f) => f());
     },
   };
+}
+function fakePrefs(initial: 'on' | 'off' | null = 'on') {
+  let v = initial;
+  return { choice: vi.fn(() => v), setChoice: vi.fn((n: 'on' | 'off' | null) => void (v = n)) };
+}
+function deps(over: Record<string, unknown> = {}) {
+  const embedder = makeEmbedderStub();
+  const d = {
+    api: { listVectors: vi.fn(async () => ({ vectors: [] as unknown[] })), putVector: vi.fn(async (_id: string, _body: { model: string; encVec: string; sourceUpdatedAt: string }) => ({ ok: true as const })) },
+    fetchManifest: vi.fn(async () => manifest),
+    makeEmbedder: () => embedder,
+    prefs: fakePrefs(),
+    account: fakeAccount(),
+    cache: { verify: vi.fn(async () => 0), clear: vi.fn(async () => {}), persist: vi.fn(async () => true) },
+    delay: () => Promise.resolve(),
+    ...over,
+  };
+  return { embedder, d, cache: d.cache, account: d.account, prefs: d.prefs };
 }
 const tree = (notes: { id: string; updatedAt: string; title?: string }[]) => ({
   v: { status: 'ready', folders: {}, notes: Object.fromEntries(notes.map((n) => [n.id, { vaultId: 'v', folderId: null, title: n.title ?? n.id, size: 1, createdAt: n.updatedAt, ...n }])) },
@@ -298,7 +317,7 @@ describe('SemanticStore', () => {
 
   it('keeps vectors for Related when the toggle is off, without loading a model', async () => {
     const app = fakeApp();
-    const { d, embedder } = deps({ prefs: { semantic: () => false, setSemantic: vi.fn() } });
+    const { d, embedder } = deps({ account: fakeAccount({ semantic: false }), prefs: fakePrefs(null) });
     d.api.listVectors = vi.fn(async () => ({ vectors: [{ noteId: 'a', model: 'bge@1', encVec: 'x', sourceUpdatedAt: '2026-10-01T00:00:00.000Z' }, { noteId: 'b', model: 'bge@1', encVec: 'y', sourceUpdatedAt: '2026-10-01T00:00:00.000Z' }] }));
     const s = new SemanticStore(app as any, d as any);
     app.set({ phase: 'unlocked', trees: tree([{ id: 'a', updatedAt: '2026-10-01T00:00:00.000Z' }, { id: 'b', updatedAt: '2026-10-01T00:00:00.000Z' }]), bodies: { a: 'alpha', b: 'beta' }, bodiesReady: { v: true } });
@@ -326,7 +345,7 @@ describe('SemanticStore', () => {
     await flushN(3);
     expect(s.getState().phase).toBe('ready');
     await s.setEnabled(false);
-    expect(d.prefs.setSemantic).toHaveBeenCalledWith(false);
+    expect(d.prefs.setChoice).toHaveBeenCalledWith(null);
     expect(d.cache.clear).toHaveBeenCalled();
     expect(embedder.terminate).toHaveBeenCalled();
     expect(s.getState().phase).toBe('off');
@@ -336,15 +355,14 @@ describe('SemanticStore', () => {
 
   it('turning on asks for persistent storage and loads a fresh model', async () => {
     const app = fakeApp();
-    let on = false;
-    const { d, embedder } = deps({ prefs: { semantic: () => on, setSemantic: vi.fn((v: boolean) => (on = v)) } });
+    const { d, embedder } = deps({ account: fakeAccount({}), prefs: fakePrefs(null) });
     d.cache.persist.mockResolvedValue(false);
     const s = new SemanticStore(app as any, d as any);
     app.set({ phase: 'unlocked' });
     await flush();
     expect(s.getState()).toMatchObject({ available: true, enabled: false, phase: 'off' });
     await s.setEnabled(true);
-    expect(d.prefs.setSemantic).toHaveBeenCalledWith(true);
+    expect(d.prefs.setChoice).toHaveBeenCalledWith('on');
     expect(d.cache.verify).toHaveBeenCalledWith(manifest);
     expect(embedder.load).toHaveBeenCalledTimes(1);
     expect(s.getState()).toMatchObject({ enabled: true, phase: 'ready', persistDenied: true });
@@ -479,5 +497,150 @@ describe('SemanticStore', () => {
     expect(s.chunkText('e', 0)).toBe('Only');
     expect(s.chunkText('a', 5)).toBeNull();
     expect(s.chunkText('missing', 0)).toBeNull();
+  });
+});
+
+describe('account switch and browser choice', () => {
+  it('loads the model only with the switch on and the browser choice on', async () => {
+    for (const [settings, choice, loads] of [
+      [{ semantic: true }, 'on', true],
+      [{ semantic: true }, null, false],
+      [{ semantic: true }, 'off', false],
+      [{ semantic: false }, 'on', false],
+      // Round 4: the switch was never synced and this browser had it on, so it migrates on and keeps the model.
+      [{}, 'on', true],
+      [{}, null, false],
+    ] as const) {
+      const app = fakeApp();
+      const { d, embedder } = deps({ account: fakeAccount({ ...settings }), prefs: fakePrefs(choice) });
+      const s = new SemanticStore(app as any, d as any);
+      app.set({ phase: 'unlocked' });
+      await flush();
+      expect(embedder.load.mock.calls.length > 0).toBe(loads);
+      s.dispose();
+    }
+  });
+  it('waits for the account settings before deciding', async () => {
+    const app = fakeApp();
+    const account = fakeAccount({ semantic: true }, false);
+    const { d, embedder } = deps({ account });
+    new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    expect(embedder.load).not.toHaveBeenCalled();
+    account.set({ loaded: true });
+    await flush();
+    expect(embedder.load).toHaveBeenCalled();
+  });
+  it('switch off elsewhere: a browser that was on deletes its model and becomes unset; a declined one stays off', async () => {
+    const app = fakeApp();
+    const prefs = fakePrefs('on');
+    const { d, cache } = deps({ account: fakeAccount({ semantic: false }), prefs });
+    new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    expect(prefs.setChoice).toHaveBeenCalledWith(null);
+    expect(cache.clear).toHaveBeenCalled();
+
+    const app2 = fakeApp();
+    const declined = fakePrefs('off');
+    const two = deps({ account: fakeAccount({ semantic: false }), prefs: declined });
+    new SemanticStore(app2 as any, two.d as any);
+    app2.set({ phase: 'unlocked' });
+    await flush();
+    expect(declined.setChoice).not.toHaveBeenCalled();
+  });
+  it('migrates a round-4 browser that was on to the account', async () => {
+    const app = fakeApp();
+    const account = fakeAccount({});
+    const { d } = deps({ account, prefs: fakePrefs('on') });
+    new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    expect(account.getState().settings).toEqual({ semantic: true });
+  });
+  it('setEnabled writes the account switch and this browser’s choice', async () => {
+    const app = fakeApp();
+    const account = fakeAccount({});
+    const prefs = fakePrefs(null);
+    const { d, embedder, cache } = deps({ account, prefs });
+    const s = new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    await s.setEnabled(true);
+    expect(account.getState().settings.semantic).toBe(true);
+    expect(prefs.choice()).toBe('on');
+    expect(embedder.load).toHaveBeenCalled();
+    await s.setEnabled(false);
+    expect(account.getState().settings.semantic).toBe(false);
+    expect(prefs.choice()).toBeNull();
+    expect(cache.clear).toHaveBeenCalled();
+  });
+  it('downloadHere turns the switch on when only Ask was on; declineHere remembers off', async () => {
+    const app = fakeApp();
+    const account = fakeAccount({ llm: { baseUrl: 'https://a/v1', model: 'm', apiKey: 'k' } });
+    const prefs = fakePrefs(null);
+    const { d, embedder } = deps({ account, prefs });
+    const s = new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    await s.downloadHere();
+    expect(account.getState().settings.semantic).toBe(true);
+    expect(prefs.choice()).toBe('on');
+    expect(embedder.load).toHaveBeenCalled();
+    s.declineHere();
+    expect(prefs.choice()).toBe('off');
+  });
+  it('overlapping reconciliations load the model once and settle on the latest settings', async () => {
+    const app = fakeApp();
+    const account = fakeAccount({ semantic: true });
+    const makeEmbedder = vi.fn(() => makeEmbedderStub());
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { d } = deps({ account, makeEmbedder });
+    d.cache.verify.mockImplementation(async () => (await gate, 0));
+    const s = new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    // Account notifications arrive while the first load is still verifying the cache.
+    account.set({ settings: { semantic: true, llm: undefined } });
+    account.set({ settings: { semantic: true } });
+    release();
+    await flushN(5);
+    expect(d.cache.verify).toHaveBeenCalledTimes(1);
+    expect(makeEmbedder).toHaveBeenCalledTimes(1);
+    expect(s.getState()).toMatchObject({ enabled: true, phase: 'ready' });
+    // The switch goes off elsewhere, then on again, before the reconciliation runs.
+    account.set({ settings: { semantic: false } });
+    account.set({ settings: { semantic: true } });
+    await flushN(5);
+    expect(s.getState()).toMatchObject({ accountOn: true, choice: null, enabled: false, phase: 'off' });
+  });
+  it('a failed account save rejects setEnabled and downloadHere', async () => {
+    const app = fakeApp();
+    const account = fakeAccount({});
+    account.update.mockRejectedValue(new Error('locked'));
+    const { d } = deps({ account, prefs: fakePrefs(null) });
+    const s = new SemanticStore(app as any, d as any);
+    app.set({ phase: 'unlocked' });
+    await flush();
+    await expect(s.setEnabled(true)).rejects.toThrow('locked');
+    await expect(s.downloadHere()).rejects.toThrow('locked');
+  });
+  it('retrieveChunks returns full chunk text for the best chunks, or null without a model', async () => {
+    const app = fakeApp();
+    const { d } = deps();
+    const s = new SemanticStore(app as any, d as any);
+    expect(await s.retrieveChunks('x')).toBeNull();
+    app.set({
+      phase: 'unlocked',
+      trees: tree([{ id: 'a', title: 'Alpha', updatedAt: '2026-10-01T00:00:00.000Z' }]),
+      bodies: { a: 'alpha body' },
+      bodiesReady: { v: true },
+    });
+    await vi.waitFor(() => expect(s.getState().coverage.v?.done).toBe(1));
+    // The fake embedder maps equal text to equal vectors, so querying the chunk text finds it.
+    const hits = await s.retrieveChunks('Alpha\nalpha body');
+    expect(hits).toEqual([{ noteId: 'a', vaultId: 'v', chunk: 0, score: expect.closeTo(1, 5), text: 'Alpha\nalpha body' }]);
   });
 });

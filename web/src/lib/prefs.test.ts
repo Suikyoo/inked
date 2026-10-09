@@ -11,11 +11,21 @@ describe('prefs.spellcheck', () => {
   });
 });
 
-describe('prefs.semantic', () => {
+describe('prefs.semanticChoice', () => {
   beforeEach(() => localStorage.clear());
-  it('semantic search is off by default and persists', () => {
-    expect(prefs.semantic()).toBe(false);
-    prefs.setSemantic(true);
-    expect(prefs.semantic()).toBe(true);
+  it('is unset by default and persists on and off', () => {
+    expect(prefs.semanticChoice()).toBeNull();
+    prefs.setSemanticChoice('on');
+    expect(prefs.semanticChoice()).toBe('on');
+    prefs.setSemanticChoice('off');
+    expect(prefs.semanticChoice()).toBe('off');
+    prefs.setSemanticChoice(null);
+    expect(prefs.semanticChoice()).toBeNull();
+  });
+  it('reads the round-4 values: 1 is on, 0 is unset', () => {
+    localStorage.setItem('inked.semantic', '1');
+    expect(prefs.semanticChoice()).toBe('on');
+    localStorage.setItem('inked.semantic', '0');
+    expect(prefs.semanticChoice()).toBeNull();
   });
 });

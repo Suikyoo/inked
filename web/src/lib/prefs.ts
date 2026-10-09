@@ -1,6 +1,8 @@
 const KEY = 'inked.spellcheck';
 const SEMANTIC_KEY = 'inked.semantic';
 
+export type SemanticChoice = 'on' | 'off' | null;
+
 export const prefs = {
   spellcheck(): boolean {
     try {
@@ -16,16 +18,20 @@ export const prefs = {
       /* storage blocked: keep default */
     }
   },
-  semantic(): boolean {
+  /** This browser's model choice: on (downloaded here), off (declined here) or null (not asked yet). */
+  semanticChoice(): SemanticChoice {
     try {
-      return localStorage.getItem(SEMANTIC_KEY) === '1';
+      const v = localStorage.getItem(SEMANTIC_KEY);
+      // Round 4 stored '1' (on) and '0' (off for this device, which did not mean "declined").
+      return v === 'on' || v === '1' ? 'on' : v === 'off' ? 'off' : null;
     } catch {
-      return false;
+      return null;
     }
   },
-  setSemantic(on: boolean): void {
+  setSemanticChoice(v: SemanticChoice): void {
     try {
-      localStorage.setItem(SEMANTIC_KEY, on ? '1' : '0');
+      if (v === null) localStorage.removeItem(SEMANTIC_KEY);
+      else localStorage.setItem(SEMANTIC_KEY, v);
     } catch {
       /* storage blocked: keep default */
     }
