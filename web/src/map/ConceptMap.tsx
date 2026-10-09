@@ -1,12 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { VaultIcon } from '../brand/VaultIcon';
-import { FitIcon, MinusIcon, PlusIcon } from '../components/Icons';
+import { FitIcon, MinusIcon, PlusIcon, ResetIcon } from '../components/Icons';
 import { relativeTime } from '../lib/util';
 import { prefersReducedMotion, usePresence } from '../motion';
-import { litSet, mapFocus } from './lit';
+import { folderLit, litSet, mapFocus } from './lit';
 import { inkTier } from './recency';
 import { planRipples } from './ripples';
+import { useSpringDrag } from './useSpringDrag';
 import { arrowDir, buildScene, chainPath, curvePath, densityClass, edgeWidth, HIERARCHY_BEND, linkPath, nearestInDirection, selRingRadius, THREAD_BEND } from './scene';
 import { fit, panBy, toScreen, useViewport, zoomAt, type Bounds, type Size } from './useViewport';
 import type { MapEntry } from './useVaultGraphs';
@@ -17,6 +18,14 @@ const LABEL_SCALE = 1.6;
 /** Below this zoom, folder labels crowd the dots, so only those on an inked path are drawn. */
 const FOLDER_LABEL_SCALE = 0.9;
 const STEP = 1.25;
+/** Node size follows the zoom, clamped between a floor and this cap. */
+const NODE_SCALE_MAX = 1.8;
+const NODE_SCALE_MIN = 0.6;
+/** Nodes follow the zoom by this power, so they grow more slowly than the map does. */
+const NODE_SCALE_POWER = 0.6;
+/** The vault icon's size: about twice a note dot, so a hub reads as the root of its map. */
+const HUB_ICON = 22;
+const HUB_HALF = HUB_ICON / 2;
 const EDGE = 16;
 /** Write-on: each level of edges starts this much after the one above it. */
 const WRITE_STEP_MS = 140;
@@ -33,7 +42,7 @@ const THREAD_STEP_MS = 90;
 /** A neighbour's dot pulses as its thread arrives, after the 640 ms draw-in has mostly run. */
 const PULSE_LAG_MS = 520;
 /** The pending-links caption fades out over --dur-2. */
-const CAPTION_EXIT_MS = 140;
+const CAPTION_EXIT_MS = 220;
 
 export const noteHref = (vaultId: string, noteId: string) => `/v/${vaultId}/n/${noteId}`;
 
@@ -88,8 +97,10 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
   const svgRef = useRef<SVGSVGElement>(null);
   const nodeRefs = useRef(new Map<string, SVGGElement>());
   const [size, setSize] = useState<Size>(FALLBACK);
-  const scene = useMemo(() => buildScene(entries), [entries]);
-  const { view, setView, animateTo } = useViewport(() => fit(scene.bounds, FALLBACK));
+  const baseScene = useMemo(() => buildScene(entries), [entries]);
+  const { view, setView, animateTo } = useViewport(() => fit(baseScene.bounds, FALLBACK));
+  // Dragged nodes stay where they are dropped (saved in this browser); `scene` is the base scene with them displaced.
+  const { scene, grab, moveTo, release, reset, moved } = useSpringDrag(baseScene);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -114,6 +125,8 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
   const touched = useRef(false);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  /** A node under the pointer when it went down: moving it drags the node, not the map. */
+  const nodeDrag = useRef<{ id: string; tow: boolean } | null>(null);
   const pinch = useRef<number | null>(null);
   const suppressClick = useRef(false);
 
@@ -284,8 +297,13 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
     suppressClick.current = false;
     const p = local(e);
     pointers.current.set(e.pointerId, p);
-    if (pointers.current.size === 1) drag.current = { x: p.x, y: p.y, moved: false };
-    else {
+    if (pointers.current.size === 1) {
+      drag.current = { x: p.x, y: p.y, moved: false };
+      const el = e.target instanceof Element ? e.target.closest<SVGGElement>('g.cmap-node, g.cmap-folder') : null;
+      const id = el?.dataset.note ?? el?.dataset.folder ?? null;
+      nodeDrag.current = id ? { id, tow: e.shiftKey } : null;
+    } else {
+      nodeDrag.current = null;
       pinch.current = null;
       if (drag.current) drag.current.moved = true;
     }
@@ -298,6 +316,8 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
       pointers.current.delete(e.pointerId);
       if (pointers.current.size < 2) pinch.current = null;
       drag.current = null;
+      if (nodeDrag.current) release();
+      nodeDrag.current = null;
       setDragging(false);
       return;
     }
@@ -316,6 +336,17 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
     }
     const g = drag.current;
     if (!g) return;
+    const nd = nodeDrag.current;
+    if (nd) {
+      if (!g.moved) {
+        if (Math.hypot(p.x - g.x, p.y - g.y) < DRAG_PX) return;
+        g.moved = true;
+        svgRef.current?.setPointerCapture?.(e.pointerId);
+        grab(nd.id, nd.tow);
+      }
+      moveTo((p.x - g.x) / view.scale, (p.y - g.y) / view.scale);
+      return;
+    }
     if (!g.moved) {
       if (Math.hypot(p.x - g.x, p.y - g.y) < DRAG_PX) return;
       g.moved = true;
@@ -333,6 +364,8 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
     if (pointers.current.size < 2) pinch.current = null;
     if (pointers.current.size === 0) {
       suppressClick.current = drag.current?.moved ?? false;
+      if (nodeDrag.current && drag.current?.moved) release();
+      nodeDrag.current = null;
       drag.current = null;
       setDragging(false);
     }
@@ -507,7 +540,9 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
   // Lit state: class toggles only, so the scene is never rebuilt by a hover.
   const faded = hits.size > 0;
   const searching = faded || queryActive;
-  const focus = mapFocus({
+  // A hovered, keyboard-focused or selected folder lights its whole subtree, unless a note holds the focus.
+  const pointedFolder = hover && folderById.has(hover) ? hover : focusId && folderById.has(focusId) ? focusId : null;
+  const focus = pointedFolder ? null : mapFocus({
     hover: hover && dotById.has(hover) ? hover : null,
     keyboard: focusId && dotById.has(focusId) ? focusId : null,
     hot: hot && dotById.has(hot) ? hot : null,
@@ -515,10 +550,12 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
     searching,
   });
   // `neighbours` must be stable per vectors version (the caller memoises it), or this recomputes every render.
+  const folderFocus = searching ? null : pointedFolder ?? (focus === null ? selFolder : null);
   const { lit, near } = useMemo(() => {
+    if (folderFocus) return { lit: folderLit(folderFocus, scene), near: [] };
     const near = focus ? neighbours(focus).filter((n) => n.id !== focus && dotById.has(n.id)).slice(0, THREAD_COUNT) : [];
     return { lit: litSet(focus, scene, near.map((n) => n.id)), near };
-  }, [focus, scene, neighbours, dotById]);
+  }, [focus, folderFocus, scene, neighbours, dotById]);
   const nearIndex = new Map(near.map((n, i) => [n.id, i]));
 
   // Meaning threads restart whenever the focus moves, or the focused note becomes the selection. A new selection
@@ -535,9 +572,21 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
   th.focus = focus;
   const threadBase = th.fresh ? THREAD_BASE_MS : 0;
   // While searching, the search fade owns opacity; the flowing links and labels still follow the selection.
-  const dimming = focus !== null && !searching;
+  const dimming = (focus !== null || folderFocus !== null) && !searching;
 
   const allFolderLabels = view.scale >= FOLDER_LABEL_SCALE;
+  const k = Math.min(NODE_SCALE_MAX, Math.max(NODE_SCALE_MIN, Math.pow(view.scale, NODE_SCALE_POWER)));
+  const nodeScale = `scale(${f1(k)})`;
+
+  // The lit folder draws a line to everything beneath it.
+  const fanFolder = folderFocus;
+  const fan = useMemo(() => {
+    if (!fanFolder) return [];
+    const out: { id: string; x: number; y: number }[] = [];
+    for (const f of scene.folders) if (f.id !== fanFolder && scene.chainFolders[f.id]?.includes(fanFolder)) out.push({ id: f.id, x: f.x, y: f.y });
+    for (const d of scene.dots) if (d.folderIds.includes(fanFolder)) out.push({ id: d.id, x: d.x, y: d.y });
+    return out;
+  }, [fanFolder, scene]);
   const at = (x: number, y: number) => toScreen(view, { x, y });
   const pending = usePresence(scene.linksPending && scene.dots.length > 0, CAPTION_EXIT_MS);
 
@@ -606,6 +655,14 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
             })}
           </g>
         )}
+        {fanFolder && fan.length > 0 && (
+          <g className="cmap-fan" data-fan={fanFolder}>
+            {fan.map((c) => {
+              const from = folderById.get(fanFolder)!;
+              return <path key={c.id} data-fan-to={c.id} d={curvePath(at(from.x, from.y), at(c.x, c.y), HIERARCHY_BEND)} />;
+            })}
+          </g>
+        )}
         <g className="cmap-ink">
           {/* Sorted, so a new stroke never moves an existing one in the DOM (a move would replay its draw). */}
           {[...inked].sort().map((id) => {
@@ -640,11 +697,15 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
                 onKeyDown={(e) => {
                   if (activates(e)) onSelect({ kind: 'folder', vaultId: f.vaultId, id: f.id });
                 }}
+                onPointerEnter={() => setHoverSoon(f.id)}
+                onPointerLeave={() => hoverNext.current === f.id && setHoverSoon(null)}
               >
                 <circle className="cmap-hit" r={11} />
-                {f.id === selFolder && <circle className="cmap-sel" r={10} />}
-                <rect key={ticks.get(f.id)?.seq ?? 0} className="cmap-sq" style={ticks.has(f.id) ? { animationDelay: ms(ticks.get(f.id)!.delay) } : undefined} x={-4.75} y={-4.75} width={9.5} height={9.5} rx={2.25} />
-                <text className={`cmap-folder-label${showLabel ? '' : ' is-hidden'}`} x={0} y={19} textAnchor="middle" aria-hidden="true">
+                <g transform={nodeScale}>
+                  {f.id === selFolder && <circle className="cmap-sel" r={10} />}
+                  <rect key={ticks.get(f.id)?.seq ?? 0} className="cmap-sq" style={ticks.has(f.id) ? { animationDelay: ms(ticks.get(f.id)!.delay) } : undefined} x={-4.75} y={-4.75} width={9.5} height={9.5} rx={2.25} />
+                </g>
+                <text className={`cmap-folder-label${showLabel ? '' : ' is-hidden'}`} x={0} y={f1(4.75 * k + 14)} textAnchor="middle" aria-hidden="true">
                   {f.name}
                 </text>
               </g>
@@ -675,18 +736,20 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
                   if (activates(ev)) onSelect({ kind: 'hub', vaultId: h.vaultId });
                 }}
               >
-                <circle className="cmap-hit" r={12} />
-                {/* The hub stands for the root Index: a hit on it lights the hub, as a diamond does for a folder. */}
-                {inkedHubs.has(h.vaultId) && <circle className="cmap-hub-ink" r={9.5} />}
-                {h.vaultId === selHub && <circle className="cmap-sel" r={12.5} />}
-                <g transform="translate(-7 -7)">
-                  <VaultIcon color={e.vault.color} level={e.level} size={14} />
+                <circle className="cmap-hit" r={HUB_HALF + 5} />
+                <g transform={nodeScale}>
+                  {/* The hub stands for the root Index: a hit on it lights the hub, as a diamond does for a folder. */}
+                  {inkedHubs.has(h.vaultId) && <circle className="cmap-hub-ink" r={HUB_HALF + 2.5} />}
+                  {h.vaultId === selHub && <circle className="cmap-sel" r={HUB_HALF + 5.5} />}
+                  <g transform={`translate(${-HUB_HALF} ${-HUB_HALF})`}>
+                    <VaultIcon color={e.vault.color} level={e.level} size={HUB_ICON} />
+                  </g>
                 </g>
-                <text className="cmap-hub-name" x={0} y={-12} textAnchor="middle">
+                <text className="cmap-hub-name" x={0} y={f1(-(HUB_HALF * k + 5))} textAnchor="middle">
                   {e.vault.name}
                 </text>
                 {e.status === 'error' && (
-                  <text className="cmap-hub-note" x={0} y={20} textAnchor="middle">
+                  <text className="cmap-hub-note" x={0} y={f1(HUB_HALF * k + 13)} textAnchor="middle">
                     Couldn’t load
                   </text>
                 )}
@@ -702,7 +765,7 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
             const dens = dot.linksReady ? densityClass(dot.degree) : '';
             const r = dens === 'hollow' ? 3.4 : big ? 5 : 4;
             const when = relativeTime(dot.updatedAt, now);
-            const showLabel = view.scale >= LABEL_SCALE || inkedNotes.has(dot.id) || active || lit.notes.has(dot.id);
+            const showLabel = view.scale >= LABEL_SCALE || inkedNotes.has(dot.id) || active || (lit.notes.has(dot.id) && !folderFocus);
             return (
               <g
                 key={dot.id}
@@ -726,29 +789,31 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
                 onPointerLeave={() => hoverNext.current === dot.id && setHoverSoon(null)}
               >
                 <circle className="cmap-hit" r={12} />
-                {(tier === 'wet' || tier === 'fresh') && <circle className={`cmap-glow tier-${tier}`} r={r + 3} filter={`url(#${uid}-glow)`} />}
-                {(dens === 'r1' || dens === 'r2') && <circle className="cmap-dens" r={6.5} />}
-                {dens === 'r2' && <circle className="cmap-dens" r={9.25} />}
-                <circle
-                  key={nearIndex.has(dot.id) ? `pulse${th.seq}` : 'dot'}
-                  className={`cmap-dot tier-${tier}${nearIndex.has(dot.id) ? ' is-pulse' : ''}${flash.has(dot.id) ? ' is-flash' : ''}`}
-                  r={r}
-                  style={nearIndex.has(dot.id) ? { animationDelay: ms(threadBase + PULSE_LAG_MS + nearIndex.get(dot.id)! * THREAD_STEP_MS) } : undefined}
-                />
-                {dot.id === selNote && <circle className="cmap-sel" r={selRingRadius(dot.degree)} />}
-                {rings.has(dot.id) &&
-                  [0, 1].map((k) => (
-                    <circle
-                      key={`${rings.get(dot.id)!.seq}-${k}`}
-                      className="cmap-save-ring"
-                      r={5}
-                      style={{ animationDelay: ms(rings.get(dot.id)!.delay + k * RING_GAP_MS) }}
-                      onAnimationEnd={k === 1 ? () => dropRings(dot.id, rings.get(dot.id)!.seq) : undefined}
-                    />
-                  ))}
-                {ring?.id === dot.id && <circle key={ring.seq} className="cmap-ring" r={5} onAnimationEnd={() => setRing(null)} />}
+                <g transform={nodeScale}>
+                  {(tier === 'wet' || tier === 'fresh') && <circle className={`cmap-glow tier-${tier}`} r={r + 3} filter={`url(#${uid}-glow)`} />}
+                  {(dens === 'r1' || dens === 'r2') && <circle className="cmap-dens" r={6.5} />}
+                  {dens === 'r2' && <circle className="cmap-dens" r={9.25} />}
+                  <circle
+                    key={nearIndex.has(dot.id) ? `pulse${th.seq}` : 'dot'}
+                    className={`cmap-dot tier-${tier}${nearIndex.has(dot.id) ? ' is-pulse' : ''}${flash.has(dot.id) ? ' is-flash' : ''}`}
+                    r={r}
+                    style={nearIndex.has(dot.id) ? { animationDelay: ms(threadBase + PULSE_LAG_MS + nearIndex.get(dot.id)! * THREAD_STEP_MS) } : undefined}
+                  />
+                  {dot.id === selNote && <circle className="cmap-sel" r={selRingRadius(dot.degree)} />}
+                  {rings.has(dot.id) &&
+                    [0, 1].map((k) => (
+                      <circle
+                        key={`${rings.get(dot.id)!.seq}-${k}`}
+                        className="cmap-save-ring"
+                        r={5}
+                        style={{ animationDelay: ms(rings.get(dot.id)!.delay + k * RING_GAP_MS) }}
+                        onAnimationEnd={k === 1 ? () => dropRings(dot.id, rings.get(dot.id)!.seq) : undefined}
+                      />
+                    ))}
+                  {ring?.id === dot.id && <circle key={ring.seq} className="cmap-ring" r={5} onAnimationEnd={() => setRing(null)} />}
+                </g>
                 {showLabel && (
-                  <text className="cmap-label" x={r + 5} y={3.5}>
+                  <text className="cmap-label" x={f1(r * k + 5)} y={3.5}>
                     {active ? `${dot.title} · ${when}` : dot.title}
                     {nearIndex.has(dot.id) && <tspan className="cmap-sim">{` · ◇ ${similarityText(near[nearIndex.get(dot.id)!].similarity)}`}</tspan>}
                   </text>
@@ -769,6 +834,11 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
         <button type="button" className="cmap-btn" aria-label="Fit map" onClick={fitAll}>
           <FitIcon size={12} />
         </button>
+        {moved && (
+          <button type="button" className="cmap-btn" aria-label="Reset node positions" title="Reset node positions" onClick={reset}>
+            <ResetIcon size={12} />
+          </button>
+        )}
       </div>
 
       {pending.mounted && (

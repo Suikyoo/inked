@@ -639,6 +639,131 @@ describe('link density cues', () => {
   });
 });
 
+describe('folder fan and node scale', () => {
+  const t = () =>
+    tree(
+      [folder('f1', null, 'Ops'), folder('f2', 'f1', 'Deep'), folder('f3', null, 'Misc')],
+      [note('a', 'f1', 'Alpha'), note('b', 'f2', 'Beta'), note('c', 'f3', 'Gamma'), note('d', null, 'Delta')],
+    );
+  const hoverFolder = (id: string) => {
+    fire(folderNode(id), new MouseEvent('pointerover', { bubbles: true }));
+    act(() => void vi.advanceTimersByTime(40));
+  };
+
+  it('draws no fan until a folder is hovered, then one line per descendant', () => {
+    render({ entries: [entry(t())] });
+    expect(host!.querySelector('.cmap-fan')).toBeNull();
+    hoverFolder('f1');
+    const to = [...host!.querySelectorAll('.cmap-fan path')].map((p) => p.getAttribute('data-fan-to')).sort();
+    expect(to).toEqual(['a', 'b', 'f2']);
+  });
+
+  it('removes the fan when the pointer leaves', () => {
+    render({ entries: [entry(t())] });
+    hoverFolder('f1');
+    fire(folderNode('f1'), new MouseEvent('pointerout', { bubbles: true }));
+    act(() => void vi.advanceTimersByTime(40));
+    expect(host!.querySelector('.cmap-fan')).toBeNull();
+  });
+
+  it('dims everything outside a hovered folder, and keeps the subtree lit', () => {
+    render({ entries: [entry(t())] });
+    hoverFolder('f1');
+    const dim = nodes().filter((n) => n.classList.contains('is-dim')).map((n) => n.dataset.note).sort();
+    expect(dim).toEqual(['c', 'd']);
+    expect(folderNode('f3').classList.contains('is-dim-soft')).toBe(true);
+    expect(folderNode('f2').classList.contains('is-dim-soft')).toBe(false);
+  });
+
+  it('keeps a clicked folder lit after the pointer leaves', () => {
+    render({ entries: [entry(t())] });
+    fire(folderNode('f1'), new MouseEvent('click', { bubbles: true }));
+    act(() => void vi.advanceTimersByTime(400));
+    expect(host!.querySelector('.cmap-fan')).not.toBeNull();
+    expect(nodes().filter((n) => n.classList.contains('is-dim')).map((n) => n.dataset.note).sort()).toEqual(['c', 'd']);
+  });
+
+  describe('moving nodes', () => {
+    const at = (el: Element) => {
+      const m = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(el.getAttribute('transform')!)!;
+      return [Number(m[1]), Number(m[2])];
+    };
+    const ptr = (type: string, x: number, y: number, shiftKey: boolean) =>
+      Object.assign(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1, shiftKey }), { pointerId: 1, pointerType: 'mouse' });
+    const drag = (el: Element, shiftKey: boolean) => {
+      const svg = host!.querySelector('svg')!;
+      fire(el, ptr('pointerdown', 100, 100, shiftKey));
+      for (const [x, y] of [[110, 100], [140, 120], [180, 140]]) {
+        fire(svg, ptr('pointermove', x, y, shiftKey));
+        act(() => void vi.advanceTimersByTime(60));
+      }
+      act(() => void vi.advanceTimersByTime(1500));
+      fire(svg, ptr('pointerup', 180, 140, shiftKey));
+      act(() => void vi.advanceTimersByTime(4000));
+    };
+    beforeEach(() => localStorage.removeItem('inked-map-offsets'));
+    afterEach(() => localStorage.removeItem('inked-map-offsets'));
+
+    it('a plain drag moves only that node, which stays put and is not selected', () => {
+      const onSelect = vi.fn();
+      render({ entries: [entry(t())], onSelect });
+      const f0 = at(folderNode('f1'));
+      const a0 = at(node('a'));
+      drag(folderNode('f1'), false);
+      fire(folderNode('f1'), new MouseEvent('click', { bubbles: true }));
+      const f1 = at(folderNode('f1'));
+      expect(f1[0]).toBeGreaterThan(f0[0] + 20);
+      expect(at(node('a'))).toEqual(a0);
+      act(() => void vi.advanceTimersByTime(5000));
+      expect(at(folderNode('f1'))).toEqual(f1);
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('Shift-drag carries every descendant along and leaves other nodes alone', () => {
+      render({ entries: [entry(t())] });
+      const a0 = at(node('a'));
+      const b0 = at(node('b'));
+      const c0 = at(node('c'));
+      const f0 = at(folderNode('f1'));
+      drag(folderNode('f1'), true);
+      const df = at(folderNode('f1'))[0] - f0[0];
+      expect(df).toBeGreaterThan(20);
+      expect(at(node('a'))[0] - a0[0]).toBeCloseTo(df, 0);
+      expect(at(node('b'))[0] - b0[0]).toBeCloseTo(df, 0);
+      expect(at(node('c'))).toEqual(c0);
+    });
+
+    it('saves the offsets in this browser, restores them on the next map, and resets on request', () => {
+      render({ entries: [entry(t())] });
+      const f0 = at(folderNode('f1'));
+      drag(folderNode('f1'), false);
+      const moved = at(folderNode('f1'));
+      expect(JSON.parse(localStorage.getItem('inked-map-offsets')!).f1).toBeDefined();
+      act(() => root?.unmount());
+      host?.remove();
+      render({ entries: [entry(t())] });
+      expect(at(folderNode('f1'))[0]).toBeCloseTo(moved[0], 0);
+      expect(at(folderNode('f1'))[1]).toBeCloseTo(moved[1], 0);
+      fire(host!.querySelector('button[aria-label="Reset node positions"]')!, new MouseEvent('click', { bubbles: true }));
+      expect(at(folderNode('f1'))).toEqual(f0);
+      expect(localStorage.getItem('inked-map-offsets')).toBeNull();
+    });
+  });
+
+  it('scales the dot group with the zoom, up to the cap', () => {
+    render({ entries: [entry(t())] });
+    const k = () => Number(/scale\(([\d.]+)\)/.exec(node('a').querySelector('g[transform^="scale"]')!.getAttribute('transform')!)![1]);
+    const before = k();
+    const zoom = host!.querySelector('button[aria-label="Zoom in"]') as HTMLElement;
+    for (let i = 0; i < 12; i++) {
+      fire(zoom, new MouseEvent('click', { bubbles: true }));
+      act(() => void vi.advanceTimersByTime(400));
+    }
+    expect(k()).toBeGreaterThan(before);
+    expect(k()).toBeLessThanOrEqual(1.8);
+  });
+});
+
 describe('lit state', () => {
   const t = () =>
     tree(

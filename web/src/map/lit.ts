@@ -37,3 +37,14 @@ export function litSet(focus: string | null, scene: Scene, meaning: readonly str
   for (const id of notes) for (const f of scene.chainFolders[id] ?? []) folders.add(f);
   return { notes, folders, links };
 }
+
+/** A folder's whole subtree: every folder and note beneath it, the folder itself and the folders above it. */
+export function folderLit(folderId: string, scene: Scene): LitSet {
+  const notes = new Set<string>();
+  const folders = new Set<string>();
+  for (const f of scene.folders) {
+    if (f.id === folderId || scene.chainFolders[f.id]?.includes(folderId)) for (const a of scene.chainFolders[f.id]) folders.add(a);
+  }
+  for (const d of scene.dots) if (d.folderIds.includes(folderId)) notes.add(d.id);
+  return { notes, folders, links: [] };
+}

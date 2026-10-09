@@ -58,6 +58,8 @@ export interface LinkSeg extends Seg {
 export interface PencilSeg extends Seg {
   /** Depth of the parent: 0 for the hub, 1 for a top-level folder, and so on. */
   depth: number;
+  /** Id of the parent folder, or null for the hub. */
+  from: string | null;
   kind: 'folder' | 'note';
 }
 /** World-space geometry for every vault on the map. */
@@ -211,7 +213,7 @@ export function buildScene(inputs: SceneInput[], gap = 48): Scene {
     for (const [id, parent] of Object.entries(layout.parent)) {
       const kind = layout.folders[id] ? 'folder' : 'note';
       const depth = parent === null ? 0 : (folderById.get(parent)?.depth ?? 0) + 1;
-      scene.pencil.push({ ...seg(id, pos(parent), pos(id)), depth, kind });
+      scene.pencil.push({ ...seg(id, pos(parent), pos(id)), depth, from: parent, kind });
     }
 
     if (graph.linksReady) {

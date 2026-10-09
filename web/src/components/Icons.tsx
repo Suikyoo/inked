@@ -74,6 +74,11 @@ export const FitIcon = (p: P) => (
     <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
   </Svg>
 );
+export const ResetIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5" />
+  </Svg>
+);
 export const ChevronRight = (p: P) => (
   <Svg strokeWidth={2.6} {...p}>
     <path d="M9 6l6 6-6 6" />

@@ -459,3 +459,18 @@
   .cmap-folder.is-tick .cmap-sq { animation: cmap-tick-rm 120ms ease-out !important; }
 }
 @keyframes cmap-tick-rm { from { stroke: var(--ink-wet); } }
+
+/* Hovering a folder fans a line out to everything beneath it. */
+.cmap-fan { pointer-events: none; }
+.cmap-fan path {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 1;
+  stroke-opacity: 0.55;
+  stroke-linecap: round;
+  animation: cmap-fan-in var(--dur-2) var(--ease-out) both;
+}
+@keyframes cmap-fan-in { from { stroke-opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .cmap-fan path { animation: none; }
+}
