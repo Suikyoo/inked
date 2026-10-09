@@ -91,6 +91,34 @@ export const encryptNoteBody = (key: CryptoKey, vaultId: string, noteId: string,
 export const decryptNoteBody = (key: CryptoKey, vaultId: string, noteId: string, ct: string) =>
   decryptString(key, ct, aad.noteBody(vaultId, noteId));
 
+export interface LlmSettings {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+/** Synced per-account settings, encrypted with userKey. A missing `semantic` means off. */
+export interface AccountSettings {
+  semantic?: boolean;
+  llm?: LlmSettings;
+}
+
+const isLlm = (v: unknown): v is LlmSettings =>
+  isObj(v) && typeof v.baseUrl === 'string' && typeof v.model === 'string' && typeof v.apiKey === 'string';
+export const isAccountSettings = (v: unknown): v is AccountSettings =>
+  isObj(v) && (v.semantic === undefined || typeof v.semantic === 'boolean') && (v.llm === undefined || isLlm(v.llm));
+
+export const encryptAccountSettings = (key: CryptoKey, userId: string, s: AccountSettings) =>
+  encryptJSON(
+    key,
+    {
+      ...(s.semantic !== undefined ? { semantic: s.semantic } : {}),
+      ...(s.llm ? { llm: { baseUrl: s.llm.baseUrl, model: s.llm.model, apiKey: s.llm.apiKey } } : {}),
+    },
+    aad.accountSettings(userId),
+  );
+export const decryptAccountSettings = (key: CryptoKey, userId: string, ct: string) =>
+  decryptJSON(key, ct, aad.accountSettings(userId), isAccountSettings);
+
 /** Plaintext: [chunk count: u8][count × EMBED_DIM int8]. */
 export async function encryptNoteVector(
   key: CryptoKey,
