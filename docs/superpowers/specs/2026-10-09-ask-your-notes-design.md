@@ -20,7 +20,10 @@ The Home search bar can answer a question from the user's own notes (retrieval-a
   - the last row of the results list reads "Ask your notes: '…'", for arrow-key and touch users;
   - **Enter keeps its meaning**: open the top result. No guessing of question intent.
 - **Map tie-in.** Cited notes light up on the map; clicking a citation selects the note. "Save as note" writes the answer as a new encrypted note with `[[links]]` to its sources.
-- **Settings sync.** Base URL, model and API key are encrypted with `userKey` and stored server-side as ciphertext, so every device has them after unlock.
+- **Settings sync.** Account settings are encrypted with `userKey` and stored server-side as ciphertext, so every device has them after unlock. They hold:
+  - the Ask settings (base URL, model, API key);
+  - the "Search by meaning" switch, which moves here from the per-device `prefs` of round 4.
+- **New-browser banner.** The model download stays a per-browser choice. When the account has search by meaning or Ask on and this browser has not chosen yet, a persistent banner offers the download (Section 2).
 
 ## Section 1: architecture and data flow
 
@@ -41,7 +44,7 @@ The Home search bar can answer a question from the user's own notes (retrieval-a
   - `fetch` is injected for tests.
 - **`core/src/crypto`:** a new account-settings field.
   - Key: `userKey`. AAD: `settings|<userId>`.
-  - Plaintext JSON: `{ llm?: { baseUrl, model, apiKey } }`. Other settings may join this object later.
+  - Plaintext JSON: `{ semantic?: boolean, llm?: { baseUrl, model, apiKey } }`. A missing `semantic` means off. Other settings may join this object later.
 - **Server:**
   - A new table, created with the existing `CREATE TABLE IF NOT EXISTS` schema pattern (no `ALTER`):
     ```sql
@@ -51,15 +54,19 @@ The Home search bar can answer a question from the user's own notes (retrieval-a
       updated_at   TEXT NOT NULL
     );
     ```
-  - **`GET /api/me/settings`** returns `{ encSettings: string | null }`.
-  - **`PUT /api/me/settings`** with body `{ encSettings }` upserts. The value uses the ciphertext pattern and is capped at 4 KB. Rate-limited like note saves.
+  - **`GET /api/me/settings`** returns `{ encSettings: string | null, updatedAt: string | null }`.
+  - **`PUT /api/me/settings`** with body `{ encSettings, baseUpdatedAt }` upserts.
+    - `baseUpdatedAt` must equal the stored `updated_at` (or be `null` when no row exists). Otherwise the route returns 409 with the current row, so one device's change never silently overwrites another's.
+    - The value uses the ciphertext pattern and is capped at 4 KB. Rate-limited like note saves.
   - A new env var **`INKED_LLM_ORIGINS`**, a comma-separated list of origins (for example `https://api.openai.com`).
     - Each entry must parse as a bare origin with `https:`. `http://localhost` and `http://127.0.0.1` (any port) are allowed for development. Anything else fails startup with a clear message.
     - The origins are appended to the CSP `connect-src` after `'self'`.
     - `GET /api/status` adds `llmOrigins: string[]` (empty when unset).
 - **`web/src/ask/`:**
   - **`askStore.ts`:** a companion store with the same `set()` and listener pattern as `semanticStore`. It holds the turns (question, answer text, sources, cited ids, status), the current `AbortController` and the decrypted LLM settings. Everything is in memory only and cleared on lock.
-  - **`askSettings.ts`:** loads and decrypts the settings after unlock, encrypts and saves them from Settings.
+  - **`web/src/state/accountSettings.ts`** (shared by Ask and semantic search, not under `ask/`): loads and decrypts the account settings after unlock, and saves a change by read-merge-write. On 409 it re-reads, applies the same change to the newer settings, and retries once, then shows an error. It exposes `semantic`, `llm` and a `loaded` flag, and clears everything on lock.
+  - **`web/src/lib/prefs.ts`:** `inked.semantic` becomes this browser's model choice, `'on' | 'off'`, or unset when the browser has not chosen. Legacy values migrate: `'1'` → `'on'`, `'0'` → unset.
+  - **`web/src/components/ModelBanner.tsx`:** the new-browser banner in `AppShell`.
   - **`AskAnswer.tsx`:** the answer view that replaces the results column.
   - Changes to **`HomePage.tsx`**: the Ask button, Ctrl+Enter, the Ask row, the bar states and the map `hits`.
   - **`SettingsPage.tsx`:** an "Ask your notes" card.
@@ -104,6 +111,36 @@ The Home search bar can answer a question from the user's own notes (retrieval-a
 - The answer region is `aria-live="polite"`. Streaming text is not announced word by word; the region announces when the answer completes.
 - Reduced motion: no streaming fade, text appears as it arrives.
 
+### Search by meaning: account switch and browser choice
+
+Round 4 kept the "Search by meaning" toggle per device. It now has two parts:
+- the **account switch**, `semantic` in the account settings, synced to every device;
+- the **browser choice**, `prefs` `inked.semantic`: `'on'` (model downloaded or downloading here), `'off'` (the user declined on this browser), or unset.
+
+Rules:
+- The model loads and embeds on a browser only when the account switch is on **and** the browser choice is `'on'`.
+- Turning the switch on in Settings sets the account switch and this browser's choice to `'on'`, then downloads as round 4 did.
+- Turning it off sets the account switch off. Every browser that unlocks with the switch off terminates the worker, deletes its cached model (as round 4 did on toggle off) and resets its browser choice to unset. Related keeps working from stored vectors, as before.
+- Settings shows the switch and, under it, one line for this browser: "Downloaded on this browser", "Downloading…", or "Not on this browser" with a **Download** button.
+- **Migration.** On the first unlock after this round, if the account settings have no `semantic` field and this browser's legacy value was `'1'`, the client writes `semantic: true` to the account. Otherwise it writes nothing, so a missing field stays off.
+
+### New-browser banner
+
+- **When.** After unlock, once the account settings are loaded, if all of these hold:
+  - `/models/manifest.json` exists;
+  - the account switch is on, or Ask settings are saved;
+  - this browser's choice is unset.
+- **Where.** A persistent bar at the top of the main area in `AppShell`, in the style of the sync bar, on every page.
+- **Text.**
+  - Search by meaning on: "Search by meaning is on for your account. This browser needs a one-time 34 MB download."
+  - Only Ask on: "Ask finds better sources with search by meaning. This browser needs a one-time 34 MB download."
+- **Buttons.**
+  - **Download**: sets the browser choice to `'on'` (and the account switch on, in the Ask-only case) and starts the download. The bar then hides, and progress shows as in round 4.
+  - **Not on this browser**: sets the browser choice to `'off'`. The bar hides. Settings can still download later.
+- **Persistent.** There is no close button. The bar returns on every load and unlock until the user picks one of the two buttons.
+- **Private windows.** The browser choice is lost when the window closes, so the bar returns next time. That is intended.
+- `role="status"`. The buttons are reachable by keyboard.
+
 ### Settings: "Ask your notes" card
 
 - Shown only when `llmOrigins` is not empty.
@@ -146,7 +183,7 @@ The user never sees raw error strings.
   - `chat`: SSE deltas, `[DONE]`, each typed error, abort;
   - settings crypto round trip, and failure on a wrong AAD.
 - **`server` tests:**
-  - settings routes: auth, the 4 KB cap, upsert, cascade on user delete;
+  - settings routes: auth, the 4 KB cap, upsert, 409 on a stale `baseUpdatedAt`, cascade on user delete;
   - CSP header includes the configured origins;
   - a non-https origin fails startup;
   - `/api/status` returns `llmOrigins`.
@@ -160,7 +197,10 @@ The user never sees raw error strings.
   - "No notes match closely enough" makes no LLM call;
   - fuzzy fallback shows its footer;
   - lock clears turns and settings;
-  - Settings card: origin check, Test, save and clear.
+  - Settings card: origin check, Test, save and clear;
+  - account settings: 409 re-read, merge and retry once; settings that won't decrypt count as unset;
+  - search by meaning: the model loads only with the account switch on and the browser choice `'on'`; switch off on another device deletes the model here on unlock; the legacy `'1'` migrates to the account;
+  - banner: shown for a new browser with the switch on, and with Ask only; hidden without a manifest; Download and "Not on this browser" each hide it for good; it returns after reload while unset.
 - **Manual check** on the `inked-test` stack with a real OpenAI key: ask a question whose answer spans two notes, see both cited and lit on the map, save the answer, and see the new note link to both.
 
 ## Out of scope
