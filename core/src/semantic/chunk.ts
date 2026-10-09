@@ -5,6 +5,11 @@ export const MAX_CHUNKS = 16;
 /** Approximate tokens per whitespace-separated word; the real tokenizer only runs in the worker. */
 const TOKENS_PER_WORD = 1.3;
 
+/** Approximate token count, the same estimate the chunker uses. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.split(/\s+/).filter(Boolean).length * TOKENS_PER_WORD);
+}
+
 /** Splits a note into overlapping windows for embedding; the title leads the first chunk. */
 export function chunkNote(title: string, body: string): string[] {
   const head = title.trim();
