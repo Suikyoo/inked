@@ -6,8 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { vault } from '../map/fixtures';
 import { SemanticProvider } from '../semantic/SemanticContext';
 import type { SemanticState, SemanticStore } from '../semantic/semanticStore';
+import { AccountSettingsProvider } from '../state/AccountSettingsContext';
 import { StoreProvider } from '../state/StoreContext';
 import type { AppState, AppStore } from '../state/store';
+import { accountStub } from '../test/account';
 import { semanticStub } from '../test/semantic';
 import { SettingsPage } from './SettingsPage';
 
@@ -44,7 +46,9 @@ function renderSettings(state: Partial<SemanticState>, methods: Partial<Semantic
       <MemoryRouter>
         <StoreProvider store={app}>
           <SemanticProvider store={semantic}>
-            <SettingsPage />
+            <AccountSettingsProvider store={accountStub()}>
+              <SettingsPage />
+            </AccountSettingsProvider>
           </SemanticProvider>
         </StoreProvider>
       </MemoryRouter>,
