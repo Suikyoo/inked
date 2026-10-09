@@ -64,6 +64,7 @@ export async function* chat(opts: ChatOptions): AsyncGenerator<string> {
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
+  let finished = false;
   try {
     for (;;) {
       let chunk: ReadableStreamReadResult<Uint8Array>;
@@ -72,28 +73,38 @@ export async function* chat(opts: ChatOptions): AsyncGenerator<string> {
       } catch {
         throw new LlmError(aborted() ? 'aborted' : 'cut');
       }
-      if (chunk.done) break;
-      buf += dec.decode(chunk.value, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
+      const eof = chunk.done;
+      buf += eof ? dec.decode() : dec.decode(chunk.value, { stream: true });
+      // At EOF, also process a final line that has no trailing newline.
+      while (buf.indexOf('\n') >= 0 || (eof && buf.length > 0)) {
+        const nl = buf.indexOf('\n');
+        const end = nl >= 0 ? nl : buf.length;
+        const line = buf.slice(0, end).trim();
+        buf = buf.slice(end + 1);
         if (!line.startsWith('data:')) continue;
         const data = line.slice(5).trim();
-        if (data === '[DONE]') return;
+        if (data === '[DONE]') {
+          finished = true;
+          return;
+        }
         let msg: { choices?: { delta?: { content?: unknown } }[]; error?: unknown };
         try {
           msg = JSON.parse(data);
         } catch {
           continue;
         }
-        if (msg.error) throw new LlmError('http', res.status);
+        if (msg.error) throw new LlmError('http');
         const content = msg.choices?.[0]?.delta?.content;
         if (typeof content === 'string' && content) yield content;
       }
+      if (eof) break;
     }
     throw new LlmError(aborted() ? 'aborted' : 'cut');
   } finally {
+    if (!finished) {
+      // Abandoned or failed: stop the provider from generating into a dead stream.
+      await reader.cancel().catch(() => undefined);
+    }
     try {
       reader.releaseLock();
     } catch {

@@ -33,11 +33,16 @@ async function kindOf(p: Promise<unknown>) {
 describe('chat', () => {
   it('posts to /chat/completions with stream and bearer key, and yields deltas until [DONE]', async () => {
     const f = okFetch([delta('Hel'), delta('lo'), 'data: [DONE]\n\n']);
-    expect(await collect(chat({ ...base, fetch: f }))).toBe('Hello');
+    const key = 'sk-test-key-123';
+    expect(await collect(chat({ ...base, apiKey: key, fetch: f }))).toBe('Hello');
     const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://api.example.com/v1/chat/completions');
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer k');
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${key}`);
     expect(JSON.parse(init.body as string)).toMatchObject({ model: 'm', stream: true, messages: base.messages });
+    expect(init.credentials).toBe('omit');
+    expect(init.referrerPolicy).toBe('no-referrer');
+    expect(url).not.toContain(key);
+    expect(init.body as string).not.toContain(key);
   });
   it('joins a data line split across reads', async () => {
     const line = delta('split');
@@ -64,9 +69,31 @@ describe('chat', () => {
     expect(await kindOf(collect(chat({ ...base, fetch: okFetch([delta('a')]) })))).toBe('cut');
     expect(await kindOf(collect(chat({ ...base, fetch: okFetch([delta('a')], { fail: true }) })))).toBe('cut');
   });
-  it('reports an error object in the stream as http', async () => {
+  it('parses a final [DONE] that has no trailing newline', async () => {
+    const f = okFetch([delta('a'), 'data: [DONE]']);
+    expect(await collect(chat({ ...base, fetch: f }))).toBe('a');
+  });
+  it('cancels the HTTP stream when the consumer stops early', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(enc.encode(delta('a') + delta('b') + 'data: [DONE]\n\n'));
+      },
+      cancel,
+    });
+    const f = vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    for await (const d of chat({ ...base, fetch: f })) {
+      expect(d).toBe('a');
+      break;
+    }
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+  it('reports an error object in the stream as http without a status', async () => {
     const f = okFetch([`data: ${JSON.stringify({ error: { message: 'bad' } })}\n\n`]);
-    expect(await kindOf(collect(chat({ ...base, fetch: f })))).toBe('http');
+    const err = await collect(chat({ ...base, fetch: f })).catch((e: unknown) => e as LlmError);
+    expect(err).toBeInstanceOf(LlmError);
+    expect((err as LlmError).kind).toBe('http');
+    expect((err as LlmError).status).toBeUndefined();
   });
   it('reports aborted when the signal fires', async () => {
     const ac = new AbortController();
