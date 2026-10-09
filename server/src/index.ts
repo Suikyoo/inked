@@ -9,6 +9,7 @@ const app = await buildApp({
   webDist: config.webDist,
   cookieSecure: config.cookieSecure,
   trustProxy: config.trustProxy,
+  llmOrigins: config.llmOrigins,
   logger: {
     level: process.env.LOG_LEVEL || 'info',
     // Log paths without query strings or invite tokens: those can carry usernames and secrets.
@@ -28,6 +29,8 @@ if (typeof config.trustProxy === 'number') {
 if (!config.cookieSecure) {
   app.log.warn('COOKIE_SECURE is false; set COOKIE_SECURE=true when serving over HTTPS');
 }
+
+if (config.llmOrigins.length) app.log.info({ llmOrigins: config.llmOrigins }, 'Ask may call these origins from the browser');
 
 let closing = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

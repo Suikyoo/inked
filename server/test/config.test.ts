@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toFastifyTrustProxy } from '../src/app.js';
-import { parseTrustProxy } from '../src/config.js';
+import { loadConfig, parseLlmOrigins, parseTrustProxy } from '../src/config.js';
 
 describe('parseTrustProxy', () => {
   it('defaults to false', () => {
@@ -49,5 +49,28 @@ describe('toFastifyTrustProxy', () => {
   it('passes strings and false through', () => {
     expect(toFastifyTrustProxy(false)).toBe(false);
     expect(toFastifyTrustProxy('127.0.0.0/8')).toBe('127.0.0.0/8');
+  });
+});
+
+describe('INKED_LLM_ORIGINS', () => {
+  it('is empty when unset', () => {
+    expect(parseLlmOrigins(undefined)).toEqual([]);
+    expect(parseLlmOrigins(' ')).toEqual([]);
+  });
+  it('accepts https origins and localhost http, normalised', () => {
+    expect(parseLlmOrigins('https://api.openai.com, http://localhost:11434,http://127.0.0.1')).toEqual([
+      'https://api.openai.com',
+      'http://localhost:11434',
+      'http://127.0.0.1',
+    ]);
+  });
+  it('rejects paths, other schemes and non-local http', () => {
+    expect(() => parseLlmOrigins('https://api.openai.com/v1')).toThrow(/INKED_LLM_ORIGINS/);
+    expect(() => parseLlmOrigins('http://api.openai.com')).toThrow(/INKED_LLM_ORIGINS/);
+    expect(() => parseLlmOrigins('ftp://x.example')).toThrow(/INKED_LLM_ORIGINS/);
+    expect(() => parseLlmOrigins("https://a.example 'unsafe-inline'")).toThrow(/INKED_LLM_ORIGINS/);
+  });
+  it('is part of the config', () => {
+    expect(loadConfig({ INKED_LLM_ORIGINS: 'https://api.openai.com' } as NodeJS.ProcessEnv).llmOrigins).toEqual(['https://api.openai.com']);
   });
 });

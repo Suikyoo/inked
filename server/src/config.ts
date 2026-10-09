@@ -9,6 +9,7 @@ export interface Config {
   webDist: string;
   cookieSecure: boolean;
   trustProxy: false | number | string;
+  llmOrigins: string[];
 }
 
 // The server package root (one level above src/ or dist/).
@@ -38,6 +39,26 @@ export function parseTrustProxy(value: string | undefined): false | number | str
   throw new Error(`Invalid TRUST_PROXY: ${value} (use a hop count like 1, or proxy IPs/CIDRs)`);
 }
 
+const LOCAL_HTTP = new Set(['localhost', '127.0.0.1']);
+
+/** INKED_LLM_ORIGINS: bare https origins (or localhost http for development) the browser may call for Ask. */
+export function parseLlmOrigins(value: string | undefined): string[] {
+  const out: string[] = [];
+  for (const raw of (value ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
+    let u: URL;
+    try {
+      u = new URL(raw);
+    } catch {
+      throw new Error(`Invalid INKED_LLM_ORIGINS entry: ${raw}`);
+    }
+    const bare = u.origin === raw.replace(/\/$/, '') && u.pathname === '/' && !u.search && !u.hash && !u.username;
+    const scheme = u.protocol === 'https:' || (u.protocol === 'http:' && LOCAL_HTTP.has(u.hostname));
+    if (!bare || !scheme) throw new Error(`Invalid INKED_LLM_ORIGINS entry: ${raw} (use bare https origins like https://api.openai.com)`);
+    if (!out.includes(u.origin)) out.push(u.origin);
+  }
+  return out;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const port = Number(env.PORT ?? 8080);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -50,5 +71,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDist: env.WEB_DIST ? path.resolve(env.WEB_DIST) : path.resolve(serverRoot, '../web/dist'),
     cookieSecure: bool(env.COOKIE_SECURE, false),
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
+    llmOrigins: parseLlmOrigins(env.INKED_LLM_ORIGINS),
   };
 }

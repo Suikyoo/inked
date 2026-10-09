@@ -106,6 +106,10 @@ The semantic search model (bge-small-en-v1.5, q8 ONNX) is downloaded at image bu
 
 `INKED_SEMANTIC=0 docker compose build` leaves the model out (about 56 MB smaller). The semantic search toggle is then hidden in the app. The default is `INKED_SEMANTIC=1`.
 
+### Ask your notes (optional)
+
+Set `INKED_LLM_ORIGINS` to the OpenAI-compatible provider origins the browser may call, comma-separated, for example `INKED_LLM_ORIGINS=https://api.openai.com`. Only bare `https://` origins are accepted (plus `http://localhost` and `http://127.0.0.1` for development); anything else stops the server at startup. The origins are added to the CSP `connect-src`. Leave it unset to hide Ask. Questions and matching note excerpts go from the browser straight to that provider; the Inked server and Cloudflare never see them.
+
 ## 7. Accepted risk
 
 Any container placed on `cloudflared-net` can reach nginx and could forge `CF-Connecting-IP`, which would let it choose the IP that login lockouts are keyed on. Only trusted containers belong on that network. The Docker host itself can do the same: its bridge gateway address sits inside the trusted range, so a process on the host can also set `CF-Connecting-IP`. The per-account lockout cap still applies.
