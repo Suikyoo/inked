@@ -44,7 +44,7 @@ function useIdleLock(store: AppStore, onIdle: () => void) {
 
 /** Animates a banner in and out, holding its last content while it collapses. */
 function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
-  const { mounted, state, ref } = usePresence(open, 140);
+  const { mounted, state, ref } = usePresence(open, 220);
   const last = useRef(children);
   if (open) last.current = children;
   if (!mounted) return null;

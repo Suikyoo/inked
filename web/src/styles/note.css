@@ -211,10 +211,10 @@ a.crumb:hover {
 .editor:focus-visible {
   outline: none;
 }
-/* Switching mode remounts the article or textarea; the new one fades in over 120ms. */
+/* Switching mode remounts the article or textarea; the new one fades in over 180ms. */
 .editor,
 .doc .md {
-  animation: fade-in 120ms var(--ease-out) backwards;
+  animation: fade-in 180ms var(--ease-out) backwards;
 }
 
 /* ---- Context panel --------------------------------------------------------------------- */

@@ -226,7 +226,7 @@ export function HomePage() {
   const barNow = downloading
     ? { label: `Downloading model · ${toMB(sem.download!.loaded)} / ${toMB(sem.download!.total)} MB`, value: sem.download!.loaded, max: sem.download!.total }
     : { label: `Indexing by meaning · ${cov.done} / ${cov.total}`, value: cov.done, max: cov.total };
-  const bar = usePresence(indexing || downloading, 200);
+  const bar = usePresence(indexing || downloading, 300);
   // The label outlives the state that earned it while the bar fades out.
   const lastBar = useRef(barNow);
   if (indexing || downloading) lastBar.current = barNow;

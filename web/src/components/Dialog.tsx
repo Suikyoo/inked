@@ -14,7 +14,7 @@ interface DialogProps {
 /** Native <dialog> (focus trap, Esc, inert background) with our styling. */
 export function Dialog({ open, title, onClose, children, describedBy }: DialogProps) {
   const ref = useRef<HTMLDialogElement | null>(null);
-  const presence = usePresence(open, 140);
+  const presence = usePresence(open, 220);
   const presenceRef = presence.ref;
   const setEl = useCallback(
     (el: HTMLDialogElement | null) => {

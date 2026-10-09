@@ -32,7 +32,7 @@ export function Menu({
   const [pos, setPos] = useState<{ top: number; left: number; origin: string } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLUListElement | null>(null);
-  const presence = usePresence(open, 90);
+  const presence = usePresence(open, 140);
   const presenceRef = presence.ref;
   const setMenuEl = useCallback(
     (el: HTMLUListElement | null) => {

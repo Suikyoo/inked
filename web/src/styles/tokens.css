@@ -75,10 +75,10 @@
   --radius-md: 7px;
   --radius-lg: 8px;
   --side-width: 240px;
-  --dur-1: 90ms;
-  --dur-2: 140ms;
-  --dur-3: 200ms;
-  --dur-4: 320ms;
+  --dur-1: 140ms;
+  --dur-2: 220ms;
+  --dur-3: 300ms;
+  --dur-4: 450ms;
   --dur-ink: 520ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);

@@ -13,7 +13,7 @@ import { AuthLayout } from './AuthLayout';
 
 const MAX_TRIES = 5;
 /** Lets the drop finish filling before the swap; mirrors --dur-2. */
-const DROP_DONE_MS = 140;
+const DROP_DONE_MS = 220;
 
 export function LoginPage() {
   const store = useStore();
