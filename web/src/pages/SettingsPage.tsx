@@ -90,19 +90,35 @@ function SemanticSearch() {
   const state = useAppState();
   if (!sem.available) return null;
   const mb = sem.downloadBytes === null ? null : toMB(sem.downloadBytes);
+  // A failed account save (say, the session locked) leaves the switch showing the account's real state.
+  const ignore = () => undefined;
   return (
     <section className="card" aria-labelledby="semantic-h">
       <h2 id="semantic-h" className="card-title">
         Search by meaning
       </h2>
       <label className="check">
-        <input type="checkbox" checked={sem.enabled} onChange={(e) => void store.setEnabled(e.target.checked)} />
+        <input type="checkbox" checked={sem.accountOn} onChange={(e) => void store.setEnabled(e.target.checked).catch(ignore)} />
         <span>Search by meaning</span>
       </label>
-      <p className="field-hint">
-        Finds notes by what they're about, not just their words.
-        {mb !== null && ` Downloads about ${mb} MB once to this device; your notes never leave it.`}
-      </p>
+      <p className="field-hint">Finds notes by what they’re about, not just their words. On for every device you sign in on.</p>
+      {sem.accountOn && (
+        <p className="field-hint">
+          {sem.enabled
+            ? sem.phase === 'downloading'
+              ? 'Downloading on this browser…'
+              : 'Downloaded on this browser.'
+            : 'Not on this browser.'}
+          {!sem.enabled && (
+            <>
+              {' '}
+              <button type="button" className="linkish" onClick={() => void store.downloadHere().catch(ignore)}>
+                Download{mb !== null ? ` (${mb} MB)` : ''}
+              </button>
+            </>
+          )}
+        </p>
+      )}
       {sem.phase === 'downloading' && sem.download && (
         <ProgressBar
           value={sem.download.loaded}

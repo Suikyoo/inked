@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { vault } from '../map/fixtures';
 import { SemanticProvider } from '../semantic/SemanticContext';
-import type { SemanticState } from '../semantic/semanticStore';
+import type { SemanticState, SemanticStore } from '../semantic/semanticStore';
 import { StoreProvider } from '../state/StoreContext';
 import type { AppState, AppStore } from '../state/store';
 import { semanticStub } from '../test/semantic';
@@ -22,12 +22,12 @@ afterEach(() => {
   host = null;
 });
 
-function renderSettings(state: Partial<SemanticState>) {
+function renderSettings(state: Partial<SemanticState>, methods: Partial<SemanticStore> = {}) {
   const setEnabled = vi.fn(async () => undefined);
   const retry = vi.fn();
   const semantic = semanticStub(
     { available: true, coverage: { v1: { done: 3, total: 5 } }, downloadBytes: 34e6, ...state },
-    { setEnabled, retry },
+    { setEnabled, retry, ...methods },
   );
   const appState = {
     user: { username: 'ada', isAdmin: false },
@@ -73,44 +73,72 @@ describe('Settings: Search by meaning', () => {
     const { setEnabled } = renderSettings({ phase: 'off', enabled: false });
     expect(host!.querySelector('#semantic-h')?.textContent).toBe('Search by meaning');
     expect(semanticBox().checked).toBe(false);
-    expect(text()).toContain('Downloads about 34 MB once to this device; your notes never leave it.');
+    expect(text()).toContain('Finds notes by what they’re about, not just their words. On for every device you sign in on.');
+    expect(text()).not.toContain('this browser');
     act(() => semanticBox().click());
     expect(setEnabled).toHaveBeenCalledWith(true);
     expect(bars()).toEqual(['Work · 3 / 5 notes']);
   });
 
   it('shows model download progress', () => {
-    renderSettings({ enabled: true, phase: 'downloading', download: { loaded: 18e6, total: 34e6 } });
+    renderSettings({ accountOn: true, enabled: true, phase: 'downloading', download: { loaded: 18e6, total: 34e6 } });
     expect(bars()).toContain('Model 18 / 34 MB');
   });
 
   it('says the model is being prepared while loading, without a model bar', () => {
-    renderSettings({ enabled: true, phase: 'loading', download: { loaded: 34e6, total: 34e6 } });
+    renderSettings({ accountOn: true, enabled: true, phase: 'loading', download: { loaded: 34e6, total: 34e6 } });
     expect(text()).toContain('Preparing the search model…');
     expect(bars()).toEqual(['Work · 3 / 5 notes']);
   });
 
   it('shows the error with a working Retry', () => {
-    const { retry } = renderSettings({ enabled: true, phase: 'error', error: 'Couldn’t download the search model.' });
+    const { retry } = renderSettings({ accountOn: true, enabled: true, phase: 'error', error: 'Couldn’t download the search model.' });
     expect(host!.querySelector('.form-error[role="alert"]')?.textContent).toBe('Couldn’t download the search model.');
     act(() => button('Retry').click());
     expect(retry).toHaveBeenCalled();
   });
 
   it('turns off when unticked while enabled', () => {
-    const { setEnabled } = renderSettings({ enabled: true, phase: 'ready' });
+    const { setEnabled } = renderSettings({ accountOn: true, enabled: true, phase: 'ready' });
     act(() => semanticBox().click());
     expect(setEnabled).toHaveBeenCalledWith(false);
   });
 
   it('explains a paused model', () => {
-    renderSettings({ enabled: true, phase: 'paused' });
+    renderSettings({ accountOn: true, enabled: true, phase: 'paused' });
     expect(text()).toContain('Search by meaning stopped after a problem. It will try again next time you unlock.');
   });
 
   it('warns when the browser may clear the model', () => {
-    renderSettings({ enabled: true, phase: 'ready', persistDenied: true });
+    renderSettings({ accountOn: true, enabled: true, phase: 'ready', persistDenied: true });
     expect(text()).toContain('This browser may clear the model when you close a private window or free up space.');
+  });
+
+  it('offers a download on a browser that does not have the model', () => {
+    const downloadHere = vi.fn(async () => undefined);
+    renderSettings({ accountOn: true, enabled: false }, { downloadHere });
+    expect(text()).toContain('Not on this browser.');
+    act(() => button('Download (34 MB)').click());
+    expect(downloadHere).toHaveBeenCalled();
+  });
+
+  it('says the model is on this browser, and while it downloads', () => {
+    renderSettings({ accountOn: true, enabled: true, phase: 'ready' });
+    expect(text()).toContain('Downloaded on this browser.');
+    act(() => root!.unmount());
+    host!.remove();
+    renderSettings({ accountOn: true, enabled: true, phase: 'downloading', download: { loaded: 1e6, total: 34e6 } });
+    expect(text()).toContain('Downloading on this browser…');
+  });
+
+  it('a failed save from the switch or the download link is not an unhandled rejection', async () => {
+    const setEnabled = vi.fn(async () => Promise.reject(new Error('locked')));
+    const downloadHere = vi.fn(async () => Promise.reject(new Error('locked')));
+    renderSettings({ accountOn: true, enabled: false }, { setEnabled, downloadHere });
+    await act(async () => button('Download (34 MB)').click());
+    await act(async () => semanticBox().click());
+    expect(downloadHere).toHaveBeenCalled();
+    expect(setEnabled).toHaveBeenCalledWith(false);
   });
 
   it('does not warn about persistence while off', () => {

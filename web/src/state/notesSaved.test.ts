@@ -28,6 +28,7 @@ vi.mock('../lib/argon2Worker', async () => {
 });
 
 import { RESAVE_DEBOUNCE_MS, SemanticStore } from '../semantic/semanticStore';
+import { accountStub } from '../test/account';
 import { AppStore } from './store';
 
 /** In-memory BroadcastChannel with no peers: this store is the only tab. */
@@ -299,7 +300,8 @@ describe('SemanticStore on a real AppStore', () => {
       },
       fetchManifest: async () => ({ model: 'bge', id: 'bge@1', revision: '1', modelPath: '1/', ortPath: 'o/', files: [] }),
       makeEmbedder: () => embedder,
-      prefs: { semantic: () => true, setSemantic: () => undefined },
+      prefs: { choice: () => 'on', setChoice: () => undefined },
+      account: accountStub({ settings: { semantic: true } }),
       cache: { verify: async () => 0, clear: async () => undefined, persist: async () => true },
       delay: async () => undefined,
     });

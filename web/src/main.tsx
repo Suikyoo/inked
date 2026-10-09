@@ -23,7 +23,7 @@ import { AccountSettingsStore } from './state/accountSettings';
 
 const store = new AppStore();
 const account = new AccountSettingsStore(store);
-const semantic = new SemanticStore(store);
+const semantic = new SemanticStore(store, { account });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

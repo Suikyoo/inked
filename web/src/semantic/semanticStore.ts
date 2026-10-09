@@ -1,6 +1,7 @@
 import { chunkNote, dequantize, isFresh, meanVector, noteScore, quantize, SEM_FLOOR, topK, type SemanticInput } from 'inked-core';
 import { api } from '../api/client';
-import { prefs } from '../lib/prefs';
+import { prefs, type SemanticChoice } from '../lib/prefs';
+import type { AccountSettingsStore } from '../state/accountSettings';
 import type { AppStore } from '../state/store';
 import type { Embedder } from './embedderClient';
 import { fetchManifest, modelBytes, transformerBytes, type Manifest } from './manifest';
@@ -19,6 +20,11 @@ export type ModelPhase = 'unavailable' | 'off' | 'downloading' | 'loading' | 're
 export interface SemanticState {
   /** Whether this deployment ships the model; null until the first unlock asks. */
   available: boolean | null;
+  /** The account switch (synced): search by meaning is on for every device signed in. */
+  accountOn: boolean;
+  /** This browser's model choice. */
+  choice: SemanticChoice;
+  /** The model runs here: the account switch is on and this browser chose to download it. */
   enabled: boolean;
   phase: ModelPhase;
   download: { loaded: number; total: number } | null;
@@ -38,7 +44,8 @@ export interface SemanticDeps {
   api: Pick<typeof api, 'listVectors' | 'putVector'>;
   fetchManifest: () => Promise<Manifest | null>;
   makeEmbedder: (onPaused: () => void) => EmbedderLike | Promise<EmbedderLike>;
-  prefs: { semantic(): boolean; setSemantic(on: boolean): void };
+  prefs: { choice(): SemanticChoice; setChoice(v: SemanticChoice): void };
+  account: Pick<AccountSettingsStore, 'getState' | 'subscribe' | 'update'>;
   cache: { verify(m: Manifest): Promise<number>; clear(): Promise<void>; persist(): Promise<boolean> };
   delay: (ms: number) => Promise<void>;
 }
@@ -53,12 +60,13 @@ interface StoredVector {
   mean: Float32Array;
 }
 
-const defaultDeps: SemanticDeps = {
+/** Every dependency but the account settings store, which the caller must pass. */
+const defaultDeps: Omit<SemanticDeps, 'account'> = {
   api,
   fetchManifest: () => fetchManifest(),
   // Dynamic import: transformers.js and the worker stay out of the main chunk until the model is wanted.
   makeEmbedder: async (onPaused) => new (await import('./embedderClient')).Embedder({ onPaused }),
-  prefs,
+  prefs: { choice: () => prefs.semanticChoice(), setChoice: (v) => prefs.setSemanticChoice(v) },
   cache: { verify: (m) => verifyModelCache(m), clear: () => clearModelCache(), persist: requestPersist },
   delay: (ms) => new Promise((r) => setTimeout(r, ms)),
 };
@@ -77,6 +85,8 @@ const sameCoverage = (a: SemanticState['coverage'], b: SemanticState['coverage']
 export class SemanticStore {
   private state: SemanticState = {
     available: null,
+    accountOn: false,
+    choice: null,
     enabled: false,
     phase: 'off',
     download: null,
@@ -109,14 +119,22 @@ export class SemanticStore {
   /** Vaults whose stored vectors are in: only their notes are counted and queued. */
   private vectorsIn = new Set<string>();
   private running = false;
+  /** The round-4 per-browser switch was copied to the account this session. */
+  private migrated = false;
+  /** The model load in flight, if any; cleared when it ends or is superseded. */
+  private loading: Promise<void> | null = null;
+  /** The reconciliation in flight, and whether another was asked for while it ran. */
+  private applying: Promise<void> | null = null;
+  private applyAgain = false;
   private unsubscribe: Array<() => void>;
 
   constructor(
     private app: AppLike,
     deps: Partial<SemanticDeps> = {},
   ) {
-    this.deps = { ...defaultDeps, ...deps };
-    this.unsubscribe = [app.subscribe(this.onApp), app.onNotesSaved(this.onSaved)];
+    if (!deps.account) throw new Error('SemanticStore needs the account settings store');
+    this.deps = { ...defaultDeps, ...deps, account: deps.account };
+    this.unsubscribe = [app.subscribe(this.onApp), app.onNotesSaved(this.onSaved), this.deps.account.subscribe(this.onAccount)];
     this.onApp();
   }
 
@@ -181,10 +199,9 @@ export class SemanticStore {
       return;
     }
     this.manifest = m;
-    const enabled = this.deps.prefs.semantic();
-    this.set({ available: true, enabled, phase: 'off', downloadBytes: modelBytes(m) });
+    this.set({ available: true, phase: 'off', downloadBytes: modelBytes(m) });
     this.onApp();
-    if (enabled) await this.loadModel();
+    await this.applyChoice();
   }
 
   /** Lock or sign-out: stop the worker and forget every vector, queue and timer. */
@@ -204,6 +221,7 @@ export class SemanticStore {
     this.fetchedVaults.clear();
     this.vectorsIn.clear();
     this.running = false;
+    this.migrated = false;
     const phase = this.state.available === false ? 'unavailable' : 'off';
     this.set({ phase, download: null, downloadBytes: null, coverage: {}, error: null, version: this.state.version + 1 });
   }
@@ -212,8 +230,18 @@ export class SemanticStore {
 
   private stopEmbedder() {
     this.modelGen++;
+    this.loading = null;
     this.embedder?.terminate();
     this.embedder = null;
+  }
+
+  /** Starts a model load and remembers it until it ends, so a second reconciliation does not start another. */
+  private startLoad(): Promise<void> {
+    const p = this.loadModel().finally(() => {
+      if (this.loading === p) this.loading = null;
+    });
+    this.loading = p;
+    return p;
   }
 
   /** Builds a fresh embedder and loads the model; never throws. */
@@ -255,24 +283,109 @@ export class SemanticStore {
     }
   }
 
-  async setEnabled(on: boolean): Promise<void> {
-    this.deps.prefs.setSemantic(on);
-    this.set({ enabled: on });
-    if (on) {
-      const persisted = await this.deps.cache.persist().catch(() => false);
-      this.set({ persistDenied: !persisted });
-      if (this.state.enabled && this.unlocked && this.manifest) await this.loadModel();
+  private onAccount = () => {
+    if (this.unlocked && this.manifest) void this.applyChoice();
+  };
+
+  /**
+   * Reconciles the account switch and this browser's choice with the running model. Runs one at a time:
+   * a call made while one runs waits for it plus one more pass, so the end state reflects the latest
+   * settings. Resolves once a model load it started has ended; never rejects.
+   */
+  private async applyChoice(): Promise<void> {
+    if (this.applying) {
+      this.applyAgain = true;
+    } else {
+      this.applying = (async () => {
+        try {
+          do {
+            this.applyAgain = false;
+            await this.reconcile();
+          } while (this.applyAgain);
+        } finally {
+          this.applying = null;
+        }
+      })();
+    }
+    await this.applying;
+    // Outside the queue, so a switch-off is not held up behind a download.
+    await this.loading;
+  }
+
+  private async reconcile(): Promise<void> {
+    const acc = this.deps.account.getState();
+    if (!acc.loaded || !this.manifest || !this.unlocked) return;
+    let choice = this.deps.prefs.choice();
+    let accountOn = acc.settings.semantic === true;
+    // Round 4 kept the switch per browser: a browser that had it on turns it on for the account (written once a
+    // session; until the write lands the switch counts as on, so a failed write never deletes the model here).
+    if (acc.settings.semantic === undefined && choice === 'on') {
+      accountOn = true;
+      if (!this.migrated) {
+        this.migrated = true;
+        void this.deps.account.update((s) => ({ ...s, semantic: s.semantic ?? true })).catch(() => undefined);
+      }
+    }
+    // Switched off (here or elsewhere): a browser that had the model drops it; one that declined stays declined.
+    const drop = !accountOn && choice === 'on';
+    if (drop) {
+      this.deps.prefs.setChoice(null);
+      choice = null;
+      this.stopEmbedder();
+    }
+    const enabled = accountOn && choice === 'on';
+    const was = this.state.enabled;
+    this.set({ accountOn, choice, enabled });
+    if (!enabled) {
+      // Declined here while it ran: stop it (the files stay cached; only a switch-off deletes them).
+      if (this.embedder || this.loading) this.stopEmbedder();
+      // Stored vectors stay: Related works without the model.
+      if (was || drop) this.set({ phase: this.state.available === false ? 'unavailable' : 'off', download: null, error: null });
+      if (drop) await this.deps.cache.clear().catch(() => undefined);
       return;
     }
+    // A failed download waits for retry() rather than restarting on every account change.
+    if (!this.embedder && !this.loading && !(was && this.state.phase === 'error')) void this.startLoad();
+  }
+
+  /** Settings switch: the account switch plus this browser's choice. Rejects if the account save fails. */
+  async setEnabled(on: boolean): Promise<void> {
+    if (on) return this.downloadHere();
+    this.deps.prefs.setChoice(null);
     this.stopEmbedder();
-    // Stored vectors stay: Related works without the model.
-    this.set({ phase: this.state.available === false ? 'unavailable' : 'off', download: null, error: null });
+    if (this.state.enabled) this.set({ enabled: false, choice: null, phase: this.state.available === false ? 'unavailable' : 'off', download: null, error: null });
     await this.deps.cache.clear().catch(() => undefined);
+    try {
+      await this.deps.account.update((s) => ({ ...s, semantic: false }));
+    } finally {
+      // Also after a failed save, so the state matches the account switch and this browser's choice.
+      if (this.unlocked && this.manifest) await this.applyChoice();
+    }
+  }
+
+  /** Banner or Settings: download the model on this browser (turns the account switch on if only Ask was on). */
+  async downloadHere(): Promise<void> {
+    const persisted = await this.deps.cache.persist().catch(() => false);
+    this.set({ persistDenied: !persisted });
+    // The account switch first: with it still off, a reconciliation in between would reset an 'on' choice.
+    // A failed save rejects here and leaves this browser's choice as it was.
+    if (this.deps.account.getState().settings.semantic !== true) {
+      await this.deps.account.update((s) => ({ ...s, semantic: true }));
+    }
+    this.deps.prefs.setChoice('on');
+    if (this.unlocked && this.manifest) await this.applyChoice();
+  }
+
+  /** Banner: not on this browser. */
+  declineHere(): void {
+    this.deps.prefs.setChoice('off');
+    this.set({ choice: 'off' });
+    if (this.unlocked && this.manifest) void this.applyChoice();
   }
 
   /** After a download error: try again with a fresh embedder. */
   retry(): void {
-    if (this.unlocked && this.manifest && this.state.enabled) void this.loadModel();
+    if (this.unlocked && this.manifest && this.state.enabled) void this.startLoad();
   }
 
   // ---- Vectors -----------------------------------------------------------------------------
