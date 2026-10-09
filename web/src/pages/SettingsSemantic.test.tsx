@@ -95,6 +95,11 @@ describe('Settings: Search by meaning', () => {
     expect(bars()).toEqual(['Work · 3 / 5 notes']);
   });
 
+  it('does not claim a download when the model failed or paused', () => {
+    renderSettings({ accountOn: true, enabled: true, phase: 'error', error: 'Couldn’t download the search model.' });
+    expect(text()).not.toContain('Downloaded on this browser.');
+  });
+
   it('shows the error with a working Retry', () => {
     const { retry } = renderSettings({ accountOn: true, enabled: true, phase: 'error', error: 'Couldn’t download the search model.' });
     expect(host!.querySelector('.form-error[role="alert"]')?.textContent).toBe('Couldn’t download the search model.');

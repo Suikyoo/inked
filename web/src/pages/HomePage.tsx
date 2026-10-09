@@ -68,7 +68,7 @@ export function HomePage() {
   const askState = useAsk();
   const account = useAccountSettings();
   const askAvailable = account.llmOrigins.length > 0;
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState(() => askStore.getState().turns.length > 0);
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
   // A lock clears the conversation; leave ask mode with it. ask() pushes its turn before its first await, so this
   // never sees an empty conversation right after asking.
@@ -200,11 +200,13 @@ export function HomePage() {
     askStore.clear();
     setAsking(false);
     setQuery('');
+    inputRef.current?.focus();
   };
 
   const onInputKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.keyCode === 229)) return;
     const mod = isMac ? e.metaKey : e.ctrlKey;
-    if (e.key === 'Enter' && mod) {
+    if (e.key === 'Enter' && mod && askAvailable) {
       e.preventDefault();
       startAsk(query);
     } else if (e.key === 'Escape') {

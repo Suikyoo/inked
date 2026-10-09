@@ -552,4 +552,33 @@ describe('Ask in the search bar', () => {
     expect(clear).toHaveBeenCalled();
     expect(host!.querySelector('.ask')).toBeNull();
   });
+
+  it('returns to the answer view when the store already holds a conversation', () => {
+    renderHome({ account: accountStub(origins), ask: askStub({ turns: [turn('done')] } as never) });
+    expect(host!.querySelector('.ask')).not.toBeNull();
+    expect(input().placeholder).toBe('Follow up…');
+  });
+
+  it('ignores Enter that confirms an IME composition', () => {
+    const ask = vi.fn(async () => undefined);
+    renderHome({ account: accountStub(origins), ask: askStub({}, { ask }) });
+    typeQuery('deploy');
+    keydown(input(), 'Enter', { isComposing: true });
+    keydown(input(), 'Enter', { ctrlKey: true, isComposing: true });
+    expect(ask).not.toHaveBeenCalled();
+    expect(currentPath()).toBe('/');
+  });
+
+  it('Ctrl+Enter opens the top result when Ask is unavailable', () => {
+    renderHome({ account: accountStub() });
+    typeQuery('deploy');
+    keydown(input(), 'Enter', { ctrlKey: true });
+    expect(currentPath()).toMatch(/^[/]v[/].+[/]n[/].+$/);
+  });
+
+  it('Back to search puts focus in the search input', () => {
+    renderHome({ account: accountStub(origins), ask: askStub({ turns: [turn('done')] } as never) });
+    act(() => host!.querySelector<HTMLButtonElement>('button[aria-label="Back to search"]')!.click());
+    expect(document.activeElement).toBe(input());
+  });
 });

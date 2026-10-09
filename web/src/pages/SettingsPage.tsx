@@ -109,7 +109,9 @@ function SemanticSearch() {
           {sem.enabled
             ? sem.phase === 'downloading'
               ? 'Downloading on this browser…'
-              : 'Downloaded on this browser.'
+              : sem.phase === 'ready'
+                ? 'Downloaded on this browser.'
+                : null
             : 'Not on this browser.'}
           {!sem.enabled && (
             <>
