@@ -24,11 +24,11 @@ export function AskSettings({ fetchImpl }: { fetchImpl?: typeof fetch }) {
 
   if (!acc.llmOrigins.length) return null;
   const origins = acc.llmOrigins.join(', ');
-  const shownOrigin = llmOrigin(baseUrl) ?? acc.llmOrigins[0];
+  const shownOrigin = (isAllowedBaseUrl(baseUrl.trim(), acc.llmOrigins) ? llmOrigin(baseUrl) : null) ?? acc.llmOrigins[0];
 
   const check = (): string | null => {
     if (!baseUrl.trim() || !model.trim() || !apiKey.trim()) return 'Enter a base URL, a model and an API key.';
-    if (!isAllowedBaseUrl(baseUrl.trim(), acc.llmOrigins)) return `This deployment only allows: ${origins}`;
+    if (!isAllowedBaseUrl(baseUrl.trim(), acc.llmOrigins)) return `This deployment only allows: ${origins}.`;
     return null;
   };
 
@@ -84,7 +84,7 @@ export function AskSettings({ fetchImpl }: { fetchImpl?: typeof fetch }) {
       }
       setStatus('Connected');
     } catch (err) {
-      setError(err instanceof LlmError && err.kind !== 'aborted' ? askErrorMessage(err.kind, llmOrigin(baseUrl), err.status) : describeError(err));
+      setError(err instanceof LlmError && err.kind !== 'aborted' ? askErrorMessage(err.kind, llmOrigin(baseUrl), err.status) : askErrorMessage('network', llmOrigin(baseUrl)));
     } finally {
       setBusy(false);
     }

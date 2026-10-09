@@ -68,7 +68,7 @@ describe('AskSettings', () => {
     const { update } = render({});
     fill('https://evil.example/v1');
     await act(async () => button('Save').click());
-    expect(host!.textContent).toContain('This deployment only allows: https://api.openai.com');
+    expect(host!.textContent).toContain('This deployment only allows: https://api.openai.com.');
     expect(update).not.toHaveBeenCalled();
   });
   it('saves through the account store', async () => {
@@ -95,6 +95,29 @@ describe('AskSettings', () => {
     render({ settings: { llm: { baseUrl: 'https://api.openai.com/v1', model: 'm', apiKey: 'k' } } }, bad as never);
     await act(async () => button('Test').click());
     expect(host!.textContent).toContain('Your API key was rejected. Check Settings.');
+  });
+  it('names the first allowed origin, not a disallowed typed one', () => {
+    render({});
+    type(field('Base URL'), 'https://evil.example/v1');
+    expect(host!.textContent).toContain('sent to https://api.openai.com.');
+    expect(host!.textContent).not.toContain('evil.example');
+  });
+  it('Test with a disallowed base URL refuses and never calls fetch', async () => {
+    const f = vi.fn();
+    render({}, f as never);
+    fill('https://evil.example/v1');
+    await act(async () => button('Test').click());
+    expect(host!.textContent).toContain('This deployment only allows: https://api.openai.com.');
+    expect(f).not.toHaveBeenCalled();
+  });
+  it('Test shows fixed copy, never raw error text, for a thrown fetch', async () => {
+    const f = vi.fn(async () => {
+      throw new Error('secret-detail');
+    });
+    render({ settings: { llm: { baseUrl: 'https://api.openai.com/v1', model: 'm', apiKey: 'k' } } }, f as never);
+    await act(async () => button('Test').click());
+    expect(host!.textContent).not.toContain('secret-detail');
+    expect(host!.textContent).toContain('Couldn’t reach https://api.openai.com.');
   });
   it('says so when saved settings could not be read', () => {
     render({ unreadable: true });
