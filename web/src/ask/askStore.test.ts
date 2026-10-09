@@ -52,11 +52,30 @@ const meaningHits = [
   { noteId: 'a', vaultId: 'v', chunk: 0, score: 0.7, text: 'Deploy runbook\nDeploy flips the release link.' },
 ];
 
-function make(over: { fetch?: any; hits?: any[] | null; settings?: any; origins?: string[] } = {}) {
+function make(over: { fetch?: any; hits?: any[] | null; settings?: any; origins?: string[]; semantic?: { retrieveChunks: any } } = {}) {
   const app = fakeApp();
   const f = over.fetch ?? vi.fn(async () => sse(['Flip the link ', '[[deploy runbook]].']));
-  const store = new AskStore(app as any, semantic(over.hits === undefined ? meaningHits : over.hits) as any, account(over.settings, over.origins) as any, { fetch: f });
-  return { app, f, store };
+  const sem = over.semantic ?? semantic(over.hits === undefined ? meaningHits : over.hits);
+  const store = new AskStore(app as any, sem as any, account(over.settings, over.origins) as any, { fetch: f });
+  return { app, f, store, sem };
+}
+
+/** A stream that sends `first` and then hangs until its request is aborted. */
+function hanging(first: string) {
+  const signals: AbortSignal[] = [];
+  const respond = (_u: string, init: RequestInit) => {
+    if (init.signal) signals.push(init.signal);
+    return new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: first } }] })}\n\n`));
+          init.signal?.addEventListener('abort', () => c.error(new Error('aborted')));
+        },
+      }),
+      { status: 200 },
+    );
+  };
+  return { respond, signals };
 }
 
 describe('AskStore', () => {
@@ -140,9 +159,64 @@ describe('AskStore', () => {
     expect(store.getState().turns[0]).toMatchObject({ status: 'done', answer: 'ok' });
   });
   it('lock aborts the stream and clears everything', async () => {
-    const { store, app } = make();
-    await store.ask('q', entries);
+    const h = hanging('part');
+    const { store, app } = make({ fetch: vi.fn(async (u: string, init: RequestInit) => h.respond(u, init)) });
+    const p = store.ask('q', entries);
+    await vi.waitFor(() => expect(store.getState().turns[0]?.answer).toBe('part'));
     app.set({ locking: true });
     expect(store.getState()).toEqual({ turns: [], busy: false });
+    expect(h.signals[0].aborted).toBe(true);
+    await p;
+    expect(store.getState()).toEqual({ turns: [], busy: false });
+  });
+  it('a second question finishes the one still in flight as stopped', async () => {
+    const h = hanging('half ');
+    const f = vi
+      .fn()
+      .mockImplementationOnce(async (u: string, init: RequestInit) => h.respond(u, init))
+      .mockImplementationOnce(async () => sse(['ok']));
+    const { store } = make({ fetch: f });
+    const p1 = store.ask('q1', entries);
+    await vi.waitFor(() => expect(store.getState().turns[0]?.answer).toBe('half '));
+    const p2 = store.ask('q2', entries);
+    // The new turn is there synchronously, and the old one is already finished.
+    expect(store.getState().turns.map((t) => t.status)).toEqual(['stopped', 'retrieving']);
+    await Promise.all([p1, p2]);
+    const [t1, t2] = store.getState().turns;
+    expect(t1).toMatchObject({ question: 'q1', status: 'stopped', answer: 'half ' });
+    expect(t2).toMatchObject({ question: 'q2', status: 'done', answer: 'ok' });
+    expect(h.signals[0].aborted).toBe(true);
+    expect(store.getState().busy).toBe(false);
+  });
+  it('stop during retrieval ends the turn as stopped without calling the provider', async () => {
+    let resolve!: (v: unknown) => void;
+    const sem = { retrieveChunks: vi.fn(() => new Promise((r) => (resolve = r))) };
+    const { store, f } = make({ semantic: sem });
+    const p = store.ask('q', entries);
+    await vi.waitFor(() => expect(sem.retrieveChunks).toHaveBeenCalled());
+    store.stop();
+    resolve([]);
+    await p;
+    expect(store.getState().turns[0].status).toBe('stopped');
+    expect(f).not.toHaveBeenCalled();
+    expect(store.getState().busy).toBe(false);
+  });
+  it('a retrieval failure ends the turn with a retrieval error and ask still resolves', async () => {
+    const sem = { retrieveChunks: vi.fn(async () => Promise.reject(new Error('boom'))) };
+    const { store, f } = make({ semantic: sem });
+    await expect(store.ask('q', entries)).resolves.toBeUndefined();
+    expect(store.getState().turns[0]).toMatchObject({ status: 'error', error: 'retrieval' });
+    expect(f).not.toHaveBeenCalled();
+    expect(store.getState().busy).toBe(false);
+  });
+  it('a follow-up retrieves with the previous question and leaves unfinished turns out of history', async () => {
+    const f = vi.fn().mockResolvedValueOnce(new Response('{}', { status: 401 })).mockResolvedValueOnce(sse(['ok']));
+    const { store, sem } = make({ fetch: f });
+    await store.ask('first', entries);
+    await store.ask('second', entries);
+    expect(sem.retrieveChunks.mock.calls[1][0]).toBe('first\nsecond');
+    const body = JSON.parse((f.mock.calls[1][1] as RequestInit).body as string);
+    expect(body.messages.some((m: { content: string }) => m.content === 'first')).toBe(false);
+    expect(body.messages).toHaveLength(2);
   });
 });

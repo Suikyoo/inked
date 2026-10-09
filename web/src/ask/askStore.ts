@@ -16,7 +16,7 @@ import type { AccountSettingsStore } from '../state/accountSettings';
 import type { AppStore } from '../state/store';
 import type { SemanticStore } from '../semantic/semanticStore';
 
-export type AskErrorKind = 'setup' | 'auth' | 'rate' | 'network' | 'http' | 'cut';
+export type AskErrorKind = 'setup' | 'retrieval' | 'auth' | 'rate' | 'network' | 'http' | 'cut';
 
 export interface AskSource extends RagSource {
   vaultId: string;
@@ -123,15 +123,22 @@ export class AskStore {
   async ask(question: string, entries: readonly SearchEntry[]): Promise<void> {
     const q = question.trim();
     if (!q || !this.unlocked) return;
-    this.abort?.abort();
+    let turns = this.state.turns;
+    if (this.abort) {
+      // A question still in flight is superseded: it ends as stopped, keeping what arrived.
+      this.abort.abort();
+      turns = turns.map((t) =>
+        t.status === 'retrieving' || t.status === 'streaming' ? { ...t, status: 'stopped', cited: parseCitations(t.answer, t.sources) } : t,
+      );
+    }
     const ac = new AbortController();
     this.abort = ac;
-    const history: AskTurn[] = this.state.turns.filter((t) => t.status === 'done').map((t) => ({ question: t.question, answer: t.answer }));
-    const prev = this.state.turns[this.state.turns.length - 1]?.question;
+    const history: AskTurn[] = turns.filter((t) => t.status === 'done').map((t) => ({ question: t.question, answer: t.answer }));
+    const prev = turns[turns.length - 1]?.question;
     const id = ++this.seq;
     const turn: AskTurnView = { id, question: q, answer: '', sources: [], cited: [], via: 'meaning', status: 'retrieving', error: null };
     // Pushed before the first await, so a caller sees the new turn as soon as ask() returns its promise.
-    this.set({ turns: [...this.state.turns, turn], busy: true });
+    this.set({ turns: [...turns, turn], busy: true });
     const live = () => this.abort === ac && this.state.turns.some((t) => t.id === id);
     try {
       // The binding check: no request leaves for an origin the operator did not allow.
@@ -144,8 +151,19 @@ export class AskStore {
       const byId = new Map(entries.map((e) => [e.noteId, e]));
       // A follow-up retrieves with the previous question too, so "and on staging?" still finds the topic.
       const retrievalQuery = prev ? `${prev}\n${q}` : q;
-      const { sources, via } = await this.sources(retrievalQuery, entries, byId, ac.signal);
+      let found: { sources: AskSource[]; via: 'meaning' | 'text' };
+      try {
+        found = await this.sources(retrievalQuery, entries, byId, ac.signal);
+      } catch {
+        if (live()) this.patchTurn(id, { status: 'error', error: 'retrieval' });
+        return;
+      }
       if (!live()) return;
+      if (ac.signal.aborted) {
+        this.patchTurn(id, { status: 'stopped' });
+        return;
+      }
+      const { sources, via } = found;
       if (!sources.length) {
         this.patchTurn(id, { status: 'empty', via });
         return;
