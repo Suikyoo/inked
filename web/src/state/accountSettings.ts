@@ -27,6 +27,8 @@ export class AccountSettingsStore {
   private deps: AccountSettingsDeps;
   private unlocked = false;
   private epoch = 0;
+  private loading: Promise<void> | null = null;
+  private chain: Promise<void> = Promise.resolve();
   private updatedAt: string | null = null;
   private unsubscribe: () => void;
 
@@ -63,47 +65,69 @@ export class AccountSettingsStore {
     this.unlocked = unlocked;
     this.epoch++;
     this.updatedAt = null;
+    this.loading = null;
     this.set(EMPTY);
-    if (unlocked) void this.load(this.epoch);
+    if (unlocked) this.loading = this.load(this.epoch);
   };
 
-  private async read(): Promise<{ settings: AccountSettings; unreadable: boolean }> {
+  /** Reads the stored settings; the caller assigns `updatedAt` after its own epoch check. */
+  private async read(): Promise<{ settings: AccountSettings; unreadable: boolean; updatedAt: string | null }> {
     const { encSettings, updatedAt } = await this.deps.api.getSettings();
-    this.updatedAt = updatedAt;
-    if (!encSettings) return { settings: {}, unreadable: false };
+    if (!encSettings) return { settings: {}, unreadable: false, updatedAt };
     try {
-      return { settings: await this.app.decryptAccountSettings(encSettings), unreadable: false };
+      return { settings: await this.app.decryptAccountSettings(encSettings), unreadable: false, updatedAt };
     } catch {
-      return { settings: {}, unreadable: true };
+      return { settings: {}, unreadable: true, updatedAt };
     }
   }
 
   private async load(ep: number) {
     const [status, read] = await Promise.all([
       this.deps.api.status().catch(() => ({ llmOrigins: [] as string[] })),
-      this.read().catch(() => ({ settings: {} as AccountSettings, unreadable: false })),
+      this.read().catch(() => ({ settings: {} as AccountSettings, unreadable: false, updatedAt: null as string | null })),
     ]);
     if (ep !== this.epoch) return;
+    this.updatedAt = read.updatedAt;
     this.set({ loaded: true, settings: read.settings, unreadable: read.unreadable, llmOrigins: status.llmOrigins ?? [] });
   }
 
-  /** Applies `change` to the current settings and saves; on 409 re-reads, applies it again and retries once. */
-  async update(change: (s: AccountSettings) => AccountSettings): Promise<void> {
+  /**
+   * Applies `change` to the current settings and saves; on 409 re-reads, applies it again and retries once.
+   * Saves run one at a time. Rejects with Error('locked') if the session locks before the save goes out.
+   */
+  update(change: (s: AccountSettings) => AccountSettings): Promise<void> {
+    const run = this.chain.then(() => this.save(change));
+    this.chain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async save(change: (s: AccountSettings) => AccountSettings): Promise<void> {
     const ep = this.epoch;
+    if (!this.unlocked) throw new Error('locked');
+    if (!this.state.loaded) await this.loading;
+    if (ep !== this.epoch) throw new Error('locked');
     let base = this.state.settings;
+    let baseAt = this.updatedAt;
     for (let attempt = 0; ; attempt++) {
       const next = change(base);
       const encSettings = await this.app.encryptAccountSettings(next);
+      if (ep !== this.epoch) throw new Error('locked');
       try {
-        const { updatedAt } = await this.deps.api.putSettings({ encSettings, baseUpdatedAt: this.updatedAt });
+        const { updatedAt } = await this.deps.api.putSettings({ encSettings, baseUpdatedAt: baseAt });
         if (ep !== this.epoch) return;
         this.updatedAt = updatedAt;
         this.set({ settings: next, unreadable: false });
         return;
       } catch (e) {
-        if (!(isApiError(e, 409) && e.code === 'conflict') || attempt >= 1 || ep !== this.epoch) throw e;
-        base = (await this.read()).settings;
-        if (ep !== this.epoch) return;
+        if (!(isApiError(e, 409) && e.code === 'conflict') || attempt >= 1) throw e;
+        if (ep !== this.epoch) throw new Error('locked');
+        const r = await this.read();
+        if (ep !== this.epoch) throw new Error('locked');
+        base = r.settings;
+        baseAt = r.updatedAt;
       }
     }
   }

@@ -97,4 +97,76 @@ describe('AccountSettingsStore', () => {
     app.set({ locking: true });
     expect(s.getState()).toMatchObject({ loaded: false, settings: {} });
   });
+  it('serializes concurrent updates so neither is lost', async () => {
+    const app = fakeApp();
+    const srv = server();
+    const s = new AccountSettingsStore(app as any, { api: srv.api as any });
+    app.set({ phase: 'unlocked' });
+    await flush();
+    const llm = { baseUrl: 'https://api.openai.com/v1', model: 'm', apiKey: 'k' };
+    await Promise.all([s.update((c) => ({ ...c, semantic: true })), s.update((c) => ({ ...c, llm }))]);
+    expect(JSON.parse(srv.row.enc!.slice(3))).toEqual({ semantic: true, llm });
+    expect(srv.api.putSettings).toHaveBeenCalledTimes(2);
+  });
+  it('rejects and sends nothing when locked during encryption', async () => {
+    const app = fakeApp();
+    const srv = server();
+    const s = new AccountSettingsStore(app as any, { api: srv.api as any });
+    app.set({ phase: 'unlocked' });
+    await flush();
+    let release!: () => void;
+    app.encryptAccountSettings.mockImplementationOnce(async (x: unknown) => {
+      await new Promise<void>((r) => (release = r));
+      return `v1.${JSON.stringify(x)}`;
+    });
+    const p = s.update((c) => ({ ...c, semantic: true }));
+    const settled = expect(p).rejects.toThrow('locked');
+    await flush();
+    app.set({ locking: true });
+    release();
+    await settled;
+    expect(srv.api.putSettings).not.toHaveBeenCalled();
+  });
+  it('rejects when locked', async () => {
+    const s = new AccountSettingsStore(fakeApp() as any, { api: server().api as any });
+    await expect(s.update((c) => c)).rejects.toThrow('locked');
+  });
+  it('waits for the load before applying an update', async () => {
+    const app = fakeApp();
+    const srv = server({ enc: 'v1.{"semantic":true}', at: 't0' });
+    const s = new AccountSettingsStore(app as any, { api: srv.api as any });
+    app.set({ phase: 'unlocked' });
+    await s.update((c) => ({ ...c, llm: undefined, semantic: !c.semantic }));
+    expect(s.getState().loaded).toBe(true);
+    expect(JSON.parse(srv.row.enc!.slice(3)).semantic).toBe(false);
+  });
+  it('ignores a load from a previous epoch that resolves late', async () => {
+    const app = fakeApp();
+    const srv = server({ enc: 'v1.{"semantic":true}', at: 'old' });
+    let release!: () => void;
+    srv.api.getSettings.mockImplementationOnce(async () => {
+      await new Promise<void>((r) => (release = r));
+      return { encSettings: 'v1.{"semantic":true}', updatedAt: 'stale' };
+    });
+    const s = new AccountSettingsStore(app as any, { api: srv.api as any });
+    app.set({ phase: 'unlocked' });
+    await flush();
+    app.set({ locking: true });
+    app.set({ locking: false });
+    await flush();
+    release();
+    await flush();
+    await s.update((c) => ({ ...c, semantic: false }));
+    expect(srv.api.putSettings).toHaveBeenCalledWith(expect.objectContaining({ baseUpdatedAt: 'old' }));
+  });
+  it('does not retry a user_mismatch 409', async () => {
+    const app = fakeApp();
+    const srv = server();
+    srv.api.putSettings.mockRejectedValue(new ApiError(409, 'user_mismatch'));
+    const s = new AccountSettingsStore(app as any, { api: srv.api as any });
+    app.set({ phase: 'unlocked' });
+    await flush();
+    await expect(s.update((c) => ({ ...c, semantic: true }))).rejects.toMatchObject({ code: 'user_mismatch' });
+    expect(srv.api.putSettings).toHaveBeenCalledTimes(1);
+  });
 });
