@@ -87,16 +87,38 @@ describe('layoutVault', () => {
       ...Array.from({ length: 25 }, (_, i) => note(`c${i}`, 'f3', `c${String(i).padStart(2, '0')}`)),
     ];
     const l = layoutVault(graphOf(fs, ns));
-    const rows = new Map<string, { x: number; y: number }[]>();
-    for (const [id, p] of Object.entries(l.notes)) {
-      const key = `${l.parent[id]}|${Math.round(Math.hypot(p.x, p.y) * 1000)}`;
-      rows.set(key, [...(rows.get(key) ?? []), p]);
-    }
-    expect(rows.size).toBeGreaterThan(3);
-    for (const pts of rows.values()) {
+    // Jitter moves dots off their rows, so every pair under one parent must keep the gap.
+    const groups = new Map<string, { x: number; y: number }[]>();
+    for (const [id, p] of Object.entries(l.notes)) groups.set(`${l.parent[id]}`, [...(groups.get(`${l.parent[id]}`) ?? []), p]);
+    expect(groups.size).toBe(3);
+    for (const pts of groups.values()) {
       for (let i = 0; i < pts.length; i++)
         for (let j = i + 1; j < pts.length; j++) expect(dist(pts[i], pts[j])).toBeGreaterThanOrEqual(MIN_GAP - 1e-6);
     }
+  });
+
+  it('keeps a gap wide enough for a dot and its link rings', () => {
+    expect(MIN_GAP).toBeGreaterThanOrEqual(10);
+  });
+
+  it('jitters dots off a perfect arc, the same way every time', () => {
+    const ns = Array.from({ length: 12 }, (_, i) => note(`n${i}`, 'fa', `t${String(i).padStart(2, '0')}`));
+    const g = graphOf([folder('fa', null, 'A')], ns);
+    const l = layoutVault(g);
+    expect(layoutVault(g)).toEqual(l);
+    const radii = new Set(ns.map((n) => Math.hypot(l.notes[n.id].x, l.notes[n.id].y).toFixed(2)));
+    // Twelve notes fill two rows; with no jitter there would be exactly two distinct radii.
+    expect(radii.size).toBeGreaterThan(4);
+  });
+
+  it('sunflower seeding keeps every pair under one folder MIN_GAP apart and stays deterministic', () => {
+    const ns = Array.from({ length: 40 }, (_, i) => note(`n${i}`, 'fa', `t${String(i).padStart(2, '0')}`));
+    const g = graphOf([folder('fa', null, 'A'), folder('fb', null, 'B')], [...ns, note('b1', 'fb')]);
+    const l = layoutVault(g, 'sunflower');
+    expect(layoutVault(g, 'sunflower')).toEqual(l);
+    const pts = ns.map((n) => l.notes[n.id]);
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) expect(dist(pts[i], pts[j])).toBeGreaterThanOrEqual(MIN_GAP - 1e-6);
+    expect(l.notes.n0).not.toEqual(layoutVault(g, 'rows').notes.n0);
   });
 
   it('gives an empty vault a hub-only layout', () => {
