@@ -70,6 +70,16 @@ describe('INKED_LLM_ORIGINS', () => {
     expect(() => parseLlmOrigins('ftp://x.example')).toThrow(/INKED_LLM_ORIGINS/);
     expect(() => parseLlmOrigins("https://a.example 'unsafe-inline'")).toThrow(/INKED_LLM_ORIGINS/);
   });
+  it('rejects hosts that could inject CSP syntax', () => {
+    for (const bad of ['https://a;b.example', 'https://x.example;sandbox', 'https://*.openai.com', "https://a'x'.example"]) {
+      expect(() => parseLlmOrigins(bad), bad).toThrow(/INKED_LLM_ORIGINS/);
+    }
+  });
+  it('normalises a trailing slash, rejects userinfo and ignores empty entries', () => {
+    expect(parseLlmOrigins('https://api.openai.com/')).toEqual(['https://api.openai.com']);
+    expect(() => parseLlmOrigins('https://u:p@api.openai.com')).toThrow(/INKED_LLM_ORIGINS/);
+    expect(parseLlmOrigins('https://a.example,,')).toEqual(['https://a.example']);
+  });
   it('is part of the config', () => {
     expect(loadConfig({ INKED_LLM_ORIGINS: 'https://api.openai.com' } as NodeJS.ProcessEnv).llmOrigins).toEqual(['https://api.openai.com']);
   });

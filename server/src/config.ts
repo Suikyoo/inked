@@ -39,6 +39,7 @@ export function parseTrustProxy(value: string | undefined): false | number | str
   throw new Error(`Invalid TRUST_PROXY: ${value} (use a hop count like 1, or proxy IPs/CIDRs)`);
 }
 
+const DNS_HOST = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const LOCAL_HTTP = new Set(['localhost', '127.0.0.1']);
 
 /** INKED_LLM_ORIGINS: bare https origins (or localhost http for development) the browser may call for Ask. */
@@ -52,8 +53,11 @@ export function parseLlmOrigins(value: string | undefined): string[] {
       throw new Error(`Invalid INKED_LLM_ORIGINS entry: ${raw}`);
     }
     const bare = u.origin === raw.replace(/\/$/, '') && u.pathname === '/' && !u.search && !u.hash && !u.username;
+    const host = DNS_HOST.test(u.hostname) || isIP(u.hostname) === 4;
     const scheme = u.protocol === 'https:' || (u.protocol === 'http:' && LOCAL_HTTP.has(u.hostname));
-    if (!bare || !scheme) throw new Error(`Invalid INKED_LLM_ORIGINS entry: ${raw} (use bare https origins like https://api.openai.com)`);
+    if (!bare || !scheme || !host) {
+      throw new Error(`Invalid INKED_LLM_ORIGINS entry: ${raw} (use bare https origins like https://api.openai.com; http only for localhost or 127.0.0.1)`);
+    }
     if (!out.includes(u.origin)) out.push(u.origin);
   }
   return out;

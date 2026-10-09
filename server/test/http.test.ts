@@ -212,7 +212,7 @@ describe('LLM origins', () => {
     try {
       const r = await call(t.app, 'GET', '/api/status', {});
       expect(r.json().llmOrigins).toEqual([]);
-      expect(r.headers['content-security-policy']).toContain("connect-src 'self';");
+      expect(r.headers['content-security-policy']).toBe(EXPECTED_HEADERS['content-security-policy']);
     } finally {
       await t.close();
     }
