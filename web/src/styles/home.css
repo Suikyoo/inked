@@ -289,3 +289,36 @@
 .res-btn:focus-visible {
   background: var(--hover);
 }
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ask-turn + .ask-turn {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ask-q {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.ask-a {
+  font-size: 13.5px;
+  color: var(--text-body);
+}
+.ask-actions,
+.ask-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ask-a {
+    animation: res-in var(--dur-2) var(--ease-out);
+  }
+}
