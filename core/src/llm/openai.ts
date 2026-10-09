@@ -35,15 +35,25 @@ export function isAllowedBaseUrl(baseUrl: string, origins: readonly string[]): b
   return o !== null && origins.includes(o);
 }
 
+/** Anthropic's API refuses browser (CORS) requests unless they carry this opt-in header. */
+const ANTHROPIC_ORIGIN = 'https://api.anthropic.com';
+const ANTHROPIC_BROWSER_HEADER = 'anthropic-dangerous-direct-browser-access';
+
 /** Streams an OpenAI-compatible chat completion, yielding text deltas. Throws LlmError. */
 export async function* chat(opts: ChatOptions): AsyncGenerator<string> {
   const f = opts.fetch ?? fetch;
   const aborted = () => opts.signal?.aborted === true;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${opts.apiKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  };
+  if (llmOrigin(opts.baseUrl) === ANTHROPIC_ORIGIN) headers[ANTHROPIC_BROWSER_HEADER] = 'true';
   let res: Response;
   try {
     res = await f(`${opts.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      headers,
       body: JSON.stringify({
         model: opts.model,
         messages: opts.messages,

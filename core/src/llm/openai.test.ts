@@ -44,6 +44,17 @@ describe('chat', () => {
     expect(url).not.toContain(key);
     expect(init.body as string).not.toContain(key);
   });
+  it('sends the browser-access header only to Anthropic', async () => {
+    const header = 'anthropic-dangerous-direct-browser-access';
+    const headersFor = async (baseUrl: string) => {
+      const f = okFetch(['data: [DONE]\n\n']);
+      await collect(chat({ ...base, baseUrl, fetch: f }));
+      return (f.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<string, string>;
+    };
+    expect((await headersFor('https://api.anthropic.com/v1'))[header]).toBe('true');
+    expect((await headersFor('https://api.openai.com/v1'))[header]).toBeUndefined();
+    expect((await headersFor('https://api.anthropic.com.evil.example/v1'))[header]).toBeUndefined();
+  });
   it('joins a data line split across reads', async () => {
     const line = delta('split');
     const f = okFetch([line.slice(0, 10), line.slice(10), 'data: [DONE]\n\n']);
