@@ -186,7 +186,7 @@ components:
 
 **Creative North Star: "The Inkwell Notebook"**
 
-Inked is a notebook written in ink on dark violet-black paper. Everything quiet is a near-black violet surface (never neutral gray, never pure black); the single hue that speaks is purple ink. Ink marks the interactive and the alive: the primary action, the focus ring, links, the active row's icon, and, on the concept map, how recently a note was written. The name is literal in the build: the logo is a pen nib, each vault is a tip-up ink drop whose fill rises with the share of notes edited this week, and map dots run from wet to dry ink.
+Inked is a notebook written in ink on dark violet-black paper. Everything quiet is a near-black violet surface (never neutral gray, never pure black); the single hue that speaks is purple ink. Ink marks the interactive and the alive: the primary action, the focus ring, links, the active row's icon, and, on the concept map, how recently a note was written. The name is literal in the build: the logo is a pen nib, each vault is a hexagon mark (a solid core inside an outline) that grows spokes from the bottom up, one per sixth of the notes edited this week, and map dots run from wet to dry ink.
 
 The density is that of a desk tool used daily: a 13px base, 28px rows, 30px controls, a 240px sidebar, and a 700px reading column. Chrome recedes into tonal steps of the same violet; hierarchy comes from text tone (strong, body, muted) and an italic serif voice reserved for names (the wordmark, vault names, vault titles, map hub labels). It is dark only; there is no light theme.
 
@@ -274,7 +274,7 @@ Tonal layering, not shadows. Depth is conveyed by stepping from ground to panel 
 
 ## Shapes
 
-Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kbd, inline controls), 5px (icon buttons, menu items), 6px (buttons, rows, nav), 7px (inputs, segmented), 8px (search, menu, banners, code blocks), 10px (cards, dialogs, recovery panel, map frame). Swatches are circles. Borders are 1px in `border` / `side-border`; inputs on panel surfaces may render their border as a 1px box-shadow ring. Icons are stroked line SVGs (`currentColor`, round caps and joins, 1.8-2.6 stroke at 14px) in a single family; the nib logo and ink-drop vault icon are filled marks with a punched hole.
+Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kbd, inline controls), 5px (icon buttons, menu items), 6px (buttons, rows, nav), 7px (inputs, segmented), 8px (search, menu, banners, code blocks), 10px (cards, dialogs, recovery panel, map frame). Swatches are circles. Borders are 1px in `border` / `side-border`; inputs on panel surfaces may render their border as a 1px box-shadow ring. Icons are stroked line SVGs (`currentColor`, round caps and joins, 1.8-2.6 stroke at 14px) in a single family; the nib logo is a filled mark, and the vault icon is the same stroked family: an outline hexagon, up to six spokes and a solid hexagon core, with no translucent fills.
 
 ## Components
 
@@ -298,7 +298,7 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - **Search by meaning.** Opt-in (Settings). Home shows one merged list of title, note-text and meaning matches. Each row ends in a muted 11px `res-why` tag (`title`, `text`, or `◇ meaning` in `ink-light`); meaning rows show the best chunk's first line as their snippet. While focus is inside the list the order holds still, and new results apply when focus leaves or the query changes. When meaning indexing is incomplete the header adds "· meaning covers 3 of 40 notes", and a 2px progress bar under the search bar reads "Indexing by meaning · 3 / 40" (or "Downloading model · 12 / 90 MB"), fading out over `--dur-3` once done. Off by default, none of this shows.
 
 ### Segmented control
-- 2px inset on `panel` with a 1px `line` border; 24px options; the pressed option has white text over an ink thumb that slides between the options over `--dur-2` (the control carries `data-mode`). Used for edit / view; the article or textarea fades in over 120ms.
+- 2px inset on `panel` with a 1px `line` border; 24px options; the pressed option has white text over an ink thumb that slides between the options over `--dur-2` (the control carries `data-mode`). Used for edit / view; the article or textarea fades in over 180ms.
 
 ### Menus and dialogs
 - Menu: 188px wide, `panel-3`, 1px `border-2`, 8px radius, 30px items, danger items in error rose. Dialog: native `<dialog>`, 400px max, `panel-2`, 10px radius, 18px padding, title 15px/600, right-aligned actions, 8px gap.
@@ -326,13 +326,13 @@ A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px
 Motion is quiet and tied to the ink metaphor: it confirms a change of state and never blocks a click or shifts layout.
 
 ### Tokens
-- **Durations:** `--dur-1` 90ms (hover, press), `--dur-2` 140ms (route, toggle, tree, banners, menus), `--dur-3` 200ms (dialogs opening, the mobile drawer, panels, the auth fade, the write-on node fade), `--dur-4` 320ms, `--dur-ink` 520ms (ink drawn along a path on the map).
+- **Durations:** `--dur-1` 140ms (hover, press), `--dur-2` 220ms (route, toggle, tree, banners, menus), `--dur-3` 300ms (dialogs opening, the mobile drawer, panels, the auth fade, the write-on node fade), `--dur-4` 450ms, `--dur-ink` 520ms (ink drawn along a path on the map).
 - **Easing:** `--ease-out` cubic-bezier(0.16, 1, 0.3, 1) for things arriving, `--ease-in` cubic-bezier(0.4, 0, 1, 1) for things leaving, `--ease-std` cubic-bezier(0.2, 0, 0, 1) for things that move between two places.
 
 ### Rules
 - **Route change:** content fades in and rises 2px over `--dur-2`. Enter only; leaving never waits. The same fade plays when the app shell first mounts after unlock, which is also the fallback when View Transitions are unavailable.
 - **Sidebar tree:** folders expand and collapse over `--dur-2` and the chevron rotates.
-- **Edit / view:** the segmented thumb slides over `--dur-2`; the article or textarea fades in over 120ms.
+- **Edit / view:** the segmented thumb slides over `--dur-2`; the article or textarea fades in over 180ms.
 - **Save status:** the new text fades in; "Saved" fades in, then dims slightly.
 - **Hover and press:** color changes over `--dur-1`; buttons scale to 0.98 while pressed.
 - **Banners and notices:** collapse in and out, holding their last content while they close.

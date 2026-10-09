@@ -253,6 +253,35 @@
 .vault-icon {
   flex: 0 0 auto;
 }
+/* An unlit spoke draws nothing (the dash pattern starts in its gap); lighting it draws it from the core outward. */
+.vault-icon .vi-spoke {
+  stroke-dasharray: 1 1.1;
+  stroke-dashoffset: 1.02;
+  transition: stroke-dashoffset var(--dur-3) var(--ease-out);
+}
+.vault-icon .vi-spoke.is-lit {
+  stroke-dashoffset: 0;
+}
+.vault-icon .vi-core {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.vault-icon .vi-core.is-pulse {
+  animation: vi-pulse 420ms var(--ease-out) 160ms;
+}
+@keyframes vi-pulse {
+  40% {
+    transform: scale(1.4);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault-icon .vi-spoke {
+    transition: none;
+  }
+  .vault-icon .vi-core.is-pulse {
+    animation: none;
+  }
+}
 
 /* ---- Tree --------------------------------------------------------------------------------- */
 .tree-wrap {
