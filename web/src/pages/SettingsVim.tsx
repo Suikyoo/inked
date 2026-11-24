@@ -71,7 +71,7 @@ export function VimSettings() {
             maxLength={VIM_CONFIG_MAX}
             spellCheck={false}
             rows={8}
-            placeholder={"vim.g.mapleader = ' '\nvim.keymap.set('i', 'jk', '<Esc>')\nvim.keymap.set('n', '<leader>w', ':w<CR>')"}
+            placeholder={"vim.g.mapleader = ' '\nvim.keymap.set('i', 'jk', '<Esc>')\nvim.keymap.set('n', '<leader>h', '^')"}
             disabled={busy}
           />
           <p className="field-hint">

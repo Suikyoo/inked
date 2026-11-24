@@ -185,7 +185,7 @@ export function CodeEditor({
     }
     let alive = true;
     void (async () => {
-      const { extension, api } = await loadVim();
+      const { extension, api } = await loadVim(vim.config.keymaps);
       vimApi = api;
       if (!alive || !viewRef.current) return;
       applyKeymaps(api, vim.config.keymaps);

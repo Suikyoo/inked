@@ -96,9 +96,8 @@ describe('CodeEditor wrapping', () => {
     await act(async () => {
       root.render(<CodeEditor value="ab" onChange={() => undefined} handleRef={handleRef} vim={vim} ariaLabel="Markdown source" />);
     });
-    // The vim package arrives by dynamic import, which takes longer than one microtask tick.
-    await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
-    expect(wrapping()).toBe(false);
+    // Wait for the lazy extension to arrive before inspecting the view.
+    await vi.waitFor(() => expect(wrapping()).toBe(false));
   });
 });
 

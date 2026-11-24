@@ -15,45 +15,10 @@ export interface VimApi {
   map(lhs: string, rhs: string, ctx: string): void;
   noremap(lhs: string, rhs: string, ctx: string): void;
   mapclear(ctx?: string): void;
-  /** Removes a binding. Called with no context, since the engine's own bindings carry none. */
-  unmap(lhs: string, ctx?: string): void;
 }
 
 const CONTEXTS = ['normal', 'insert', 'visual'] as const;
 const CONTEXT_OF: Record<VimMode, (typeof CONTEXTS)[number]> = { n: 'normal', i: 'insert', v: 'visual' };
-
-/**
- * A vim key sequence split into its keys: `<Space>w` is two keys, not seven characters.
- */
-export function vimKeys(lhs: string): string[] {
-  return lhs.match(/<[^<>]+>|[\s\S]/g) ?? [];
-}
-
-/**
- * The leading key of every multi-key mapping in a mode where keys are commands.
- *
- * The engine binds `<Space>` and `,` — the two usual leaders — as complete commands, and its matcher takes
- * a full match the moment it has one rather than waiting for a longer sequence. So `<leader>w` never fires
- * while the bare leader is still bound. A prefix the config maps itself is left alone: that is the owner
- * saying what the bare key should do.
- *
- * Insert mode is skipped: there a bare character is text, not a command, so nothing needs freeing — and
- * freeing it would be actively harmful, since `unmap` is contextless and an insert-mode `jk` mapping would
- * take the normal-mode `j` motion with it.
- */
-function prefixesToFree(keymaps: VimKeymap[]): string[] {
-  const mapped = new Set(keymaps.map((k) => k.lhs));
-  const out: string[] = [];
-  for (const k of keymaps) {
-    if (!k.modes.some((m) => m === 'n' || m === 'v')) continue;
-    const keys = vimKeys(k.lhs);
-    if (keys.length < 2) continue;
-    const prefix = keys[0]!;
-    if (mapped.has(prefix) || out.includes(prefix)) continue;
-    out.push(prefix);
-  }
-  return out;
-}
 
 /** Clears every mapping this module may have set. */
 export function clearKeymaps(api: VimApi): void {
@@ -63,12 +28,27 @@ export function clearKeymaps(api: VimApi): void {
 /** Replaces every mapping in normal, insert and visual with this config's, in file order. */
 export function applyKeymaps(api: VimApi, keymaps: VimKeymap[]): void {
   clearKeymaps(api);
-  // Before mapping, not after: mapclear puts the engine's own bindings back.
-  for (const prefix of prefixesToFree(keymaps)) api.unmap(prefix);
+  // The engine expands a recursive RHS one keystroke at a time. When it names
+  // another mapping, a native command can otherwise claim its first key (e.g.
+  // Q -> sa runs substitute before a). Use a single engine key for that target.
+  const aliases = new Map<string, string>();
+  const id = (mode: VimMode, lhs: string) => mode + ':' + lhs;
+  const defined = new Set(keymaps.flatMap((k) => k.modes.map((mode) => id(mode, k.lhs))));
+  for (const k of keymaps) {
+    if (!k.remap || (k.rhs.match(/<[^<>]+>|[\s\S]/gu)?.length ?? 0) < 2) continue;
+    for (const mode of k.modes) {
+      const target = id(mode, k.rhs);
+      if (defined.has(target) && !aliases.has(target)) aliases.set(target, `<InkedMap${aliases.size}>`);
+    }
+  }
   for (const k of keymaps) {
     for (const mode of k.modes) {
-      if (k.remap) api.map(k.lhs, k.rhs, CONTEXT_OF[mode]);
-      else api.noremap(k.lhs, k.rhs, CONTEXT_OF[mode]);
+      const rhs = (k.remap && aliases.get(id(mode, k.rhs))) || k.rhs;
+      const alias = aliases.get(id(mode, k.lhs));
+      for (const lhs of alias ? [k.lhs, alias] : [k.lhs]) {
+        if (k.remap) api.map(lhs, rhs, CONTEXT_OF[mode]);
+        else api.noremap(lhs, rhs, CONTEXT_OF[mode]);
+      }
     }
   }
 }
@@ -98,7 +78,8 @@ export function optionExtensions(o: VimOptions): Extension[] {
 }
 
 /** Imports the vim package on first use, and hands back its extension and its global object. */
-export async function loadVim(): Promise<{ extension: Extension; api: VimApi }> {
+export async function loadVim(keymaps: VimKeymap[]): Promise<{ extension: Extension; api: VimApi }> {
   const m = await import('@replit/codemirror-vim');
-  return { extension: m.vim(), api: m.Vim as unknown as VimApi };
+  const { vimKeySequences } = await import('./vimKeySequences');
+  return { extension: [vimKeySequences(keymaps), m.vim()], api: m.Vim as unknown as VimApi };
 }

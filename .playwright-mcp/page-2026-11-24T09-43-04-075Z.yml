@@ -1,0 +1,62 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - complementary [ref=f1e3]:
+      - generic [ref=f1e4]:
+        - generic [ref=f1e5]: ✳
+        - text: Inked
+    - main [ref=f1e6]:
+      - generic [ref=f1e7]:
+        - generic [ref=f1e8]: Workspace / Atlas
+        - generic [ref=f1e9]:
+          - generic [ref=f1e10]: ⌕ Search notes…
+          - generic [ref=f1e11]: M
+      - generic [ref=f1e12]:
+        - generic [ref=f1e13]:
+          - generic [ref=f1e14]:
+            - heading "Ideas in orbit" [level=1] [ref=f1e15]
+            - paragraph [ref=f1e16]: A living map of what you’ve written and how it connects.
+          - generic [ref=f1e17]:
+            - generic [ref=f1e18]: 2 vaults
+            - generic [ref=f1e19]: 12 notes
+            - generic [ref=f1e20]: 4 folders
+        - generic [ref=f1e21]:
+          - generic [ref=f1e22]:
+            - strong [ref=f1e23]: Field journal
+            - generic [ref=f1e24]: VAULT ATLAS · UPDATED JUST NOW
+          - generic [ref=f1e25]:
+            - button "Zoom in" [ref=f1e26] [cursor=pointer]: +
+            - button "Zoom out" [ref=f1e27] [cursor=pointer]: −
+            - button "Fit map" [ref=f1e28] [cursor=pointer]: ⛶
+          - img "A radial atlas of a notes vault, with folders, notes and links" [ref=f1e29]:
+            - generic [ref=f1e45]: Field journal
+            - generic [ref=f1e46] [cursor=pointer]
+            - generic [ref=f1e47] [cursor=pointer]
+            - generic [ref=f1e48] [cursor=pointer]
+            - generic [ref=f1e49] [cursor=pointer]
+            - generic [ref=f1e50] [cursor=pointer]
+            - generic [ref=f1e51] [cursor=pointer]
+            - generic [ref=f1e52] [cursor=pointer]
+            - generic [ref=f1e53] [cursor=pointer]
+            - generic [ref=f1e54]: Salt marsh
+            - generic [ref=f1e55]: Tidal pools
+            - generic [ref=f1e56]: Moss after rain
+            - generic [ref=f1e57]: Dawn chorus
+            - generic [ref=f1e58]: Field recording
+            - generic [ref=f1e59]: Wind atlas
+            - generic [ref=f1e60]: Rain on canvas
+            - generic [ref=f1e61]: Ecology
+            - generic [ref=f1e62]: Sound
+            - generic [ref=f1e63]: Coast
+            - generic [ref=f1e64]: Weather
+          - generic [ref=f1e65]:
+            - generic [ref=f1e66]: recent
+            - generic [ref=f1e68]: older
+            - generic [ref=f1e70]: ··· linked notes
+            - generic [ref=f1e71]: ◔ reading trail
+        - generic [ref=f1e72]:
+          - generic [ref=f1e73]:
+            - generic [ref=f1e74]: Field journal / Ecology / Coast
+            - heading "Salt marsh" [level=2] [ref=f1e75]
+            - paragraph [ref=f1e76]: At the turn of the tide, the mudflats hold a thin mirror of sky. The paths between reed beds redraw themselves each morning.
+          - button "Open note ↗" [ref=f1e77] [cursor=pointer]
+  - generic [ref=f1e78]: PROPOSAL · ENGRAVED ATLAS
