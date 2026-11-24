@@ -17,8 +17,8 @@ describe('readDiagramTheme', () => {
   it('falls back to the dark token values when a variable is missing', () => {
     vi.spyOn(window, 'getComputedStyle').mockReturnValue({ getPropertyValue: () => '' } as unknown as CSSStyleDeclaration);
     const t = readDiagramTheme();
-    expect(t.primaryColor).toBe('#24222c');
-    expect(t.primaryTextColor).toBe('#e6e3ee');
+    expect(t.primaryColor).toBe('#2b2636');
+    expect(t.primaryTextColor).toBe('#e9e4f0');
     expect(t.fontSize).toBe('14px');
     expect(String(t.fontFamily)).toContain('Public Sans');
     // Mermaid does color maths on these, so none may be a var() reference.

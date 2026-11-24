@@ -6,6 +6,7 @@ import { Logo } from './brand/Logo';
 import { AppShell } from './components/AppShell';
 import { Spinner } from './components/Fields';
 import { LoginPage } from './pages/LoginPage';
+import { FrontboardPage } from './pages/FrontboardPage';
 import { RecoverPage } from './pages/RecoverPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { JoinPage, SetupPage } from './pages/SetupPage';
@@ -21,11 +22,20 @@ import { StoreProvider, useAppState, useStore } from './state/StoreContext';
 
 /** Pages that need unlocked keys. Anyone else goes to setup or the unlock screen. */
 function RequireUnlocked({ children }: { children: ReactNode }) {
-  const { phase } = useAppState();
+  const { phase, lastUsername } = useAppState();
   const location = useLocation();
   if (phase === 'setup') return <Navigate to="/setup" replace />;
-  if (phase !== 'unlocked') return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (phase !== 'unlocked') {
+    if (location.pathname === '/' && !lastUsername) return <Navigate to="/welcome" replace state={{ from: '/' }} />;
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
   return <>{children}</>;
+}
+
+function PublicWelcome() {
+  const { phase } = useAppState();
+  if (phase === 'unlocked') return <Navigate to="/" replace />;
+  return <FrontboardPage />;
 }
 
 /** Login and recovery: once unlocked, go back to where the user was. */
@@ -98,6 +108,7 @@ export function App({ store, semantic, account, ask }: { store: AppStore; semant
                 <Routes>
                   <Route path="/setup" element={<SetupPage />} />
                   <Route path="/join/:token" element={<JoinPage />} />
+                  <Route path="/welcome" element={<PublicWelcome />} />
                   <Route
                     path="/login"
                     element={

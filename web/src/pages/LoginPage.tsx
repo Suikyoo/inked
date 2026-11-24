@@ -175,6 +175,8 @@ export function LoginPage() {
           Locks again after 15 minutes idle.
           <br />
           <Link to="/recover">Forgot password? Recovery needs your recovery key.</Link>
+          <br />
+          <Link to="/welcome">Explore Inked</Link>
         </>
       }
     >

@@ -1,49 +1,63 @@
 ---
 name: Inked
-description: A dark, compact, self-hosted notes app where purple ink on near-black violet paper marks what you wrote and how recently.
+description: A dark, self-hosted notes app where lilac ink on violet-black paper maps what you wrote, where it lives, and how recently it changed.
 colors:
-  ground: "#17161c"
-  side: "#121117"
-  side-border: "#222029"
-  panel: "#1b1a21"
-  panel-2: "#211f28"
-  panel-3: "#24222c"
-  canvas: "#1a1920"
-  hover: "#1f1d26"
-  row-selected: "#2a2440"
-  border: "#2e2c38"
-  border-2: "#34323f"
-  line: "#2a2833"
-  text: "#e6e3ee"
-  text-strong: "#ede9ff"
-  text-2: "#c4bfd1"
-  text-body: "#dad6e3"
-  muted: "#a29db2"
-  muted-2: "#8d879f"
-  muted-3: "#6e6880"
-  placeholder: "#7d7790"
-  ink: "#7452e0"
-  ink-hover: "#8160ea"
-  ink-light: "#b69cff"
-  ink-lighter: "#d6c8ff"
-  selection: "#4b3a80"
-  ink-wet: "#b69cff"
-  ink-fresh: "#9d7cf2"
-  ink-drying: "#6b5a9e"
-  ink-dry: "#524b6e"
-  map-pencil: "#4a4659"
-  error: "#f2a7b4"
-  error-bg: "#241d2a"
-  error-text: "#e9c9cf"
-  ok: "#8fd1b5"
-  warn: "#d19c3c"
-  danger: "#8f3348"
-  danger-hover: "#a33c54"
-  menu-hover: "#2e2b39"
-  sync-bg: "#2b2029"
-  scroll-thumb-hover: "#403d4d"
-  text-lead: "#a8a3b8"
-  code-text: "#cfcbda"
+  ground: "#14121a"
+  side: "#100e16"
+  side-border: "#292431"
+  panel: "#1b1822"
+  panel-2: "#231f2c"
+  panel-3: "#2b2636"
+  canvas: "#17131f"
+  hover: "#24202d"
+  row-selected: "#332744"
+  border: "#393344"
+  border-2: "#484052"
+  line: "#302b3a"
+  text: "#e9e4f0"
+  text-strong: "#f7f2ff"
+  text-2: "#d0c9dc"
+  text-body: "#ded8e7"
+  muted: "#b1a9bf"
+  muted-2: "#968da6"
+  muted-3: "#91879e"
+  placeholder: "#978ea8"
+  ink: "#7150bf"
+  ink-hover: "#8464d0"
+  logo-ink: "#7452e0"
+  ink-light: "#c5a9f6"
+  ink-lighter: "#eadcff"
+  selection: "#51406b"
+  ink-wet: "#eadcff"
+  ink-fresh: "#c3a4ef"
+  ink-drying: "#a180bf"
+  ink-dry: "#8f779f"
+  map-pencil: "#655b72"
+  map-ink: "#c3a4ef"
+  map-sel: "#fff8ff"
+  map-link: "#a99aba"
+  map-boundary: "rgba(191, 164, 229, 0.17)"
+  map-boundary-fill: "rgba(197, 169, 246, 0.018)"
+  map-boundary-focus: "rgba(197, 169, 246, 0.34)"
+  map-boundary-fill-focus: "rgba(197, 169, 246, 0.045)"
+  map-vignette: "rgba(12, 9, 18, 0.34)"
+  map-grid: "rgba(206, 189, 232, 0.045)"
+  surface-glow: "rgba(174, 137, 255, 0.1)"
+  frontboard-atmosphere: "rgba(117, 79, 171, 0.12)"
+  gold: "#f2c14e"
+  text-inverse: "#fffaff"
+  error: "#f2b1c0"
+  error-bg: "#2d202d"
+  error-text: "#f0d5dc"
+  ok: "#9bd7c0"
+  warn: "#e1b35c"
+  danger: "#8f3e57"
+  danger-hover: "#a94a68"
+  menu-hover: "#363044"
+  sync-bg: "#30212c"
+  scroll-thumb-hover: "#51485f"
+  text-lead: "#c0b7ce"
+  code-text: "#d8d1e3"
 typography:
   wordmark:
     fontFamily: "Spectral, Georgia, serif"
@@ -68,6 +82,12 @@ typography:
     fontWeight: 700
     lineHeight: 1.2
     letterSpacing: "-0.015em"
+  frontboard-title:
+    fontFamily: "Public Sans, system-ui, sans-serif"
+    fontSize: "clamp(56px, 9vw, 96px)"
+    fontWeight: 600
+    lineHeight: 0.93
+    letterSpacing: "-0.045em"
   page-title:
     fontFamily: "Public Sans, system-ui, sans-serif"
     fontSize: "20px"
@@ -103,13 +123,13 @@ rounded:
   sm: "5px"
   md: "6px"
   lg: "7px"
-  xl: "8px"
+  xl: "14px"
   card: "10px"
 spacing:
   xs: "4px"
   sm: "8px"
   md: "12px"
-  lg: "18px"
+  lg: "16px"
   xl: "24px"
   row: "28px"
   row-sm: "26px"
@@ -187,7 +207,7 @@ components:
 
 **Creative North Star: "The Inkwell Notebook"**
 
-Inked is a notebook written in ink on dark violet-black paper. Everything quiet is a near-black violet surface (never neutral gray, never pure black); the single hue that speaks is purple ink. Ink marks the interactive and the alive: the primary action, the focus ring, links, the active row's icon, and, on the concept map, how recently a note was written. The name is literal in the build: the logo is a pen nib, each vault is a hexagon mark (a solid core inside an outline) that grows spokes from the bottom up, one per sixth of the notes edited this week, and map dots run from wet to dry ink.
+Inked is a notebook written in lilac ink on violet-black paper. Everything quiet is a tinted surface (never neutral gray, never pure black); one ink hue marks the interactive and the alive. Ink marks the primary action, focus, links, active rows, and the age of notes on the concept map. The logo is a pen nib, each vault is a hexagon mark (a solid core inside an outline) that grows spokes from the bottom up, one per sixth of the notes edited this week, and map dots run from wet to dry ink.
 
 The density is that of a desk tool used daily: a 13px base, 28px rows, 30px controls, a 240px sidebar, and a 700px reading column. Chrome recedes into tonal steps of the same violet; hierarchy comes from text tone (strong, body, muted) and an italic serif voice reserved for names (the wordmark, vault names, vault titles, map hub labels). It is dark only; there is no light theme.
 
@@ -195,7 +215,7 @@ The map is a drawn diagram, not a data-viz widget. Structure is pencil (thin gra
 
 **Key Characteristics:**
 - Dark only, tonal layering of violet-black surfaces; no light mode.
-- One accent hue (purple ink) in three working values: fill, text/focus, and highlight.
+- One accent hue (lilac ink) in three working values: fill, text/focus, and highlight; gold remains reserved for reading progress.
 - Compact: 13px base, 26-36px rows and controls, 1px borders, small radii.
 - Italic Spectral for names; Public Sans for all UI; JetBrains Mono for raw Markdown and keys.
 - Flat at rest; shadows only on floating layers.
@@ -205,22 +225,22 @@ The map is a drawn diagram, not a data-viz widget. Structure is pencil (thin gra
 A restrained violet-tinted dark palette with one ink accent and quiet, desaturated status colors.
 
 ### Primary
-- **Ink Violet** (`ink`, #7452e0): the filled primary button, selected segmented option, checkboxes, and the logo nib. White text sits on it. Hover is **Ink Violet Lifted** (`ink-hover`, #8160ea).
-- **Lilac Ink** (`ink-light`, #b69cff): ink as text and signal: links, focus ring (2px outline, plus 18% glow on fields), caret, active nav icon, "Open note" actions, the recovery-key prefix. Hover is **Pale Ink** (`ink-lighter`, #d6c8ff).
-- **Selection Plum** (`selection`, #4b3a80) for text selection; `mark` uses ink at 32% alpha.
+- **Ink Violet** (`ink`, #7150bf): the filled primary button, selected segmented option, and checkboxes. Inverse paper text sits on it; contrast exceeds 5:1. Hover is **Ink Lifted** (`ink-hover`, #8464d0). The original pen-nib mark keeps **Logo Violet** (`logo-ink`, #7452e0).
+- **Lilac Ink** (`ink-light`, #c5a9f6): text-level emphasis, links, focus, caret, active icons, and "Open note" actions. **Pale Ink** (`ink-lighter`, #eadcff) is the brightest ink and wettest map tier.
+- **Selection Plum** (`selection`, #51406b) for text selection; `mark` uses pale ink at 34% alpha.
 
 ### Neutral
-- **Ground** (`ground`, #17161c): page background. **Side** (`side`, #121117) and **Side Border** (`side-border`, #222029): sidebar, topbar, code blocks, recovery panel, and the hairline between regions. The sidebar is darker than the page.
-- **Panel** (`panel` #1b1a21), **Panel 2** (`panel-2` #211f28), **Panel 3** (`panel-3` #24222c): raised steps. Inputs, buttons and cards use panel; banners, notices and dialogs panel-2; menus, hover fills and active nav items panel-3. **Canvas** (`canvas`, #1a1920) is reserved for the map surface and is the ground every map color is validated against.
-- **Hover** (#1f1d26) and **Row Selected** (`row-selected`, #2a2440, a violet-tinted step used only for the active tree row).
-- **Borders:** `border` (#2e2c38) for controls, `border-2` (#34323f) for floating layers, `line` (#2a2833) for rules inside content.
-- **Text ramp:** `text-strong` #ede9ff (titles, headings), `text` #e6e3ee, `text-body` #dad6e3 (rendered prose), `text-2` #c4bfd1 (rows, editor text), `muted` #a29db2, `muted-2` #8d879f, `muted-3` #6e6880 (counts, hints, status), `placeholder` #7d7790.
+- **Ground** (`ground`, #14121a): page background. **Side** (`side`, #100e16) and **Side Border** (`side-border`, #292431) define the sidebar and the region seams.
+- **Panel** (`panel`, #1b1822), **Panel 2** (`panel-2`, #231f2c), **Panel 3** (`panel-3`, #2b2636): raised tonal steps. Inputs use panel; notices and dialogs use panel-2; menus, hover fills and active navigation use panel-3. **Canvas** (`canvas`, #17131f) grounds every map mark.
+- **Hover** (#24202d) and **Row Selected** (`row-selected`, #332744, a violet-tinted step used for the active tree row).
+- **Borders:** `border` (#393344) for controls, `border-2` (#484052) for floating layers, `line` (#302b3a) for quiet rules.
+- **Text ramp:** `text-strong` #f7f2ff, `text` #e9e4f0, `text-body` #ded8e7, `text-2` #d0c9dc, `muted` #b1a9bf, `muted-2` #968da6, `muted-3` #91879e, and `placeholder` #978ea8. Tertiary copy and placeholders remain legible on the darker ground.
 
 ### Status
-- **Error** (#f2a7b4 text; #241d2a surface; #e9c9cf body text) is a soft rose, never saturated red, except the destructive button fill (#8f3348). **OK** (#8fd1b5) and **Warn** (#d19c3c) are used sparingly.
+- **Error** (#f2b1c0 text; #2d202d surface; #f0d5dc body text) is a soft rose, never saturated red, except the destructive button fill (#8f3e57). **OK** (#9bd7c0) and **Warn** (#e1b35c) are used sparingly.
 
 ### Concept map ramp
-An ordinal one-hue ramp from wet to dry ink, by age of last edit: **Wet** (`ink-wet`, #b69cff, under 1 day), **Fresh** (`ink-fresh`, #9d7cf2, under 7 days), **Drying** (`ink-drying`, #6b5a9e, under 30 days), **Dry** (`ink-dry`, #524b6e, older). Wet and Fresh add a soft glow (38% and 22% opacity). **Pencil** (`map-pencil`, #4a4659) draws folder structure; explicit links are the same pencil, dotted 2-4 with round caps; **Map Ink** (#9d7cf2) draws 3px round-capped quill-curve ink strokes; selection is `text-strong` (#ede9ff) at 1.5px. Vault colors are user-chosen data (swatches in settings), not palette tokens.
+An ordinal one-hue ramp from wet to dry ink, by age of last edit: **Wet** (`ink-wet`, #eadcff), **Fresh** (`ink-fresh`, #c3a4ef), **Drying** (`ink-drying`, #a180bf), and **Dry** (`ink-dry`, #8f779f). The dry floor stays distinct from pencil even at rest; dots retain 85% opacity. **Pencil** (`map-pencil`, #655b72) draws folder structure; explicit links are dotted pencil curves; **Map Ink** (#c3a4ef) draws the active route. A faint dotted boundary frames each vault and brightens only when the vault is in focus. The map has a restrained drafting grid, soft central wash, and edge vignette beneath the graph. Vault colors are user-chosen data, not palette tokens.
 
 ### Named Rules
 **The One Ink Rule.** Purple is the only chromatic voice. Status colors are muted and appear only when something is wrong or done; do not introduce a second accent hue.
@@ -256,6 +276,7 @@ A two-column shell: a sticky 240px sidebar (`side` surface, 12px 10px padding, 1
 **The One Ladder Rule.** The rhythm is a token ladder in `tokens.css`, named for its multiple of 4px (`--sp-4` is 16px): 2, 4, 6, 8, 12, 16, 24, 32, 48. Every gap, margin and padding picks a step; nothing sits between two. A 1px gap is a hairline, a rule's width, not a step, and the tree's 14px indentation per level is structure (`--indent`), not spacing. The openboard sheets are held to the ladder by a test; the rest of the app is still being moved onto it and keeps the 10, 14, 18 and 20px it was drawn with.
 
 - **Home:** padded 18px 24px; a 36px search bar (max 560px, centered) heads the page, then results and the concept map wrap side by side (`flex-wrap`, 20px gap).
+- **Public frontboard (`/welcome`):** a scroll-led introduction before the first unlock. The opening pairs a direct promise and unlock action with a large, selectable sample atlas. The map traces one sample note to its folder and reveals a short excerpt; ruled sections explain structure and browser-side encryption. Returning locked users and deep links still go directly to unlock.
 - **Note:** document column (flex-grow, 700px content, 44px top bar with breadcrumbs, save status and an edit/view segmented control) plus a 220px+ context panel (outline, properties, local map) on a `side-border` left rule. At 1080px the panel drops below the document in a row.
 - **Settings / vault overview:** single centered column, 720px / 760px max.
 - **Auth:** centered 320px column (440px wide variant) on `ground`.
@@ -321,10 +342,10 @@ Small, consistent radii on a hairline-bordered rectilinear system: 4px (code, kb
 - Menu: 188px wide, `panel-3`, 1px `border-2`, 8px radius, 30px items, danger items in error rose. Dialog: native `<dialog>`, 400px max, `panel-2`, 10px radius, 18px padding, title 15px/600, right-aligned actions, 8px gap.
 
 ### Cards and notices
-- Card: `panel`, 1px `side-border`, 10px radius, 18px padding, 12px internal gap. Banner / notice: `panel-2`, 8px or 6px radius, 12.5px text. Alert: `error-bg` with `error-text`, no border. Sync bar: 32px, `sync-bg` (#2b2029) with `error-text`.
+- Card: `panel`, 1px `side-border`, 10px radius, 18px padding, 12px internal gap. Banner / notice: `panel-2`, 8px or 6px radius, 12.5px text. Alert: `error-bg` with `error-text`, no border. Sync bar: 32px, `sync-bg` (#30212c) with `error-text`.
 
 ### Concept map (signature)
-A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. Notes are 8px round markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Folders are rounded squares (`panel-3` fill, `muted-3` stroke, about 9.5px) inside a 22px hit target (r=11); on an inked path a folder turns into a diamond as the ink arrives. Every folder's `Index` note has no dot of its own: a hit on it inks the path to its folder (the diamond), and a vault's root Index lights the hub, which stands for it. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Edges are quill curves, not straight lines: folder structure draws as pencil curves (1.5px hub to top folder, 1.1px folder to subfolder, 0.8px to a note), explicit links as dotted pencil curves (`2 4`, round caps) bowed more than the hierarchy so the two read apart, and ink strokes as the same curves joined end to end. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. There is no slip card and no legend: selecting a node shows it in the Home preview panel beside the map, which replaces "Recently edited" and holds the node's rendered Index or note, its notes, backlinks, "Open note" / "Open Index", and "Add description" where a folder or vault has no Index. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
+A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px), pan and zoom by drag, with 24px square tool buttons at the top right. The canvas carries a low-contrast drafting grid, a central wash, and an edge vignette under the SVG. Each vault receives an engraved boundary keyed to its existing layout radius: a faint outer dotted ring, a finer inner ring at 78% radius, and twelve short register ticks, with four cardinal ticks slightly longer. The focused vault's marks brighten together. Notes are 8px round markers (r=4, r=5 for larger nodes) inside a 24px hit target (r=12), each with a 2px surface ring (stroke `canvas`, painted behind) so dots stay legible over lines. Folders are rounded squares (`panel-3` fill, `muted-3` stroke, about 9.5px) inside a 22px hit target (r=11); on an inked path a folder turns into a diamond as the ink arrives. Every folder's `Index` note has no dot of its own: a hit on it inks the path to its folder (the diamond), and a vault's root Index lights the hub, which stands for it. Labels are 10.5px Public Sans with a canvas halo; vault hubs carry an italic serif name and the ink-drop icon. Edges are quill curves, not straight lines: folder structure draws as pencil curves (1.5px hub to top folder, 1.1px folder to subfolder, 0.8px to a note), explicit links as subtler dotted pencil curves (`2 4`, round caps) bowed more than the hierarchy, and selected ink paths as the same curves joined end to end at 3.25px. Selection is a `map-sel` ring at r+3; unselected neighbors fade to 30%. The count line identifies the number of vaults, notes, and folders. There is no slip card and no legend: selecting a node shows it in the Home preview panel beside the map, which replaces "Recently edited" and holds the node's rendered Index or note, its notes, backlinks, "Open note" / "Open Index", and "Add description" where a folder or vault has no Index. The local map on the note page uses the same grammar at 220px width: 4.5px center dot with an 8px ring, 3px child dots, 10px labels, captions ("links in", "same folder", "links out") in sentence-case `muted-3` with no tracking. Text below the 11px type floor is limited to four places: concept-map labels (10.5px, dense SVG with a canvas halo), local-map labels (10px) and the local map's overflow count (9px), both because the panel is only 220px wide and carries up to 12 rows, and `kbd` key caps (10.5px).
 
 **Lit state.** Hovering or focusing a note dot (or selecting a note) lights it and what it is tied to: its ink path, linked notes and its meaning neighbours. Everything else dims (notes to 30%, folders and pencil to 45%, links to 35%), and the links of the lit node flow toward it as a dash that runs along the curve. Hover is applied once per animation frame. While a search is active nothing dims, because search already fades non-hits.
 
@@ -343,7 +364,7 @@ A `canvas` frame with a 1px `side-border`, 10px radius, aspect 100:60 (min 320px
 Motion is quiet and tied to the ink metaphor: it confirms a change of state and never blocks a click or shifts layout.
 
 ### Tokens
-- **Durations:** `--dur-1` 140ms (hover, press), `--dur-2` 220ms (route, toggle, tree, banners, menus), `--dur-3` 300ms (dialogs opening, the mobile drawer, panels, the auth fade, the write-on node fade), `--dur-4` 450ms, `--dur-ink` 520ms (ink drawn along a path on the map).
+- **Durations:** `--dur-1` 200ms (hover, press), `--dur-2` 320ms (route, toggle, tree, banners, menus), `--dur-3` 450ms (dialogs opening, the mobile drawer, panels, the auth fade, the write-on node fade), `--dur-4` 650ms, `--dur-ink` 750ms (ink drawn along a path on the map).
 - **Easing:** `--ease-out` cubic-bezier(0.16, 1, 0.3, 1) for things arriving, `--ease-in` cubic-bezier(0.4, 0, 1, 1) for things leaving, `--ease-std` cubic-bezier(0.2, 0, 0, 1) for things that move between two places.
 
 ### Rules
@@ -364,7 +385,7 @@ Under `prefers-reduced-motion: reduce`, every animation runs for 1ms with no del
 
 ### Do:
 - **Do** build new surfaces from the tonal ladder: ground, panel, panel-2, panel-3, with 1px `border` / `side-border` lines and no shadow.
-- **Do** use ink-light (#b69cff) for text-level emphasis and the 2px focus ring, and Ink Violet fill for the one primary action per view.
+- **Do** use ink-light (#c5a9f6) for text-level emphasis and the 2px focus ring, and Ink Violet fill for the one primary action per view.
 - **Do** keep controls at 30px (36px for fields) and rows at 26-28px, with 12.5-13px text.
 - **Do** set vault and app names in Spectral italic and everything else in Public Sans; set raw Markdown, keys and code in JetBrains Mono.
 - **Do** validate any new map color against `canvas`, keep the 24px hit target around each 8px marker, and give map text a canvas halo.

@@ -433,14 +433,14 @@
     transform: none;
     visibility: visible;
     transition: transform var(--dur-3) var(--ease-out);
-    box-shadow: 16px 0 40px -20px rgba(0, 0, 0, 0.8);
+  box-shadow: var(--shadow-drawer);
   }
   .drawer-open .scrim {
     display: block;
     position: fixed;
     inset: 0;
     z-index: 40;
-    background: rgba(10, 9, 14, 0.55);
+    background: var(--drawer-scrim);
   }
   .banner {
     margin: 10px 16px 0;

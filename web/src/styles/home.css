@@ -42,7 +42,7 @@
 }
 .search:focus-within {
   border-color: var(--ink-light);
-  box-shadow: 0 0 0 2px rgba(182, 156, 255, 0.16);
+  box-shadow: var(--shadow-focus);
 }
 .search-icon {
   flex: 0 0 auto;

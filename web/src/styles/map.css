@@ -11,14 +11,29 @@
   position: relative;
   flex: 1 1 auto;
   min-height: 320px;
-  background: var(--canvas);
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 52% 45%, var(--surface-glow), transparent 58%),
+    linear-gradient(var(--map-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--map-grid) 1px, transparent 1px),
+    var(--canvas);
+  background-size: auto, 36px 36px, 36px 36px, auto;
   border: 1px solid var(--side-border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
+}
+.cmap::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 40%, var(--map-vignette));
 }
 /* Out of flow, so the svg's own size can never feed back into the frame. */
 .cmap-svg {
   position: absolute;
+  z-index: 1;
   inset: 0;
   display: block;
   width: 100%;
@@ -26,6 +41,74 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
+}
+.cmap-boundary-outer,
+.cmap-boundary-inner,
+.cmap-boundary-ticks line {
+  vector-effect: non-scaling-stroke;
+  transition:
+    fill var(--dur-3),
+    stroke var(--dur-3),
+    stroke-opacity var(--dur-3);
+}
+.cmap-boundary-outer {
+  fill: var(--map-boundary-fill);
+  stroke: var(--map-boundary);
+  stroke-width: 1;
+  stroke-dasharray: 1 5;
+}
+.cmap-boundary-inner {
+  fill: none;
+  stroke: var(--map-boundary);
+  stroke-width: 0.8;
+  stroke-opacity: 0.52;
+  stroke-dasharray: 1 7;
+}
+.cmap-boundary-ticks {
+  fill: none;
+  stroke: var(--map-boundary);
+  stroke-width: 1;
+  stroke-linecap: round;
+  opacity: 0.72;
+  pointer-events: none;
+}
+.cmap-boundary.is-focus .cmap-boundary-outer {
+  fill: var(--map-boundary-fill-focus);
+  stroke: var(--map-boundary-focus);
+  stroke-dasharray: 1 4;
+}
+.cmap-boundary.is-focus .cmap-boundary-inner {
+  stroke: var(--map-boundary-focus);
+  stroke-opacity: 0.7;
+}
+.cmap-boundary.is-focus .cmap-boundary-ticks {
+  stroke: var(--map-boundary-focus);
+  opacity: 0.9;
+}
+.cmap-meta {
+  position: absolute;
+  z-index: 2;
+  top: 16px;
+  left: 18px;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0;
+  color: var(--muted-2);
+  font-size: var(--type-xs);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+.cmap-meta strong {
+  color: var(--text-2);
+  font-size: var(--type-sm);
+  font-weight: 500;
+}
+.cmap-meta-label {
+  color: var(--ink-light);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-style: italic;
 }
 .cmap-svg.is-dragging {
   cursor: grabbing;
@@ -44,15 +127,17 @@
 }
 .cmap-pencil path {
   stroke: var(--map-pencil);
+  stroke-opacity: 0.88;
 }
 .cmap-links path {
   stroke: var(--map-pencil);
   stroke-width: 1;
   stroke-dasharray: 2 4;
+  stroke-opacity: 0.72;
 }
 .cmap-ink path {
   stroke: var(--map-ink);
-  stroke-width: 3;
+  stroke-width: 3.25;
   stroke-linejoin: round;
 }
 /* pathLength="1": a dash as long as the path, slid in from offset 1. */
@@ -184,12 +269,13 @@
   opacity: 0.38;
 }
 .cmap-glow.tier-fresh {
-  opacity: 0.22;
+  opacity: 0.3;
 }
 .cmap-sel {
   fill: none;
   stroke: var(--map-sel);
-  stroke-width: 1.5;
+  stroke-width: 1.7;
+  vector-effect: non-scaling-stroke;
 }
 
 /* Read progress: a gold arc on the ring, from 12 o'clock clockwise. pathLength 1 makes the dasharray a fraction. */
@@ -250,6 +336,7 @@
 
 .cmap-tools {
   position: absolute;
+  z-index: 2;
   top: 8px;
   right: 8px;
   display: flex;
@@ -365,7 +452,7 @@
 }
 /* Notes rest a step back so the one in hand stands out: on (selected, hovered, a hit) > lit (linked) > resting > dim. */
 .cmap-node {
-  opacity: 0.6;
+  opacity: 0.85;
 }
 .cmap-node.is-lit {
   opacity: 0.85;
@@ -559,5 +646,18 @@
   .cmap {
     flex: none;
     aspect-ratio: 100 / 60;
+  }
+  .cmap-meta {
+    top: 12px;
+    left: 12px;
+    max-width: calc(100% - 132px);
+    flex-wrap: wrap;
+    gap: 2px 6px;
+  }
+  .cmap-meta strong {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

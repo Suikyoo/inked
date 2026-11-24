@@ -1,74 +1,89 @@
-/* Inked design tokens (dark only). Values come from the approved mockups. */
+/* Inked design system. Violet-black paper; one living voice: lilac ink. */
 :root {
   color-scheme: dark;
 
-  /* Surfaces */
-  --ground: #17161c;
-  --side: #121117;
-  --side-border: #222029;
-  --panel: #1b1a21;
-  --panel-2: #211f28;
-  --panel-3: #24222c;
-  --canvas: #1a1920;
-  --hover: #1f1d26;
-  --row-selected: #2a2440;
-  --menu-hover: #2e2b39;
-  --sync-bg: #2b2029;
-  --scroll-thumb-hover: #403d4d;
+  /* Surfaces: paper rises in quiet, violet-tinted steps. */
+  --ground: #14121a;
+  --side: #100e16;
+  --side-border: #292431;
+  --panel: #1b1822;
+  --panel-2: #231f2c;
+  --panel-3: #2b2636;
+  --canvas: #17131f;
+  --hover: #24202d;
+  --row-selected: #332744;
+  --menu-hover: #363044;
+  --sync-bg: #30212c;
+  --scroll-thumb-hover: #51485f;
+  --surface-glow: rgba(174, 137, 255, 0.1);
+  --frontboard-atmosphere: rgba(117, 79, 171, 0.12);
+  --map-grid: rgba(206, 189, 232, 0.045);
+  --map-boundary: rgba(191, 164, 229, 0.17);
+  --map-boundary-fill: rgba(197, 169, 246, 0.018);
+  --map-boundary-focus: rgba(197, 169, 246, 0.34);
+  --map-boundary-fill-focus: rgba(197, 169, 246, 0.045);
+  --map-vignette: rgba(12, 9, 18, 0.34);
 
-  /* Lines */
-  --border: #2e2c38;
-  --border-2: #34323f;
-  --line: #2a2833;
+  /* Rules and edges. */
+  --border: #393344;
+  --border-2: #484052;
+  --line: #302b3a;
 
-  /* Text */
-  --text: #e6e3ee;
-  --text-strong: #ede9ff;
-  --text-2: #c4bfd1;
-  --text-body: #dad6e3;
-  --muted: #a29db2;
-  --muted-2: #8d879f;
-  --muted-3: #6e6880;
-  --placeholder: #7d7790;
-  --text-lead: #a8a3b8;
-  --code-text: #cfcbda;
+  /* Text ramp. */
+  --text: #e9e4f0;
+  --text-strong: #f7f2ff;
+  --text-2: #d0c9dc;
+  --text-body: #ded8e7;
+  --muted: #b1a9bf;
+  --muted-2: #968da6;
+  --muted-3: #91879e;
+  --placeholder: #978ea8;
+  --text-lead: #c0b7ce;
+  --code-text: #d8d1e3;
+  --text-inverse: #fffaff;
 
-  /* Ink */
-  --ink: #7452e0;
-  --ink-hover: #8160ea;
-  --ink-light: #b69cff;
-  --ink-lighter: #d6c8ff;
-  --selection: #4b3a80;
-  --mark: rgba(124, 92, 230, 0.32);
+  /* Ink: action, text signal, and selection. */
+  --ink: #7150bf;
+  --ink-hover: #8464d0;
+  --logo-ink: #7452e0;
+  --ink-light: #c5a9f6;
+  --ink-lighter: #eadcff;
+  --selection: #51406b;
+  --mark: rgba(184, 151, 240, 0.34);
 
-  /* Concept map: wet → dry is an ordinal one-hue ramp (validated against --canvas) */
-  --ink-wet: #b69cff;
-  --ink-fresh: #9d7cf2;
-  --ink-drying: #6b5a9e;
-  --ink-dry: #524b6e;
-  --ink-link: #8d7bc4;
-  --map-pencil: #4a4659;
-  --map-ink: #9d7cf2;
-  --map-sel: #ede9ff;
+  /* Concept map: recency is lightness, structure is the dimmer pencil. */
+  --ink-wet: #eadcff;
+  --ink-fresh: #c3a4ef;
+  --ink-drying: #a180bf;
+  --ink-dry: #8f779f;
+  --ink-link: #a99aba;
+  --map-pencil: #655b72;
+  --map-ink: #c3a4ef;
+  --map-sel: #fff8ff;
   --gold: #f2c14e;
 
-  /* Status */
-  --error: #f2a7b4;
-  --error-bg: #241d2a;
-  --error-text: #e9c9cf;
-  --ok: #8fd1b5;
-  --warn: #d19c3c;
-  --danger: #8f3348;
-  --danger-hover: #a33c54;
+  /* Status colors stay reserved for status. */
+  --error: #f2b1c0;
+  --error-bg: #2d202d;
+  --error-text: #f0d5dc;
+  --ok: #9bd7c0;
+  --warn: #e1b35c;
+  --danger: #8f3e57;
+  --danger-hover: #a94a68;
 
-  /* Type */
+  /* Type. */
   --font-ui: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-serif: 'Spectral', Georgia, serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  --type-xs: 11px;
+  --type-sm: 12px;
+  --type-md: 13px;
+  --type-lg: 15px;
+  --type-xl: 20px;
+  --type-2xl: 28px;
+  --type-display: clamp(3.5rem, 9vw, 6rem);
 
-  /* Spacing: one ladder on a 4px base, named for its multiple of it (--sp-4 is 16px). It covers the
-     4/6/8/12/16/24 rhythm DESIGN.md describes under Layout, with 2px for the hairline gaps between rows
-     and 32/48px for page tails. Gaps, margins and padding pick a step; nothing sits between two. */
+  /* Spacing: one ladder on a 4px base, named for its multiple of it (--sp-4 is 16px). */
   --sp-0-5: 2px;
   --sp-1: 4px;
   --sp-1-5: 6px;
@@ -84,13 +99,18 @@
   --row-sm: 26px;
   --control: 30px;
   --control-lg: 36px;
+  --radius-xs: 4px;
   --radius-sm: 5px;
   --radius: 6px;
-  --radius-md: 7px;
-  --radius-lg: 8px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
   --side-width: 240px;
   /* Tree indentation per level (DESIGN.md, Navigation): not a spacing step, a fixed structural offset. */
   --indent: 14px;
+
+  /* Motion and elevation. */
   --dur-1: 200ms;
   --dur-2: 320ms;
   --dur-3: 450ms;
@@ -99,4 +119,10 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-std: cubic-bezier(0.2, 0, 0, 1);
+  --shadow-menu: 0 12px 28px -12px rgba(5, 3, 10, 0.82);
+  --shadow-dialog: 0 24px 48px -16px rgba(5, 3, 10, 0.88);
+  --shadow-drawer: 16px 0 40px -20px rgba(5, 3, 10, 0.86);
+  --shadow-focus: 0 0 0 2px rgba(197, 169, 246, 0.2);
+  --backdrop: rgba(10, 8, 14, 0.68);
+  --drawer-scrim: rgba(10, 8, 14, 0.58);
 }

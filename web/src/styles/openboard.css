@@ -447,7 +447,7 @@ body,
 .md button.wl {
   padding: 0;
   border: 0;
-  border-bottom: 1px solid rgba(182, 156, 255, 0.35);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink-light) 45%, transparent);
   background: none;
   font: inherit;
   color: var(--ink-light);
@@ -507,7 +507,7 @@ body,
     left: 0;
     z-index: 5;
     width: min(300px, 86vw);
-    box-shadow: 16px 0 40px -20px rgba(0, 0, 0, 0.8);
+    box-shadow: var(--shadow-drawer);
   }
   /* The address bar must not hide the bottom of the board, and the slim bars grow to a touch size so the
      44px buttons phone.css puts in them (Edit, the close and toggle icons) still fit. */

@@ -140,6 +140,9 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
   const suppressClick = useRef(false);
 
   const entryById = useMemo(() => new Map(entries.map((e) => [e.vaultId, e])), [entries]);
+  const mapNoteCount = entries.reduce((sum, entry) => sum + entry.graph.notes.length, 0);
+  const mapFolderCount = entries.reduce((sum, entry) => sum + entry.graph.folders.length, 0);
+  const emphasizedVault = selected?.vaultId ?? focusVault;
   const dotById = useMemo(() => new Map(scene.dots.map((d) => [d.id, d])), [scene]);
   const folderById = useMemo(() => new Map(scene.folders.map((f) => [f.id, f])), [scene]);
   const hubByKey = useMemo(() => new Map(scene.hubs.map((h) => [hubKey(h.vaultId), h])), [scene]);
@@ -669,6 +672,10 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
 
   return (
     <div className="cmap" ref={frameRef}>
+      <p className="cmap-meta" aria-live="polite">
+        <span className="cmap-meta-label">Vault atlas</span>
+        <strong>{loading ? 'Gathering your notes' : `${entries.length} ${entries.length === 1 ? 'vault' : 'vaults'} · ${mapNoteCount} notes · ${mapFolderCount} folders`}</strong>
+      </p>
       <svg
         ref={svgRef}
         className={`cmap-svg${dragging ? ' is-dragging' : ''}${writing ? ' is-writing' : ''}`}
@@ -690,6 +697,35 @@ export function ConceptMap({ entries, hits, hot, searching: queryActive = false,
             <feGaussianBlur stdDeviation="2.5" />
           </filter>
         </defs>
+        <g className="cmap-boundaries" aria-hidden="true">
+          {scene.hubs.map((h) => {
+            const center = at(h.x, h.y);
+            const radius = h.radius * view.scale;
+            const focused = emphasizedVault === h.vaultId;
+            return (
+              <g key={h.vaultId} className={`cmap-boundary${focused ? ' is-focus' : ''}`}>
+                <circle className="cmap-boundary-outer" cx={center.x} cy={center.y} r={radius} />
+                <circle className="cmap-boundary-inner" cx={center.x} cy={center.y} r={radius * 0.78} />
+                <g className="cmap-boundary-ticks">
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const angle = (i * Math.PI) / 6;
+                    const outer = radius + (i % 3 === 0 ? 5 : 2.5);
+                    const inner = radius - 2;
+                    return (
+                      <line
+                        key={i}
+                        x1={center.x + Math.cos(angle) * inner}
+                        y1={center.y + Math.sin(angle) * inner}
+                        x2={center.x + Math.cos(angle) * outer}
+                        y2={center.y + Math.sin(angle) * outer}
+                      />
+                    );
+                  })}
+                </g>
+              </g>
+            );
+          })}
+        </g>
         <g className="cmap-pencil">
           {scene.pencil.map((s) => (
             <path
